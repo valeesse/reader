@@ -14,7 +14,7 @@ interface ReaderLayoutProps {
 
 export function ReaderLayout({ book, onClose, onOpenBook }: ReaderLayoutProps) {
   const { books, series, settings, updateSettings } = useAppContext();
-  const [chromeVisible, setChromeVisible] = useState(true);
+  const [chromeVisible, setChromeVisible] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showToc, setShowToc] = useState(false);
   const [tocItems, setTocItems] = useState<ReaderTocItem[]>([]);
@@ -26,6 +26,12 @@ export function ReaderLayout({ book, onClose, onOpenBook }: ReaderLayoutProps) {
   const nextBook = currentSeries && currentIndex >= 0
     ? books.find((item) => item.id === currentSeries.bookIds[currentIndex + 1])
     : undefined;
+
+  useEffect(() => {
+    setChromeVisible(false);
+    setShowSettings(false);
+    setShowToc(false);
+  }, [book.id]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

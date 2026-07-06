@@ -1,13 +1,18 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { LoaderCircle } from 'lucide-react';
 import { Book, ReaderTocItem } from './types';
 import { useAppContext } from './store/AppStore';
 import { getProgress, saveProgress } from './lib/storage';
-import { LoaderCircle } from 'lucide-react';
-import { closeTxtBook, NativeTxtBookInfo, readTxtWindow, openTxtBook } from './lib/native';
+import { closeTxtBook, NativeTxtBookInfo, openTxtBook, readTxtWindow } from './lib/native';
 
 const TXT_OVERSCAN_PAGES = 5;
 const TXT_MIN_WINDOW_CHARS = 24000;
 const TXT_MAX_WINDOW_CHARS = 140000;
+const TXT_LAYOUT_DEBOUNCE_MS = 180;
+const TXT_PREFETCH_DEBOUNCE_MS = 120;
+
+type TxtWindow = { start: number; end: number; text: string };
+type PageMetrics = { pageWidth: number; pageStep: number; spreadCount: number };
 
 export function TxtViewerNext({
   book,
@@ -31,25 +36,30 @@ export function TxtViewerNext({
 }) {
   const { settings } = useAppContext();
   const [bookInfo, setBookInfo] = useState<NativeTxtBookInfo | null>(null);
-  const [textWindow, setTextWindow] = useState({ start: 0, end: 0, text: '' });
+  const [textWindow, setTextWindow] = useState<TxtWindow>({ start: 0, end: 0, text: '' });
   const [loading, setLoading] = useState(true);
   const [layoutReady, setLayoutReady] = useState(false);
-  const [pageMetrics, setPageMetrics] = useState({ pageWidth: 0, pageStep: 1, spreadCount: 1 });
+  const [pageMetrics, setPageMetrics] = useState<PageMetrics>({ pageWidth: 0, pageStep: 1, spreadCount: 1 });
+
   const contentRef = useRef<HTMLDivElement>(null);
   const flowRef = useRef<HTMLDivElement>(null);
-  const pageMetricsRef = useRef(pageMetrics);
-  const latestProgressRef = useRef(0);
-  const pendingChapterPartRef = useRef(0);
-  const pendingPersistProgressRef = useRef<number | undefined>(undefined);
-  const animationFrameRef = useRef<number | undefined>(undefined);
-  const progressFrameRef = useRef<number | undefined>(undefined);
-  const persistTimerRef = useRef<number | undefined>(undefined);
-  const windowRefreshTimerRef = useRef<number | undefined>(undefined);
-  const windowRequestIdRef = useRef(0);
-  const latestWindowRef = useRef(textWindow);
+  const latestWindowRef = useRef<TxtWindow>(textWindow);
+  const pageMetricsRef = useRef<PageMetrics>(pageMetrics);
   const totalCharsRef = useRef(0);
-  const isAnimatingRef = useRef(false);
-  const wheelReadyAtRef = useRef(0);
+  const activeAnchorCharRef = useRef(0);
+  const activePageIndexRef = useRef(0);
+  const pendingPersistProgressRef = useRef<number | undefined>(undefined);
+  const persistTimerRef = useRef<number | undefined>(undefined);
+  const prefetchTimerRef = useRef<number | undefined>(undefined);
+  const layoutTimerRef = useRef<number | undefined>(undefined);
+  const progressFrameRef = useRef<number | undefined>(undefined);
+  const windowRequestIdRef = useRef(0);
+  const isLoadingWindowRef = useRef(false);
+  const windowCacheRef = useRef(new Map<string, TxtWindow>());
+  const wheelGestureTimerRef = useRef<number | undefined>(undefined);
+  const wheelGestureLockedRef = useRef(false);
+  const programmaticScrollRef = useRef(false);
+
   const layoutKey = JSON.stringify({
     pageMode: settings.pageMode,
     txtReadingFlow: settings.txtReadingFlow,
@@ -66,7 +76,6 @@ export function TxtViewerNext({
   const progressReserve = 44;
   const topInset = settings.pageMargins.top + progressReserve / 2;
   const bottomInset = settings.pageMargins.bottom + progressReserve / 2;
-  const visibleRange = useMemo(() => ({ start: textWindow.start, end: textWindow.end }), [textWindow.start, textWindow.end]);
   const visibleText = textWindow.text;
   const paragraphHtml = useMemo(() => textToParagraphHtml(visibleText), [visibleText]);
 
@@ -75,12 +84,12 @@ export function TxtViewerNext({
   }, [textWindow]);
 
   useEffect(() => {
-    totalCharsRef.current = bookInfo?.totalChars || 0;
-  }, [bookInfo?.totalChars]);
-
-  useEffect(() => {
     pageMetricsRef.current = pageMetrics;
   }, [pageMetrics]);
+
+  useEffect(() => {
+    totalCharsRef.current = bookInfo?.totalChars || 0;
+  }, [bookInfo?.totalChars]);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,8 +97,10 @@ export function TxtViewerNext({
       try {
         setLoading(true);
         setLayoutReady(false);
+        windowCacheRef.current.clear();
         const info = await openTxtBook(book.path);
         if (cancelled) return;
+
         setBookInfo(info);
         totalCharsRef.current = info.totalChars;
         onTocChange(info.chapters.map((chapter, index) => ({
@@ -101,16 +112,19 @@ export function TxtViewerNext({
         const progress = await getProgress(book.id);
         if (cancelled) return;
         const restoredProgress = Math.max(0, Math.min(1, progress?.scrollPercentage || 0));
-        pendingChapterPartRef.current = restoredProgress;
-        await loadWindowForProgress(restoredProgress, true, info.totalChars);
+        const restoredAnchor = Math.round(restoredProgress * info.totalChars);
+        activeAnchorCharRef.current = restoredAnchor;
+        await loadWindowForAnchor(restoredAnchor, true, info.totalChars);
         if (cancelled) return;
-        updateProgress(restoredProgress);
-      } catch (err) {
-        console.error('Failed to load txt', err);
+        updateProgressFromAnchor(restoredAnchor);
+        scheduleWindowPrefetch(restoredAnchor);
+      } catch (error) {
+        console.error('Failed to load txt', error);
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
+
     loadText();
     return () => {
       cancelled = true;
@@ -121,10 +135,11 @@ export function TxtViewerNext({
 
   useEffect(() => {
     return () => {
-      if (animationFrameRef.current !== undefined) cancelAnimationFrame(animationFrameRef.current);
       if (progressFrameRef.current !== undefined) cancelAnimationFrame(progressFrameRef.current);
       if (persistTimerRef.current !== undefined) window.clearTimeout(persistTimerRef.current);
-      if (windowRefreshTimerRef.current !== undefined) window.clearTimeout(windowRefreshTimerRef.current);
+      if (prefetchTimerRef.current !== undefined) window.clearTimeout(prefetchTimerRef.current);
+      if (layoutTimerRef.current !== undefined) window.clearTimeout(layoutTimerRef.current);
+      if (wheelGestureTimerRef.current !== undefined) window.clearTimeout(wheelGestureTimerRef.current);
       flushPersistProgress();
     };
   }, []);
@@ -132,13 +147,13 @@ export function TxtViewerNext({
   useEffect(() => {
     if (!tocTarget || tocTarget.index === undefined) return;
     const chapter = bookInfo?.chapters[tocTarget.index];
-    if (!chapter || !bookInfo.totalChars) return;
-    goToGlobalProgress(chapter.startIndex / bookInfo.totalChars, true);
+    if (!chapter) return;
+    goToAnchor(chapter.startIndex, true, true);
   }, [tocTarget, bookInfo]);
 
   useEffect(() => {
     if (seekProgress === null || !totalCharsRef.current) return;
-    goToGlobalProgress(seekProgress, true);
+    goToAnchor(Math.round(seekProgress * totalCharsRef.current), true, true);
   }, [seekProgress]);
 
   const recalculatePages = useCallback(() => {
@@ -167,12 +182,12 @@ export function TxtViewerNext({
     const visibleWidth = pagesPerSpread * pageWidth + (pagesPerSpread - 1) * pageGap;
     const maxScroll = Math.max(0, flow.scrollWidth - visibleWidth);
     const spreadCount = Math.max(1, Math.ceil(maxScroll / (pageStep * pagesPerSpread)) + 1);
-    const nextMetrics = { pageWidth, pageStep, spreadCount };
-    pageMetricsRef.current = nextMetrics;
+    const metrics = { pageWidth, pageStep, spreadCount };
+    pageMetricsRef.current = metrics;
     setPageMetrics((current) => (
-      current.pageWidth === pageWidth && current.pageStep === pageStep && current.spreadCount === spreadCount
+      current.pageWidth === metrics.pageWidth && current.pageStep === metrics.pageStep && current.spreadCount === metrics.spreadCount
         ? current
-        : nextMetrics
+        : metrics
     ));
     setLayoutReady(true);
 
@@ -192,114 +207,32 @@ export function TxtViewerNext({
     const element = contentRef.current;
     if (!element) return;
 
-    const observer = new ResizeObserver(recalculatePages);
+    const observer = new ResizeObserver(() => {
+      setLayoutReady(false);
+      if (layoutTimerRef.current !== undefined) {
+        window.clearTimeout(layoutTimerRef.current);
+      }
+      layoutTimerRef.current = window.setTimeout(() => {
+        layoutTimerRef.current = undefined;
+        recalculatePages();
+        scrollToAnchor(activeAnchorCharRef.current);
+        scheduleWindowPrefetch(activeAnchorCharRef.current);
+      }, TXT_LAYOUT_DEBOUNCE_MS);
+    });
     observer.observe(element);
     return () => observer.disconnect();
   }, [visibleText, recalculatePages, layoutKey]);
 
-  useEffect(() => {
-    const element = contentRef.current;
-    const globalProgress = pendingChapterPartRef.current;
-    if (!element) return;
+  useLayoutEffect(() => {
+    if (!textWindow.text) return;
+    scrollToAnchor(activeAnchorCharRef.current);
+    scheduleWindowPrefetch(activeAnchorCharRef.current);
+  }, [textWindow, pageMetrics, isPagedFlow]);
+
+  const updateProgressFromAnchor = (anchor: number) => {
     const totalChars = totalCharsRef.current;
-    const windowProgress = progressToWindowProgress(globalProgress, visibleRange, totalChars);
-    if (isPagedFlow) {
-      const maxSpreadIndex = Math.max(0, pageMetrics.spreadCount - 1);
-      const nextSpreadIndex = Math.round(windowProgress * maxSpreadIndex);
-      element.scrollLeft = nextSpreadIndex * pageMetrics.pageStep * pagesPerSpread;
-    } else {
-      const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight);
-      element.scrollTop = maxScroll * windowProgress;
-    }
-  }, [visibleRange, isPagedFlow, pageMetrics, pagesPerSpread]);
-
-  useEffect(() => {
-    const progress = latestProgressRef.current;
-    window.requestAnimationFrame(() => goToGlobalProgress(progress, false));
-  }, [layoutKey]);
-
-  const updateProgress = (progress: number) => {
-    const next = Math.max(0, Math.min(1, progress));
-    latestProgressRef.current = next;
-    onProgressChange(next);
-  };
-
-  const estimateCharsPerPage = () => {
-    const rangeLength = Math.max(1, latestWindowRef.current.end - latestWindowRef.current.start);
-    const element = contentRef.current;
-    if (isPagedFlow) {
-      const pageCount = Math.max(1, pageMetricsRef.current.spreadCount * pagesPerSpread);
-      return Math.max(500, Math.min(4500, Math.round(rangeLength / pageCount)));
-    }
-
-    const pages = element ? Math.max(1, element.scrollHeight / Math.max(1, element.clientHeight)) : 1;
-    return Math.max(500, Math.min(4500, Math.round(rangeLength / pages)));
-  };
-
-  const rangeForProgress = (progress: number, totalChars = totalCharsRef.current) => {
-    if (totalChars <= 0) return { start: 0, end: 0 };
-    const target = Math.round(Math.max(0, Math.min(1, progress)) * totalChars);
-    const charsPerPage = estimateCharsPerPage();
-    const visiblePages = Math.max(1, pagesPerSpread);
-    const naturalWindow = Math.ceil(charsPerPage * (TXT_OVERSCAN_PAGES * 2 + visiblePages + 2));
-    const windowSize = Math.max(TXT_MIN_WINDOW_CHARS, Math.min(TXT_MAX_WINDOW_CHARS, naturalWindow, totalChars));
-    const before = Math.min(Math.floor(windowSize * 0.46), charsPerPage * TXT_OVERSCAN_PAGES);
-    const preferredStart = target - before;
-    const start = Math.max(0, Math.min(preferredStart, Math.max(0, totalChars - windowSize)));
-    return {
-      start,
-      end: Math.min(totalChars, start + windowSize),
-    };
-  };
-
-  const loadWindow = async (range: { start: number; end: number }, progress: number) => {
-    const requestId = windowRequestIdRef.current + 1;
-    windowRequestIdRef.current = requestId;
-    if (animationFrameRef.current !== undefined) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = undefined;
-    }
-    isAnimatingRef.current = false;
-    setLayoutReady(false);
-    const nextWindow = await readTxtWindow(book.path, range.start, range.end);
-    if (requestId !== windowRequestIdRef.current) return;
-    pendingChapterPartRef.current = progress;
-    latestWindowRef.current = nextWindow;
-    setTextWindow(nextWindow);
-  };
-
-  const loadWindowForProgress = async (progress: number, force = false, totalChars = totalCharsRef.current) => {
-    const range = rangeForProgress(progress, totalChars);
-    const current = latestWindowRef.current;
-    if (!force && current.start === range.start && current.end === range.end && current.text) return;
-    await loadWindow(range, progress);
-  };
-
-  const ensureWindowAroundProgress = (progress: number, immediate = false) => {
-    const totalChars = totalCharsRef.current;
-    if (!totalChars) return;
-    const current = latestWindowRef.current;
-    if (!current.text) {
-      loadWindowForProgress(progress, true, totalChars).catch((error) => console.warn('Failed to load TXT window', error));
-      return;
-    }
-
-    const target = Math.round(progress * totalChars);
-    const charsPerPage = estimateCharsPerPage();
-    const beforePages = Math.floor((target - current.start) / Math.max(1, charsPerPage));
-    const afterPages = Math.floor((current.end - target) / Math.max(1, charsPerPage));
-    if (beforePages >= TXT_OVERSCAN_PAGES && afterPages >= TXT_OVERSCAN_PAGES + pagesPerSpread) return;
-
-    const refresh = () => {
-      windowRefreshTimerRef.current = undefined;
-      loadWindowForProgress(progress, false, totalChars).catch((error) => console.warn('Failed to refresh TXT window', error));
-    };
-    if (windowRefreshTimerRef.current !== undefined) {
-      window.clearTimeout(windowRefreshTimerRef.current);
-      windowRefreshTimerRef.current = undefined;
-    }
-    if (immediate) refresh();
-    else windowRefreshTimerRef.current = window.setTimeout(refresh, 80);
+    const progress = totalChars > 0 ? clamp(anchor / totalChars, 0, 1) : 0;
+    onProgressChange(progress);
   };
 
   const persistProgress = (scrollPercentage: number) => {
@@ -312,7 +245,10 @@ export function TxtViewerNext({
     });
   };
 
-  const schedulePersistProgress = (scrollPercentage: number) => {
+  const schedulePersistProgress = (anchor: number) => {
+    const totalChars = totalCharsRef.current;
+    if (!totalChars) return;
+    const scrollPercentage = clamp(anchor / totalChars, 0, 1);
     pendingPersistProgressRef.current = scrollPercentage;
     if (persistTimerRef.current !== undefined) {
       window.clearTimeout(persistTimerRef.current);
@@ -334,119 +270,216 @@ export function TxtViewerNext({
     }
   };
 
-  const chapterPartFromElement = (element: HTMLDivElement) => {
+  const estimateCharsPerSpread = () => {
+    const rangeLength = Math.max(1, latestWindowRef.current.end - latestWindowRef.current.start);
+    const element = contentRef.current;
     if (isPagedFlow) {
-      const metrics = pageMetricsRef.current;
-      const maxSpreadIndex = Math.max(0, metrics.spreadCount - 1);
-      const spreadIndex = metrics.pageStep > 0
-        ? Math.round(element.scrollLeft / (metrics.pageStep * pagesPerSpread))
-        : 0;
-      return maxSpreadIndex > 0 ? spreadIndex / maxSpreadIndex : 0;
+      return Math.max(500, Math.min(9000, Math.round(rangeLength / Math.max(1, pageMetricsRef.current.spreadCount))));
     }
 
-    const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight);
-    return maxScroll > 0 ? element.scrollTop / maxScroll : 0;
+    const pages = element ? Math.max(1, element.scrollHeight / Math.max(1, element.clientHeight)) : 1;
+    return Math.max(500, Math.min(9000, Math.round((rangeLength / pages) * pagesPerSpread)));
   };
 
-  const globalProgressFromElement = (element: HTMLDivElement) => {
+  const rangeForAnchor = (anchor: number, totalChars = totalCharsRef.current) => {
+    if (totalChars <= 0) return { start: 0, end: 0 };
+    const target = Math.round(clamp(anchor, 0, totalChars));
+    const charsPerSpread = estimateCharsPerSpread();
+    const naturalWindow = Math.ceil(charsPerSpread * (TXT_OVERSCAN_PAGES * 2 + 3));
+    const windowSize = Math.max(TXT_MIN_WINDOW_CHARS, Math.min(TXT_MAX_WINDOW_CHARS, naturalWindow, totalChars));
+    const before = Math.min(Math.floor(windowSize * 0.46), charsPerSpread * TXT_OVERSCAN_PAGES);
+    const start = Math.max(0, Math.min(target - before, Math.max(0, totalChars - windowSize)));
+    return {
+      start,
+      end: Math.min(totalChars, start + windowSize),
+    };
+  };
+
+  const cacheKeyForRange = (range: { start: number; end: number }) => `${range.start}:${range.end}`;
+
+  const rememberWindow = (windowValue: TxtWindow) => {
+    const cache = windowCacheRef.current;
+    cache.set(cacheKeyForRange(windowValue), windowValue);
+    while (cache.size > 6) {
+      const oldestKey = cache.keys().next().value;
+      if (oldestKey === undefined) break;
+      cache.delete(oldestKey);
+    }
+  };
+
+  const applyWindow = (windowValue: TxtWindow, anchor: number) => {
+    activeAnchorCharRef.current = clamp(Math.round(anchor), 0, totalCharsRef.current);
+    latestWindowRef.current = windowValue;
+    setLayoutReady(false);
+    setTextWindow(windowValue);
+  };
+
+  const loadWindow = async (range: { start: number; end: number }, anchor: number) => {
+    const requestId = windowRequestIdRef.current + 1;
+    windowRequestIdRef.current = requestId;
+    const cachedWindow = windowCacheRef.current.get(cacheKeyForRange(range));
+    if (cachedWindow) {
+      applyWindow(cachedWindow, anchor);
+      return;
+    }
+
+    isLoadingWindowRef.current = true;
+    setLayoutReady(false);
+    try {
+      const nextWindow = await readTxtWindow(book.path, range.start, range.end);
+      if (requestId !== windowRequestIdRef.current) return;
+      rememberWindow(nextWindow);
+      applyWindow(nextWindow, anchor);
+    } finally {
+      if (requestId === windowRequestIdRef.current) {
+        isLoadingWindowRef.current = false;
+      }
+    }
+  };
+
+  const loadWindowForAnchor = async (anchor: number, force = false, totalChars = totalCharsRef.current) => {
+    const range = rangeForAnchor(anchor, totalChars);
+    const current = latestWindowRef.current;
+    if (current.text && current.start === range.start && current.end === range.end) {
+      activeAnchorCharRef.current = clamp(Math.round(anchor), 0, totalChars);
+      if (force) {
+        recalculatePages();
+        scrollToAnchor(activeAnchorCharRef.current);
+      }
+      return;
+    }
+    await loadWindow(range, anchor);
+  };
+
+  const prefetchWindowForAnchor = async (anchor: number) => {
+    const range = rangeForAnchor(anchor);
+    const current = latestWindowRef.current;
+    if (current.text && current.start === range.start && current.end === range.end) return;
+    const key = cacheKeyForRange(range);
+    if (windowCacheRef.current.has(key)) return;
+
+    const nextWindow = await readTxtWindow(book.path, range.start, range.end);
+    rememberWindow(nextWindow);
+  };
+
+  const scheduleWindowPrefetch = (anchor: number) => {
     const totalChars = totalCharsRef.current;
-    if (!totalChars) return 0;
-    const localProgress = chapterPartFromElement(element);
-    const rangeLength = Math.max(1, visibleRange.end - visibleRange.start);
-    return Math.max(0, Math.min(1, (visibleRange.start + localProgress * rangeLength) / totalChars));
+    const current = latestWindowRef.current;
+    if (!totalChars || !current.text) return;
+
+    const charsPerSpread = Math.max(1, estimateCharsPerSpread());
+    const beforePages = Math.floor((anchor - current.start) / charsPerSpread);
+    const afterPages = Math.floor((current.end - anchor) / charsPerSpread);
+    if (beforePages > TXT_OVERSCAN_PAGES && afterPages > TXT_OVERSCAN_PAGES) return;
+
+    if (prefetchTimerRef.current !== undefined) {
+      window.clearTimeout(prefetchTimerRef.current);
+    }
+    prefetchTimerRef.current = window.setTimeout(() => {
+      prefetchTimerRef.current = undefined;
+      if (isLoadingWindowRef.current) return;
+      prefetchWindowForAnchor(activeAnchorCharRef.current).catch((error) => console.warn('Failed to prefetch TXT window', error));
+    }, TXT_PREFETCH_DEBOUNCE_MS);
   };
 
-  const syncProgressFromElement = (persist: boolean) => {
-    const element = contentRef.current;
-    if (!element || !totalCharsRef.current) return;
-    const scrollPercentage = globalProgressFromElement(element);
-    pendingChapterPartRef.current = scrollPercentage;
-    updateProgress(scrollPercentage);
-    ensureWindowAroundProgress(scrollPercentage);
-    if (persist) schedulePersistProgress(scrollPercentage);
+  const setAnchor = (anchor: number, persist: boolean) => {
+    const totalChars = totalCharsRef.current;
+    const nextAnchor = clamp(Math.round(anchor), 0, totalChars);
+    activeAnchorCharRef.current = nextAnchor;
+    updateProgressFromAnchor(nextAnchor);
+    if (persist) schedulePersistProgress(nextAnchor);
+    scheduleWindowPrefetch(nextAnchor);
   };
 
-  const animateScrollTo = (target: number, axis: 'x' | 'y', onComplete?: () => void) => {
+  const pageIndexForAnchor = (anchor: number, windowValue = latestWindowRef.current) => {
+    const metrics = pageMetricsRef.current;
+    const maxPageIndex = Math.max(0, metrics.spreadCount - 1);
+    const rangeLength = Math.max(1, windowValue.end - windowValue.start);
+    const localProgress = clamp((anchor - windowValue.start) / rangeLength, 0, 1);
+    return Math.max(0, Math.min(maxPageIndex, Math.round(localProgress * maxPageIndex)));
+  };
+
+  const anchorForPageIndex = (pageIndex: number, windowValue = latestWindowRef.current) => {
+    const metrics = pageMetricsRef.current;
+    const maxPageIndex = Math.max(0, metrics.spreadCount - 1);
+    const safePageIndex = Math.max(0, Math.min(maxPageIndex, pageIndex));
+    const rangeLength = Math.max(1, windowValue.end - windowValue.start);
+    const localProgress = maxPageIndex > 0 ? safePageIndex / maxPageIndex : 0;
+    return Math.round(windowValue.start + localProgress * rangeLength);
+  };
+
+  const scrollToAnchor = (anchor: number) => {
     const element = contentRef.current;
     if (!element) return;
-    if (animationFrameRef.current !== undefined) {
-      cancelAnimationFrame(animationFrameRef.current);
+    const metrics = pageMetricsRef.current;
+    programmaticScrollRef.current = true;
+
+    if (isPagedFlow) {
+      const pageIndex = pageIndexForAnchor(anchor);
+      activePageIndexRef.current = pageIndex;
+      element.scrollLeft = pageIndex * metrics.pageStep * pagesPerSpread;
+    } else {
+      const windowValue = latestWindowRef.current;
+      const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight);
+      const localProgress = clamp((anchor - windowValue.start) / Math.max(1, windowValue.end - windowValue.start), 0, 1);
+      element.scrollTop = maxScroll * localProgress;
     }
 
-    const start = axis === 'x' ? element.scrollLeft : element.scrollTop;
-    const max = axis === 'x'
-      ? Math.max(0, element.scrollWidth - element.clientWidth)
-      : Math.max(0, element.scrollHeight - element.clientHeight);
-    const end = Math.max(0, Math.min(max, target));
-    const distance = end - start;
-    if (Math.abs(distance) < 1) return;
-
-    isAnimatingRef.current = true;
-    const duration = Math.min(240, Math.max(140, Math.abs(distance) * 0.13));
-    const startedAt = performance.now();
-    const easeOutQuint = (value: number) => 1 - Math.pow(1 - value, 5);
-
-    const tick = (now: number) => {
-      const elapsed = Math.min(1, (now - startedAt) / duration);
-      const next = start + distance * easeOutQuint(elapsed);
-      if (axis === 'x') element.scrollLeft = next;
-      else element.scrollTop = next;
-
-      if (elapsed < 1) {
-        animationFrameRef.current = requestAnimationFrame(tick);
-      } else {
-        if (axis === 'x') element.scrollLeft = end;
-        else element.scrollTop = end;
-        isAnimatingRef.current = false;
-        animationFrameRef.current = undefined;
-        onComplete?.();
-      }
-    };
-
-    animationFrameRef.current = requestAnimationFrame(tick);
-  };
-
-  const goToGlobalProgress = (progress: number, persist: boolean) => {
-    const totalChars = totalCharsRef.current;
-    if (!totalChars) return;
-    const bookProgress = Math.max(0, Math.min(1, progress));
-    pendingChapterPartRef.current = bookProgress;
-    const nextRange = rangeForProgress(bookProgress, totalChars);
-    if (nextRange.start !== visibleRange.start || nextRange.end !== visibleRange.end) {
-      loadWindow(nextRange, bookProgress).catch((error) => console.warn('Failed to load TXT window', error));
-    }
     window.requestAnimationFrame(() => {
-      const element = contentRef.current;
-      if (!element) return;
-      const activeRange = latestWindowRef.current.start === nextRange.start && latestWindowRef.current.end === nextRange.end
-        ? nextRange
-        : visibleRange;
-      const windowProgress = progressToWindowProgress(bookProgress, activeRange, totalChars);
-      if (isPagedFlow) {
-        const metrics = pageMetricsRef.current;
-        const maxSpreadIndex = Math.max(0, metrics.spreadCount - 1);
-        const nextSpreadIndex = Math.round(windowProgress * maxSpreadIndex);
-        element.scrollLeft = nextSpreadIndex * metrics.pageStep * pagesPerSpread;
-      } else {
-        const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight);
-        element.scrollTop = maxScroll * windowProgress;
-      }
-      updateProgress(bookProgress);
-      if (persist) persistProgress(bookProgress);
+      programmaticScrollRef.current = false;
     });
   };
 
+  const syncAnchorFromElement = (persist: boolean) => {
+    const element = contentRef.current;
+    const totalChars = totalCharsRef.current;
+    if (!element || !totalChars) return;
+
+    let anchor: number;
+    if (isPagedFlow) {
+      const metrics = pageMetricsRef.current;
+      const spreadStep = metrics.pageStep * pagesPerSpread;
+      const maxPageIndex = Math.max(0, metrics.spreadCount - 1);
+      const pageIndex = spreadStep > 0 ? Math.round(element.scrollLeft / spreadStep) : 0;
+      activePageIndexRef.current = Math.max(0, Math.min(maxPageIndex, pageIndex));
+      anchor = anchorForPageIndex(activePageIndexRef.current);
+    } else {
+      const windowValue = latestWindowRef.current;
+      const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight);
+      const localProgress = maxScroll > 0 ? element.scrollTop / maxScroll : 0;
+      anchor = Math.round(windowValue.start + localProgress * Math.max(1, windowValue.end - windowValue.start));
+    }
+
+    setAnchor(anchor, persist);
+  };
+
+  const goToAnchor = (anchor: number, persist: boolean, forceWindow = false) => {
+    const totalChars = totalCharsRef.current;
+    if (!totalChars) return;
+    const nextAnchor = clamp(Math.round(anchor), 0, totalChars);
+    activeAnchorCharRef.current = nextAnchor;
+    const current = latestWindowRef.current;
+    const shouldLoad = forceWindow || !current.text || nextAnchor < current.start || nextAnchor > current.end;
+    if (shouldLoad) {
+      loadWindowForAnchor(nextAnchor, forceWindow || !current.text, totalChars).catch((error) => console.warn('Failed to load TXT window', error));
+    } else {
+      scrollToAnchor(nextAnchor);
+    }
+    updateProgressFromAnchor(nextAnchor);
+    if (persist) schedulePersistProgress(nextAnchor);
+    scheduleWindowPrefetch(nextAnchor);
+  };
+
   const handleScroll = () => {
+    if (programmaticScrollRef.current) return;
     const element = contentRef.current;
     if (!element || !totalCharsRef.current) return;
-    if (isAnimatingRef.current) return;
     if (progressFrameRef.current !== undefined) return;
 
     progressFrameRef.current = requestAnimationFrame(() => {
       progressFrameRef.current = undefined;
-      const activeElement = contentRef.current;
-      if (!activeElement || !totalCharsRef.current) return;
-      syncProgressFromElement(true);
+      if (!contentRef.current || !totalCharsRef.current || programmaticScrollRef.current) return;
+      syncAnchorFromElement(true);
     });
   };
 
@@ -456,80 +489,82 @@ export function TxtViewerNext({
     }
   };
 
-  const moveWindow = (direction: 1 | -1) => {
-    const totalChars = totalCharsRef.current;
-    if (!totalChars) return false;
-    const pageDistance = Math.max(1, Math.round(estimateCharsPerPage() * (isPagedFlow ? pagesPerSpread : 1)));
-    const targetIndex = direction > 0
-      ? visibleRange.end
-      : Math.max(0, visibleRange.start - pageDistance);
-    if (direction > 0 && targetIndex >= totalChars) return false;
-    if (direction < 0 && visibleRange.start <= 0) return false;
-    const nextProgress = Math.max(0, Math.min(1, targetIndex / totalChars));
-    const nextRange = rangeForProgress(nextProgress, totalChars);
-    pendingChapterPartRef.current = nextProgress;
-    loadWindow(nextRange, nextProgress).catch((error) => console.warn('Failed to move TXT window', error));
-    updateProgress(nextProgress);
-    schedulePersistProgress(nextProgress);
-    return true;
-  };
-
   const turnBackward = () => {
     const element = contentRef.current;
     if (!element || !layoutReady) return;
     if (isPagedFlow) {
-      if (element.scrollLeft <= 4) {
-        moveWindow(-1);
+      const pageIndex = pageIndexForAnchor(activeAnchorCharRef.current);
+      if (pageIndex > 0) {
+        const nextPageIndex = pageIndex - 1;
+        const nextAnchor = anchorForPageIndex(nextPageIndex);
+        activePageIndexRef.current = nextPageIndex;
+        programmaticScrollRef.current = true;
+        element.scrollLeft = nextPageIndex * pageMetricsRef.current.pageStep * pagesPerSpread;
+        window.requestAnimationFrame(() => {
+          programmaticScrollRef.current = false;
+        });
+        setAnchor(nextAnchor, true);
         return;
       }
-      const metrics = pageMetricsRef.current;
-      animateScrollTo(
-        element.scrollLeft - metrics.pageStep * pagesPerSpread,
-        'x',
-        () => syncProgressFromElement(true),
-      );
+
+      const nextAnchor = Math.max(0, activeAnchorCharRef.current - estimateCharsPerSpread());
+      if (nextAnchor === activeAnchorCharRef.current) return;
+      goToAnchor(nextAnchor, true, true);
       return;
     }
 
     if (element.scrollTop <= 4) {
-      moveWindow(-1);
+      const nextAnchor = Math.max(0, activeAnchorCharRef.current - estimateCharsPerSpread());
+      goToAnchor(nextAnchor, true, true);
       return;
     }
-    else animateScrollTo(
-      element.scrollTop - element.clientHeight * 0.86,
-      'y',
-      () => syncProgressFromElement(true),
-    );
+
+    const nextTop = Math.max(0, element.scrollTop - element.clientHeight * 0.86);
+    element.scrollTop = nextTop;
+    syncAnchorFromElement(true);
   };
 
   const turnForward = () => {
     const element = contentRef.current;
     if (!element || !layoutReady) return;
     if (isPagedFlow) {
-      const maxScroll = Math.max(0, element.scrollWidth - element.clientWidth);
-      if (element.scrollLeft >= maxScroll - 4) {
-        if (!moveWindow(1)) openNextBook();
+      const pageIndex = pageIndexForAnchor(activeAnchorCharRef.current);
+      const maxPageIndex = Math.max(0, pageMetricsRef.current.spreadCount - 1);
+      if (pageIndex < maxPageIndex) {
+        const nextPageIndex = pageIndex + 1;
+        const nextAnchor = anchorForPageIndex(nextPageIndex);
+        activePageIndexRef.current = nextPageIndex;
+        programmaticScrollRef.current = true;
+        element.scrollLeft = nextPageIndex * pageMetricsRef.current.pageStep * pagesPerSpread;
+        window.requestAnimationFrame(() => {
+          programmaticScrollRef.current = false;
+        });
+        setAnchor(nextAnchor, true);
         return;
       }
-      const metrics = pageMetricsRef.current;
-      animateScrollTo(
-        element.scrollLeft + metrics.pageStep * pagesPerSpread,
-        'x',
-        () => syncProgressFromElement(true),
-      );
+
+      const nextAnchor = Math.min(totalCharsRef.current, activeAnchorCharRef.current + estimateCharsPerSpread());
+      if (nextAnchor >= totalCharsRef.current) {
+        openNextBook();
+        return;
+      }
+      goToAnchor(nextAnchor, true, true);
       return;
     }
 
     const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight);
     if (element.scrollTop >= maxScroll - 4) {
-      if (!moveWindow(1)) openNextBook();
+      const nextAnchor = Math.min(totalCharsRef.current, activeAnchorCharRef.current + estimateCharsPerSpread());
+      if (nextAnchor >= totalCharsRef.current) {
+        openNextBook();
+        return;
+      }
+      goToAnchor(nextAnchor, true, true);
       return;
     }
-    else animateScrollTo(
-      element.scrollTop + element.clientHeight * 0.86,
-      'y',
-      () => syncProgressFromElement(true),
-    );
+
+    element.scrollTop = Math.min(maxScroll, element.scrollTop + element.clientHeight * 0.86);
+    syncAnchorFromElement(true);
   };
 
   const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
@@ -538,9 +573,16 @@ export function TxtViewerNext({
     if (Math.abs(dominantDelta) < 20) return;
 
     event.preventDefault();
-    const now = performance.now();
-    if (now < wheelReadyAtRef.current || isAnimatingRef.current) return;
-    wheelReadyAtRef.current = now + 190;
+    if (wheelGestureTimerRef.current !== undefined) {
+      window.clearTimeout(wheelGestureTimerRef.current);
+    }
+    wheelGestureTimerRef.current = window.setTimeout(() => {
+      wheelGestureTimerRef.current = undefined;
+      wheelGestureLockedRef.current = false;
+    }, 260);
+    if (wheelGestureLockedRef.current) return;
+
+    wheelGestureLockedRef.current = true;
     if (dominantDelta > 0) turnForward();
     else turnBackward();
   };
@@ -592,7 +634,7 @@ export function TxtViewerNext({
           <div dangerouslySetInnerHTML={{ __html: paragraphHtml }} />
         </div>
       </div>
-      {!layoutReady && (
+      {!layoutReady && !textWindow.text && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-inherit">
           <LoaderCircle className="h-7 w-7 animate-spin text-[#007AFF]" />
         </div>
@@ -610,13 +652,6 @@ function textToParagraphHtml(text: string) {
     .join('');
 }
 
-function progressToWindowProgress(progress: number, range: { start: number; end: number }, textLength: number) {
-  if (textLength <= 0) return 0;
-  const target = Math.max(0, Math.min(textLength, progress * textLength));
-  const rangeLength = Math.max(1, range.end - range.start);
-  return Math.max(0, Math.min(1, (target - range.start) / rangeLength));
-}
-
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, '&amp;')
@@ -624,4 +659,8 @@ function escapeHtml(value: string) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
 }

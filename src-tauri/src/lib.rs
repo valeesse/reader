@@ -11,12 +11,15 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     sync::Mutex,
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager};
 use walkdir::WalkDir;
 use zip::ZipArchive;
 
 const TXT_CHAR_CHECKPOINT_INTERVAL: usize = 4096;
+const TXT_BOOK_CACHE_LIMIT: usize = 5;
+const EPUB_BOOK_CACHE_LIMIT: usize = 5;
 const EPUB_RESOURCE_CACHE_LIMIT: usize = 96;
 
 #[derive(Default)]
@@ -27,6 +30,9 @@ struct ReaderState {
 
 #[derive(Debug)]
 struct TxtBookCache {
+    signature: FileSignature,
+    last_used_at: u128,
+    open_count: usize,
     text: String,
     total_chars: usize,
     total_bytes: u64,
@@ -60,9 +66,19 @@ struct TxtTextWindow {
 
 #[derive(Debug, Clone)]
 struct EpubBookCache {
+    signature: FileSignature,
+    last_used_at: u128,
+    open_count: usize,
+    info: EpubBookInfo,
     manifest_items: Vec<EpubManifestItem>,
     resource_cache: HashMap<String, EpubCachedResource>,
     resource_order: VecDeque<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileSignature {
+    len: u64,
+    modified_ns: u128,
 }
 
 #[derive(Debug, Clone)]
@@ -79,7 +95,7 @@ struct EpubCachedResource {
     media_type: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EpubBookInfo {
     metadata: EpubMetadataInfo,
@@ -88,7 +104,7 @@ struct EpubBookInfo {
     toc: Vec<EpubLinkInfo>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EpubMetadataInfo {
     title: String,
@@ -247,20 +263,31 @@ fn emit_scan_progress(app: &AppHandle, visited: usize, matched: usize, path: &Pa
 }
 
 #[tauri::command]
-fn open_txt_book(state: tauri::State<'_, ReaderState>, path: String) -> Result<TxtBookInfo, String> {
+fn open_txt_book(
+    state: tauri::State<'_, ReaderState>,
+    path: String,
+) -> Result<TxtBookInfo, String> {
+    let signature = file_signature(&path)?;
     let mut books = state
         .txt_books
         .lock()
         .map_err(|_| "TXT 缓存被占用".to_string())?;
-    let cache = if let Some(cache) = books.get(&path) {
-        cache
-    } else {
-        let cache = load_txt_book(&path)?;
-        books.insert(path.clone(), cache);
-        books
-            .get(&path)
-            .ok_or_else(|| "TXT 缓存初始化失败".to_string())?
-    };
+    let should_reload = books
+        .get(&path)
+        .map(|cache| cache.signature != signature)
+        .unwrap_or(true);
+
+    if should_reload {
+        books.insert(path.clone(), load_txt_book(&path, signature, 1)?);
+    } else if let Some(cache) = books.get_mut(&path) {
+        cache.open_count = cache.open_count.saturating_add(1);
+        cache.last_used_at = now_millis_u128();
+    }
+
+    trim_txt_cache(&mut books);
+    let cache = books
+        .get(&path)
+        .ok_or_else(|| "TXT 缓存初始化失败".to_string())?;
 
     Ok(TxtBookInfo {
         total_chars: cache.total_chars,
@@ -276,16 +303,22 @@ fn read_txt_window(
     start: usize,
     end: usize,
 ) -> Result<TxtTextWindow, String> {
+    let signature = file_signature(&path)?;
     let mut books = state
         .txt_books
         .lock()
         .map_err(|_| "TXT 缓存被占用".to_string())?;
-    if !books.contains_key(&path) {
-        books.insert(path.clone(), load_txt_book(&path)?);
+    let should_reload = books
+        .get(&path)
+        .map(|cache| cache.signature != signature)
+        .unwrap_or(true);
+    if should_reload {
+        books.insert(path.clone(), load_txt_book(&path, signature, 1)?);
     }
     let cache = books
-        .get(&path)
+        .get_mut(&path)
         .ok_or_else(|| "TXT 缓存读取失败".to_string())?;
+    cache.last_used_at = now_millis_u128();
     let start = start.min(cache.total_chars);
     let end = end.max(start).min(cache.total_chars);
     let start_byte = byte_index_for_char(cache, start);
@@ -300,11 +333,15 @@ fn read_txt_window(
 
 #[tauri::command]
 fn close_txt_book(state: tauri::State<'_, ReaderState>, path: String) -> Result<(), String> {
-    state
+    let mut books = state
         .txt_books
         .lock()
-        .map_err(|_| "TXT 缓存被占用".to_string())?
-        .remove(&path);
+        .map_err(|_| "TXT 缓存被占用".to_string())?;
+    if let Some(cache) = books.get_mut(&path) {
+        cache.open_count = cache.open_count.saturating_sub(1);
+        cache.last_used_at = now_millis_u128();
+    }
+    trim_txt_cache(&mut books);
     Ok(())
 }
 
@@ -314,20 +351,40 @@ fn open_epub_book(
     path: String,
     fallback_title: String,
 ) -> Result<EpubBookInfo, String> {
-    let info = load_epub_book(&path, &fallback_title)?;
+    let signature = file_signature(&path)?;
     let mut books = state
         .epub_books
         .lock()
         .map_err(|_| "EPUB 缓存被占用".to_string())?;
-    books.insert(
-        path,
-        EpubBookCache {
-            manifest_items: info.0,
-            resource_cache: HashMap::new(),
-            resource_order: VecDeque::new(),
-        },
-    );
-    Ok(info.1)
+    let should_reload = books
+        .get(&path)
+        .map(|cache| cache.signature != signature)
+        .unwrap_or(true);
+
+    if should_reload {
+        let (manifest_items, info) = load_epub_book(&path, &fallback_title)?;
+        books.insert(
+            path.clone(),
+            EpubBookCache {
+                signature,
+                last_used_at: now_millis_u128(),
+                open_count: 1,
+                info,
+                manifest_items,
+                resource_cache: HashMap::new(),
+                resource_order: VecDeque::new(),
+            },
+        );
+    } else if let Some(cache) = books.get_mut(&path) {
+        cache.open_count = cache.open_count.saturating_add(1);
+        cache.last_used_at = now_millis_u128();
+    }
+
+    trim_epub_cache(&mut books);
+    books
+        .get(&path)
+        .map(|cache| cache.info.clone())
+        .ok_or_else(|| "EPUB 缓存初始化失败".to_string())
 }
 
 #[tauri::command]
@@ -370,11 +427,15 @@ fn prefetch_epub_resources(
 
 #[tauri::command]
 fn close_epub_book(state: tauri::State<'_, ReaderState>, path: String) -> Result<(), String> {
-    state
+    let mut books = state
         .epub_books
         .lock()
-        .map_err(|_| "EPUB 缓存被占用".to_string())?
-        .remove(&path);
+        .map_err(|_| "EPUB 缓存被占用".to_string())?;
+    if let Some(cache) = books.get_mut(&path) {
+        cache.open_count = cache.open_count.saturating_sub(1);
+        cache.last_used_at = now_millis_u128();
+    }
+    trim_epub_cache(&mut books);
     Ok(())
 }
 
@@ -432,7 +493,11 @@ async fn webdav_download_snapshot(config: WebDavConfig) -> Result<Option<String>
         .map_err(|err| format!("WebDAV 响应解析失败: {err}"))
 }
 
-fn load_txt_book(path: &str) -> Result<TxtBookCache, String> {
+fn load_txt_book(
+    path: &str,
+    signature: FileSignature,
+    open_count: usize,
+) -> Result<TxtBookCache, String> {
     let bytes = fs::read(path).map_err(|err| format!("读取 TXT 失败: {err}"))?;
     let total_bytes = bytes.len() as u64;
     let (text, _, had_errors) = UTF_8.decode(&bytes);
@@ -450,6 +515,9 @@ fn load_txt_book(path: &str) -> Result<TxtBookCache, String> {
     let chapters = parse_txt_chapter_index(&text);
 
     Ok(TxtBookCache {
+        signature,
+        last_used_at: now_millis_u128(),
+        open_count,
         text,
         total_chars,
         total_bytes,
@@ -582,7 +650,15 @@ fn load_epub_book(
     let reading_order = spine_items
         .iter()
         .enumerate()
-        .map(|(index, item)| epub_link_from_manifest(item, Some(item.id.clone()).filter(|id| !id.is_empty()).or_else(|| Some(format!("Chapter {}", index + 1))), vec![]))
+        .map(|(index, item)| {
+            epub_link_from_manifest(
+                item,
+                Some(item.id.clone())
+                    .filter(|id| !id.is_empty())
+                    .or_else(|| Some(format!("Chapter {}", index + 1))),
+                vec![],
+            )
+        })
         .collect::<Vec<_>>();
     let reading_hrefs = reading_order
         .iter()
@@ -592,7 +668,11 @@ fn load_epub_book(
         .iter()
         .filter(|item| !reading_hrefs.contains(&item.absolute_href))
         .map(|item| {
-            let rels = if item.properties.iter().any(|property| property == "cover-image") {
+            let rels = if item
+                .properties
+                .iter()
+                .any(|property| property == "cover-image")
+            {
                 vec!["cover".to_string()]
             } else {
                 vec![]
@@ -644,7 +724,11 @@ fn epub_spine_items(doc: &Document, manifest_items: &[EpubManifestItem]) -> Vec<
         .collect::<HashMap<_, _>>();
     doc.descendants()
         .filter(|node| node.tag_name().name() == "itemref")
-        .filter_map(|node| node.attribute("idref").and_then(|id| by_id.get(id)).copied())
+        .filter_map(|node| {
+            node.attribute("idref")
+                .and_then(|id| by_id.get(id))
+                .copied()
+        })
         .cloned()
         .collect()
 }
@@ -695,7 +779,8 @@ fn epub_toc_links(
                 let nav_node = doc.descendants().find(|node| {
                     node.tag_name().name() == "nav"
                         && (node.attribute("type") == Some("toc")
-                            || node.attribute(("http://www.idpf.org/2007/ops", "type")) == Some("toc"))
+                            || node.attribute(("http://www.idpf.org/2007/ops", "type"))
+                                == Some("toc"))
                 });
                 if let Some(nav_node) = nav_node {
                     return Ok(nav_node
@@ -771,6 +856,7 @@ fn read_cached_epub_resource(
     path: &str,
     href: &str,
 ) -> Result<EpubCachedResource, String> {
+    let signature = file_signature(path)?;
     let normalized_href = strip_fragment(&normalize_zip_path(href));
     {
         let mut books = state
@@ -778,6 +864,10 @@ fn read_cached_epub_resource(
             .lock()
             .map_err(|_| "EPUB 缓存被占用".to_string())?;
         if let Some(book) = books.get_mut(path) {
+            if book.signature != signature {
+                return Err("EPUB 文件已变更，请重新打开".to_string());
+            }
+            book.last_used_at = now_millis_u128();
             if let Some(resource) = book.resource_cache.get(&normalized_href) {
                 return Ok(resource.clone());
             }
@@ -793,6 +883,10 @@ fn read_cached_epub_resource(
     let book = books
         .get_mut(path)
         .ok_or_else(|| "EPUB 尚未打开".to_string())?;
+    if book.signature != signature {
+        return Err("EPUB 文件已变更，请重新打开".to_string());
+    }
+    book.last_used_at = now_millis_u128();
     book.resource_cache
         .insert(normalized_href.clone(), resource.clone());
     book.resource_order.push_back(normalized_href.clone());
@@ -969,7 +1063,11 @@ fn find_epub_cover(
     let mime = mime_guess::from_path(&archive_path).first_or_octet_stream();
     let extension = mime_guess::get_mime_extensions(&mime)
         .and_then(|extensions| extensions.first().copied())
-        .or_else(|| Path::new(&archive_path).extension().and_then(|ext| ext.to_str()))
+        .or_else(|| {
+            Path::new(&archive_path)
+                .extension()
+                .and_then(|ext| ext.to_str())
+        })
         .unwrap_or("img");
     let covers_dir = app
         .path()
@@ -1034,7 +1132,10 @@ fn resolve_zip_href(base_dir: &str, href: &str) -> String {
 }
 
 fn is_external_href(value: &str) -> bool {
-    value.starts_with('#') || value.contains("://") || value.starts_with("data:") || value.starts_with("blob:")
+    value.starts_with('#')
+        || value.contains("://")
+        || value.starts_with("data:")
+        || value.starts_with("blob:")
 }
 
 fn mime_from_path(path: &str) -> String {
@@ -1106,10 +1207,56 @@ fn stable_book_id(path: &Path) -> String {
 }
 
 fn now_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
+    now_millis_u128() as u64
+}
+
+fn now_millis_u128() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
         .unwrap_or_default()
+}
+
+fn file_signature(path: &str) -> Result<FileSignature, String> {
+    let metadata = fs::metadata(path).map_err(|err| format!("读取文件信息失败: {err}"))?;
+    let modified_ns = metadata
+        .modified()
+        .unwrap_or(UNIX_EPOCH)
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    Ok(FileSignature {
+        len: metadata.len(),
+        modified_ns,
+    })
+}
+
+fn trim_txt_cache(books: &mut HashMap<String, TxtBookCache>) {
+    while books.len() > TXT_BOOK_CACHE_LIMIT {
+        let Some(path) = books
+            .iter()
+            .filter(|(_, cache)| cache.open_count == 0)
+            .min_by_key(|(_, cache)| cache.last_used_at)
+            .map(|(path, _)| path.clone())
+        else {
+            break;
+        };
+        books.remove(&path);
+    }
+}
+
+fn trim_epub_cache(books: &mut HashMap<String, EpubBookCache>) {
+    while books.len() > EPUB_BOOK_CACHE_LIMIT {
+        let Some(path) = books
+            .iter()
+            .filter(|(_, cache)| cache.open_count == 0)
+            .min_by_key(|(_, cache)| cache.last_used_at)
+            .map(|(path, _)| path.clone())
+        else {
+            break;
+        };
+        books.remove(&path);
+    }
 }
 
 fn webdav_state_url(config: &WebDavConfig) -> Result<String, String> {
