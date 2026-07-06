@@ -5,6 +5,7 @@ import {
   prefetchEpubResources,
   readEpubResource,
   openEpubBook,
+  toLocalAssetUrl,
 } from './native';
 
 const EPUB_PROFILE = 'https://readium.org/webpub-manifest/profiles/epub';
@@ -266,7 +267,7 @@ class ReadiumResource {
 
 class EpubResourceManager {
   private path: string;
-  private payloads = new Map<string, Promise<{ href: string; mediaType: string; text?: string; base64?: string }>>();
+  private payloads = new Map<string, Promise<{ href: string; mediaType: string; text?: string; base64?: string; filePath?: string }>>();
   private blobUrls = new Map<string, string>();
 
   constructor(path: string) {
@@ -284,6 +285,10 @@ class EpubResourceManager {
     }
 
     const payload = await this.payloadFor(link.href);
+    if (payload.filePath) {
+      const response = await fetch(toLocalAssetUrl(payload.filePath));
+      return new Uint8Array(await response.arrayBuffer());
+    }
     if (payload.base64) return base64ToBytes(payload.base64);
     if (payload.text !== undefined) return new TextEncoder().encode(payload.text);
     return undefined;
@@ -309,7 +314,10 @@ class EpubResourceManager {
     const normalized = stripHash(normalizeZipPath(href));
     const existing = this.payloads.get(normalized);
     if (existing) return existing;
-    const payload = readEpubResource(this.path, normalized);
+    const payload = readEpubResource(this.path, normalized).catch((error) => {
+      console.warn('Failed to read EPUB resource', { bookPath: this.path, href: normalized, error });
+      throw error;
+    });
     this.payloads.set(normalized, payload);
     return payload;
   }
@@ -322,6 +330,13 @@ class EpubResourceManager {
     const link = new ReadiumLink({ href: normalized });
     const payload = await this.payloadFor(normalized);
     const type = payload.mediaType || link.type;
+    if (payload.filePath && type !== 'text/css' && !link.mediaType.isHTML) {
+      const response = await fetch(toLocalAssetUrl(payload.filePath));
+      if (!response.ok) throw new Error(`Failed reading cached EPUB resource ${normalized}`);
+      const url = URL.createObjectURL(await response.blob());
+      this.blobUrls.set(normalized, url);
+      return url;
+    }
     const content = type === 'text/css'
       ? await this.rewriteCss(payload.text ?? new TextDecoder().decode(base64ToBytes(payload.base64 || '')), normalized)
       : payload.text !== undefined

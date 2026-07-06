@@ -529,7 +529,7 @@ function forceReadiumLayoutSettings(navigator: EpubNavigator, settings: AppSetti
       userProperties?: { colCount?: number | null };
       rsProperties?: { colCount?: number | null; colGap?: number | null; pageGutter?: number | null };
     };
-    _cframes?: Array<{ iframe?: HTMLIFrameElement; window?: Window }>;
+    _cframes?: Array<{ iframe?: HTMLIFrameElement; window?: Window } | undefined>;
     pool?: { setPerPage?: (columns: number | null) => void };
   };
 
@@ -544,6 +544,7 @@ function forceReadiumLayoutSettings(navigator: EpubNavigator, settings: AppSetti
   internal.pool?.setPerPage?.(columns);
 
   for (const frame of internal._cframes || []) {
+    if (!frame) continue;
     const doc = frame.iframe?.contentDocument || frame.window?.document;
     if (doc) applyReadiumFrameSettings(doc, settings);
   }

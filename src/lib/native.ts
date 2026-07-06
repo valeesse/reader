@@ -56,6 +56,7 @@ export interface NativeEpubResource {
   mediaType: string;
   text?: string;
   base64?: string;
+  filePath?: string;
 }
 
 export function isTauriApp() {

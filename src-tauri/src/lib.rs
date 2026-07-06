@@ -21,6 +21,9 @@ const TXT_CHAR_CHECKPOINT_INTERVAL: usize = 4096;
 const TXT_BOOK_CACHE_LIMIT: usize = 5;
 const EPUB_BOOK_CACHE_LIMIT: usize = 5;
 const EPUB_RESOURCE_CACHE_LIMIT: usize = 96;
+const PERSISTENT_CACHE_VERSION: u8 = 2;
+const TXT_PERSISTENT_CACHE_MAX_BYTES: u64 = 80 * 1024 * 1024;
+const TRANSPARENT_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/luzcLwAAAABJRU5ErkJggg==";
 
 #[derive(Default)]
 struct ReaderState {
@@ -33,6 +36,7 @@ struct TxtBookCache {
     signature: FileSignature,
     last_used_at: u128,
     open_count: usize,
+    encoding: String,
     text: String,
     total_chars: usize,
     total_bytes: u64,
@@ -40,7 +44,7 @@ struct TxtBookCache {
     chapters: Vec<TxtChapterInfo>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TxtChapterInfo {
     id: String,
@@ -75,13 +79,13 @@ struct EpubBookCache {
     resource_order: VecDeque<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 struct FileSignature {
     len: u64,
     modified_ns: u128,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct EpubManifestItem {
     id: String,
     absolute_href: String,
@@ -95,7 +99,7 @@ struct EpubCachedResource {
     media_type: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EpubBookInfo {
     metadata: EpubMetadataInfo,
@@ -104,7 +108,7 @@ struct EpubBookInfo {
     toc: Vec<EpubLinkInfo>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EpubMetadataInfo {
     title: String,
@@ -114,7 +118,7 @@ struct EpubMetadataInfo {
     reading_progression: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EpubLinkInfo {
     href: String,
@@ -131,6 +135,7 @@ struct EpubResourcePayload {
     media_type: String,
     text: Option<String>,
     base64: Option<String>,
+    file_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -163,6 +168,43 @@ struct ScanProgress {
     visited: usize,
     matched: usize,
     current_path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistentTxtBookCache {
+    version: u8,
+    path: String,
+    signature: FileSignature,
+    encoding: String,
+    text: String,
+    total_chars: usize,
+    total_bytes: u64,
+    checkpoints: Vec<(usize, usize)>,
+    chapters: Vec<TxtChapterInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistentTxtIndexCache {
+    version: u8,
+    path: String,
+    signature: FileSignature,
+    encoding: String,
+    total_chars: usize,
+    total_bytes: u64,
+    checkpoints: Vec<(usize, usize)>,
+    chapters: Vec<TxtChapterInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistentEpubBookCache {
+    version: u8,
+    path: String,
+    signature: FileSignature,
+    info: EpubBookInfo,
+    manifest_items: Vec<EpubManifestItem>,
 }
 
 #[tauri::command]
@@ -264,6 +306,7 @@ fn emit_scan_progress(app: &AppHandle, visited: usize, matched: usize, path: &Pa
 
 #[tauri::command]
 fn open_txt_book(
+    app: AppHandle,
     state: tauri::State<'_, ReaderState>,
     path: String,
 ) -> Result<TxtBookInfo, String> {
@@ -278,7 +321,12 @@ fn open_txt_book(
         .unwrap_or(true);
 
     if should_reload {
-        books.insert(path.clone(), load_txt_book(&path, signature, 1)?);
+        let cache = load_txt_book_from_persistent_cache(&app, &path, signature, 1)
+            .unwrap_or_else(|| load_txt_book_with_persistent_index(&app, &path, signature, 1));
+        let cache = cache?;
+        save_txt_book_to_persistent_cache(&app, &path, &cache);
+        save_txt_index_to_persistent_cache(&app, &path, &cache);
+        books.insert(path.clone(), cache);
     } else if let Some(cache) = books.get_mut(&path) {
         cache.open_count = cache.open_count.saturating_add(1);
         cache.last_used_at = now_millis_u128();
@@ -298,6 +346,7 @@ fn open_txt_book(
 
 #[tauri::command]
 fn read_txt_window(
+    app: AppHandle,
     state: tauri::State<'_, ReaderState>,
     path: String,
     start: usize,
@@ -313,7 +362,11 @@ fn read_txt_window(
         .map(|cache| cache.signature != signature)
         .unwrap_or(true);
     if should_reload {
-        books.insert(path.clone(), load_txt_book(&path, signature, 1)?);
+        let cache = load_txt_book_from_persistent_cache(&app, &path, signature, 1)
+            .unwrap_or_else(|| load_txt_book_with_persistent_index(&app, &path, signature, 1))?;
+        save_txt_book_to_persistent_cache(&app, &path, &cache);
+        save_txt_index_to_persistent_cache(&app, &path, &cache);
+        books.insert(path.clone(), cache);
     }
     let cache = books
         .get_mut(&path)
@@ -347,11 +400,13 @@ fn close_txt_book(state: tauri::State<'_, ReaderState>, path: String) -> Result<
 
 #[tauri::command]
 fn open_epub_book(
+    app: AppHandle,
     state: tauri::State<'_, ReaderState>,
     path: String,
     fallback_title: String,
 ) -> Result<EpubBookInfo, String> {
     let signature = file_signature(&path)?;
+    clean_old_epub_resource_cache_dirs(&app, &path, signature);
     let mut books = state
         .epub_books
         .lock()
@@ -362,7 +417,8 @@ fn open_epub_book(
         .unwrap_or(true);
 
     if should_reload {
-        let (manifest_items, info) = load_epub_book(&path, &fallback_title)?;
+        let (manifest_items, info) = load_epub_book_from_persistent_cache(&app, &path, signature)
+            .unwrap_or_else(|| load_epub_book(&path, &fallback_title))?;
         books.insert(
             path.clone(),
             EpubBookCache {
@@ -375,6 +431,9 @@ fn open_epub_book(
                 resource_order: VecDeque::new(),
             },
         );
+        if let Some(cache) = books.get(&path) {
+            save_epub_book_to_persistent_cache(&app, &path, cache);
+        }
     } else if let Some(cache) = books.get_mut(&path) {
         cache.open_count = cache.open_count.saturating_add(1);
         cache.last_used_at = now_millis_u128();
@@ -389,12 +448,22 @@ fn open_epub_book(
 
 #[tauri::command]
 fn read_epub_resource(
+    app: AppHandle,
     state: tauri::State<'_, ReaderState>,
     path: String,
     href: String,
 ) -> Result<EpubResourcePayload, String> {
-    let resource = read_cached_epub_resource(&state, &path, &href)?;
     let normalized_href = strip_fragment(&normalize_zip_path(&href));
+    let resource = match read_cached_epub_resource(&state, &path, &href) {
+        Ok(resource) => resource,
+        Err(error) if is_probably_bitmap_href(&normalized_href) => {
+            eprintln!(
+                "EPUB missing bitmap resource, using transparent placeholder: path={path}, href={normalized_href}, error={error}"
+            );
+            missing_bitmap_placeholder()
+        }
+        Err(error) => return Err(error),
+    };
     if is_epub_text_resource(&resource.media_type) {
         let (text, _, _) = UTF_8.decode(&resource.bytes);
         Ok(EpubResourcePayload {
@@ -402,25 +471,48 @@ fn read_epub_resource(
             media_type: resource.media_type,
             text: Some(text.into_owned()),
             base64: None,
+            file_path: None,
         })
     } else {
+        let signature = file_signature(&path)?;
+        if let Some(file_path) =
+            save_epub_resource_file(&app, &path, signature, &normalized_href, &resource)
+        {
+            return Ok(EpubResourcePayload {
+                href: normalized_href,
+                media_type: resource.media_type,
+                text: None,
+                base64: None,
+                file_path: Some(file_path.to_string_lossy().to_string()),
+            });
+        }
+
         Ok(EpubResourcePayload {
             href: normalized_href,
             media_type: resource.media_type,
             text: None,
             base64: Some(general_purpose::STANDARD.encode(resource.bytes)),
+            file_path: None,
         })
     }
 }
 
 #[tauri::command]
 fn prefetch_epub_resources(
+    app: AppHandle,
     state: tauri::State<'_, ReaderState>,
     path: String,
     hrefs: Vec<String>,
 ) -> Result<(), String> {
+    let signature = file_signature(&path)?;
     for href in hrefs {
-        let _ = read_cached_epub_resource(&state, &path, &href);
+        if let Ok(resource) = read_cached_epub_resource(&state, &path, &href) {
+            if !is_epub_text_resource(&resource.media_type) {
+                let normalized_href = strip_fragment(&normalize_zip_path(&href));
+                let _ =
+                    save_epub_resource_file(&app, &path, signature, &normalized_href, &resource);
+            }
+        }
     }
     Ok(())
 }
@@ -493,37 +585,146 @@ async fn webdav_download_snapshot(config: WebDavConfig) -> Result<Option<String>
         .map_err(|err| format!("WebDAV 响应解析失败: {err}"))
 }
 
-fn load_txt_book(
+fn decode_txt_to_utf8(bytes: &[u8]) -> (String, String) {
+    let (text, _, had_errors) = UTF_8.decode(bytes);
+    if !had_errors {
+        return (text.into_owned(), "utf-8".to_string());
+    }
+
+    let (text, _, _) = GBK.decode(bytes);
+    (text.into_owned(), "gbk".to_string())
+}
+
+fn load_txt_book_from_persistent_cache(
+    app: &AppHandle,
+    path: &str,
+    signature: FileSignature,
+    open_count: usize,
+) -> Option<Result<TxtBookCache, String>> {
+    let cache_path = persistent_cache_path(app, "recent-txt.json").ok()?;
+    let bytes = fs::read(cache_path).ok()?;
+    let cached = serde_json::from_slice::<PersistentTxtBookCache>(&bytes).ok()?;
+    if cached.version != PERSISTENT_CACHE_VERSION
+        || cached.path != path
+        || cached.signature != signature
+    {
+        return None;
+    }
+
+    Some(Ok(TxtBookCache {
+        signature,
+        last_used_at: now_millis_u128(),
+        open_count,
+        encoding: cached.encoding,
+        text: cached.text,
+        total_chars: cached.total_chars,
+        total_bytes: cached.total_bytes,
+        checkpoints: cached.checkpoints,
+        chapters: cached.chapters,
+    }))
+}
+
+fn load_txt_book_with_persistent_index(
+    app: &AppHandle,
     path: &str,
     signature: FileSignature,
     open_count: usize,
 ) -> Result<TxtBookCache, String> {
     let bytes = fs::read(path).map_err(|err| format!("读取 TXT 失败: {err}"))?;
     let total_bytes = bytes.len() as u64;
-    let (text, _, had_errors) = UTF_8.decode(&bytes);
-    let text = if had_errors {
-        let (text, _, _) = GBK.decode(&bytes);
-        text.into_owned()
-    } else {
-        text.into_owned()
-    };
+    let (text, encoding) = decode_txt_to_utf8(&bytes);
+    if let Some(index) = load_txt_index_from_persistent_cache(app, path, signature) {
+        if index.encoding == encoding && index.total_bytes == total_bytes {
+            return Ok(TxtBookCache {
+                signature,
+                last_used_at: now_millis_u128(),
+                open_count,
+                encoding,
+                text,
+                total_chars: index.total_chars,
+                total_bytes,
+                checkpoints: index.checkpoints,
+                chapters: index.chapters,
+            });
+        }
+    }
+
     let checkpoints = build_char_checkpoints(&text);
     let total_chars = checkpoints
         .last()
         .map(|(char_index, _)| *char_index)
         .unwrap_or_else(|| text.chars().count());
     let chapters = parse_txt_chapter_index(&text);
-
     Ok(TxtBookCache {
         signature,
         last_used_at: now_millis_u128(),
         open_count,
+        encoding,
         text,
         total_chars,
         total_bytes,
         checkpoints,
         chapters,
     })
+}
+
+fn load_txt_index_from_persistent_cache(
+    app: &AppHandle,
+    path: &str,
+    signature: FileSignature,
+) -> Option<PersistentTxtIndexCache> {
+    let cache_path = persistent_cache_path(app, "recent-txt-index.json").ok()?;
+    let bytes = fs::read(cache_path).ok()?;
+    let cached = serde_json::from_slice::<PersistentTxtIndexCache>(&bytes).ok()?;
+    if cached.version != PERSISTENT_CACHE_VERSION
+        || cached.path != path
+        || cached.signature != signature
+    {
+        return None;
+    }
+    Some(cached)
+}
+
+fn save_txt_book_to_persistent_cache(app: &AppHandle, path: &str, cache: &TxtBookCache) {
+    if cache.total_bytes > TXT_PERSISTENT_CACHE_MAX_BYTES {
+        return;
+    }
+    let Ok(cache_path) = persistent_cache_path(app, "recent-txt.json") else {
+        return;
+    };
+    let payload = PersistentTxtBookCache {
+        version: PERSISTENT_CACHE_VERSION,
+        path: path.to_string(),
+        signature: cache.signature,
+        encoding: cache.encoding.clone(),
+        text: cache.text.clone(),
+        total_chars: cache.total_chars,
+        total_bytes: cache.total_bytes,
+        checkpoints: cache.checkpoints.clone(),
+        chapters: cache.chapters.clone(),
+    };
+    if let Ok(bytes) = serde_json::to_vec(&payload) {
+        let _ = fs::write(cache_path, bytes);
+    }
+}
+
+fn save_txt_index_to_persistent_cache(app: &AppHandle, path: &str, cache: &TxtBookCache) {
+    let Ok(cache_path) = persistent_cache_path(app, "recent-txt-index.json") else {
+        return;
+    };
+    let payload = PersistentTxtIndexCache {
+        version: PERSISTENT_CACHE_VERSION,
+        path: path.to_string(),
+        signature: cache.signature,
+        encoding: cache.encoding.clone(),
+        total_chars: cache.total_chars,
+        total_bytes: cache.total_bytes,
+        checkpoints: cache.checkpoints.clone(),
+        chapters: cache.chapters.clone(),
+    };
+    if let Ok(bytes) = serde_json::to_vec(&payload) {
+        let _ = fs::write(cache_path, bytes);
+    }
 }
 
 fn build_char_checkpoints(text: &str) -> Vec<(usize, usize)> {
@@ -692,6 +893,39 @@ fn load_epub_book(
             toc,
         },
     ))
+}
+
+fn load_epub_book_from_persistent_cache(
+    app: &AppHandle,
+    path: &str,
+    signature: FileSignature,
+) -> Option<Result<(Vec<EpubManifestItem>, EpubBookInfo), String>> {
+    let cache_path = persistent_cache_path(app, "recent-epub.json").ok()?;
+    let bytes = fs::read(cache_path).ok()?;
+    let cached = serde_json::from_slice::<PersistentEpubBookCache>(&bytes).ok()?;
+    if cached.version != PERSISTENT_CACHE_VERSION
+        || cached.path != path
+        || cached.signature != signature
+    {
+        return None;
+    }
+    Some(Ok((cached.manifest_items, cached.info)))
+}
+
+fn save_epub_book_to_persistent_cache(app: &AppHandle, path: &str, cache: &EpubBookCache) {
+    let Ok(cache_path) = persistent_cache_path(app, "recent-epub.json") else {
+        return;
+    };
+    let payload = PersistentEpubBookCache {
+        version: PERSISTENT_CACHE_VERSION,
+        path: path.to_string(),
+        signature: cache.signature,
+        info: cache.info.clone(),
+        manifest_items: cache.manifest_items.clone(),
+    };
+    if let Ok(bytes) = serde_json::to_vec(&payload) {
+        let _ = fs::write(cache_path, bytes);
+    }
 }
 
 fn epub_manifest_items(doc: &Document, opf_dir: &str) -> Vec<EpubManifestItem> {
@@ -910,26 +1144,122 @@ fn read_epub_resource_bytes(
             .epub_books
             .lock()
             .map_err(|_| "EPUB 缓存被占用".to_string())?;
-        books
-            .get(path)
-            .and_then(|book| {
-                book.manifest_items
-                    .iter()
-                    .find(|item| strip_fragment(&item.absolute_href) == href)
-                    .cloned()
-            })
-            .ok_or_else(|| format!("EPUB 缺少资源: {href}"))?
+        books.get(path).and_then(|book| {
+            book.manifest_items
+                .iter()
+                .find(|item| strip_fragment(&item.absolute_href) == href)
+                .cloned()
+        })
     };
 
     let file = File::open(path).map_err(|err| format!("打开 EPUB 失败: {err}"))?;
     let mut archive = ZipArchive::new(file).map_err(|err| format!("读取 EPUB 失败: {err}"))?;
-    let mut file = archive
-        .by_name(&manifest_item.absolute_href)
+    let (archive_path, media_type) = manifest_item
+        .map(|item| (item.absolute_href, item.media_type))
+        .unwrap_or_else(|| (href.to_string(), mime_from_path(href)));
+    let (_, bytes) = read_zip_bytes_flexible(&mut archive, &archive_path)
         .map_err(|err| format!("读取 EPUB 资源失败: {err}"))?;
+    Ok((media_type, bytes))
+}
+
+fn read_zip_bytes_flexible(
+    archive: &mut ZipArchive<File>,
+    path: &str,
+) -> Result<(String, Vec<u8>), String> {
+    if let Ok(bytes) = read_zip_bytes_exact(archive, path) {
+        return Ok((path.to_string(), bytes));
+    }
+
+    let decoded = percent_decode_str(path).decode_utf8_lossy().to_string();
+    if decoded != path {
+        if let Ok(bytes) = read_zip_bytes_exact(archive, &decoded) {
+            return Ok((decoded, bytes));
+        }
+    }
+
+    let normalized = normalize_zip_path(&decoded);
+    let normalized_lower = normalized.to_ascii_lowercase();
+    let path_without_root_lower = strip_first_zip_segment(&normalized_lower);
+    let file_name_lower = Path::new(&normalized)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_ascii_lowercase());
+    let mut suffix_match: Option<String> = None;
+    let mut basename_match: Option<String> = None;
+    let mut basename_ambiguous = false;
+
+    for index in 0..archive.len() {
+        let Ok(file) = archive.by_index(index) else {
+            continue;
+        };
+        let candidate = normalize_zip_path(file.name());
+        let candidate_lower = candidate.to_ascii_lowercase();
+        drop(file);
+
+        if candidate_lower == normalized_lower {
+            let bytes = read_zip_bytes_exact(archive, &candidate)?;
+            return Ok((candidate, bytes));
+        }
+
+        if !path_without_root_lower.is_empty()
+            && (candidate_lower == path_without_root_lower
+                || candidate_lower.ends_with(&format!("/{path_without_root_lower}")))
+        {
+            let bytes = read_zip_bytes_exact(archive, &candidate)?;
+            return Ok((candidate, bytes));
+        }
+
+        if candidate_lower.ends_with(&format!("/{normalized_lower}")) {
+            suffix_match = Some(candidate);
+            continue;
+        }
+
+        if let Some(file_name) = &file_name_lower {
+            let candidate_file_name = Path::new(&candidate_lower)
+                .file_name()
+                .and_then(|name| name.to_str());
+            if candidate_file_name == Some(file_name.as_str()) {
+                if basename_match.is_some() {
+                    basename_ambiguous = true;
+                } else {
+                    basename_match = Some(candidate);
+                }
+            }
+        }
+    }
+
+    let fallback_match = suffix_match.or_else(|| {
+        if basename_ambiguous {
+            None
+        } else {
+            basename_match
+        }
+    });
+    if let Some(candidate) = fallback_match {
+        let bytes = read_zip_bytes_exact(archive, &candidate)?;
+        eprintln!("EPUB resource fallback matched: requested={path}, actual={candidate}");
+        return Ok((candidate, bytes));
+    }
+
+    eprintln!(
+        "EPUB resource lookup failed: requested={path}, normalized={normalized}, file_name={}",
+        file_name_lower.unwrap_or_default()
+    );
+    Err(format!("EPUB 缺少资源: {path}"))
+}
+
+fn read_zip_bytes_exact(archive: &mut ZipArchive<File>, path: &str) -> Result<Vec<u8>, String> {
+    let mut file = archive.by_name(path).map_err(|err| err.to_string())?;
     let mut bytes = Vec::with_capacity(file.size() as usize);
     file.read_to_end(&mut bytes)
-        .map_err(|err| format!("读取 EPUB 资源失败: {err}"))?;
-    Ok((manifest_item.media_type, bytes))
+        .map_err(|err| err.to_string())?;
+    Ok(bytes)
+}
+
+fn strip_first_zip_segment(path: &str) -> String {
+    path.split_once('/')
+        .map(|(_, rest)| rest.to_string())
+        .unwrap_or_default()
 }
 
 fn is_epub_text_resource(media_type: &str) -> bool {
@@ -943,6 +1273,27 @@ fn is_epub_text_resource(media_type: &str) -> bool {
                 | "application/json"
                 | "image/svg+xml"
         )
+}
+
+fn is_probably_bitmap_href(href: &str) -> bool {
+    matches!(
+        strip_fragment(href)
+            .rsplit('.')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "avif"
+    )
+}
+
+fn missing_bitmap_placeholder() -> EpubCachedResource {
+    EpubCachedResource {
+        bytes: general_purpose::STANDARD
+            .decode(TRANSPARENT_PNG_BASE64)
+            .unwrap_or_default(),
+        media_type: "image/png".to_string(),
+    }
 }
 
 fn parse_epub_metadata(
@@ -1229,6 +1580,107 @@ fn file_signature(path: &str) -> Result<FileSignature, String> {
         len: metadata.len(),
         modified_ns,
     })
+}
+
+fn persistent_cache_path(app: &AppHandle, file_name: &str) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|err| err.to_string())?
+        .join("recent-book");
+    fs::create_dir_all(&dir).map_err(|err| format!("创建阅读缓存失败: {err}"))?;
+    Ok(dir.join(file_name))
+}
+
+fn epub_resource_cache_dir(
+    app: &AppHandle,
+    path: &str,
+    signature: FileSignature,
+) -> Result<PathBuf, String> {
+    let root = app
+        .path()
+        .app_cache_dir()
+        .map_err(|err| err.to_string())?
+        .join("epub-resources");
+    fs::create_dir_all(&root).map_err(|err| format!("创建 EPUB 资源缓存失败: {err}"))?;
+    Ok(root.join(format!(
+        "{}-{}-{}",
+        hash_string(path),
+        signature.len,
+        signature.modified_ns
+    )))
+}
+
+fn save_epub_resource_file(
+    app: &AppHandle,
+    path: &str,
+    signature: FileSignature,
+    href: &str,
+    resource: &EpubCachedResource,
+) -> Option<PathBuf> {
+    let dir = epub_resource_cache_dir(app, path, signature).ok()?;
+    fs::create_dir_all(&dir).ok()?;
+    let extension = resource_extension(href, &resource.media_type);
+    let file_path = dir.join(format!("{}.{}", hash_string(href), extension));
+    if file_path.exists() {
+        return Some(file_path);
+    }
+    fs::write(&file_path, &resource.bytes).ok()?;
+    Some(file_path)
+}
+
+fn clean_old_epub_resource_cache_dirs(app: &AppHandle, path: &str, signature: FileSignature) {
+    let Ok(current_dir) = epub_resource_cache_dir(app, path, signature) else {
+        return;
+    };
+    let Some(root) = current_dir.parent().map(Path::to_path_buf) else {
+        return;
+    };
+    let book_prefix = format!("{}-", hash_string(path));
+    let current_name = current_dir.file_name().map(|name| name.to_os_string());
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let entry_name = entry.file_name();
+        let entry_name = entry_name.to_string_lossy();
+        if !entry_name.starts_with(&book_prefix) {
+            continue;
+        }
+        if current_name
+            .as_ref()
+            .map(|name| entry_name.as_ref() == name.to_string_lossy())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let _ = fs::remove_dir_all(entry.path());
+    }
+}
+
+fn resource_extension(href: &str, media_type: &str) -> String {
+    Path::new(strip_fragment(href).as_str())
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
+        .filter(|extension| !extension.is_empty())
+        .unwrap_or_else(|| {
+            mime_guess::get_mime_extensions_str(media_type)
+                .and_then(|extensions| extensions.first().copied())
+                .unwrap_or("bin")
+                .to_string()
+        })
+}
+
+fn hash_string(value: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(value.as_bytes());
+    let digest = hasher.finalize();
+    digest
+        .iter()
+        .take(16)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn trim_txt_cache(books: &mut HashMap<String, TxtBookCache>) {
