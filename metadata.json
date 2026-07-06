@@ -1,0 +1,6 @@
+{
+  "name": "Zenith Reader",
+  "description": "A macOS/iOS inspired glassmorphic e-book reader supporting local EPUB and TXT files with continuous series reading and customizable typography.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

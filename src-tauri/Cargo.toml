@@ -1,0 +1,28 @@
+[package]
+name = "zenith-reader"
+version = "0.1.0"
+description = "A glassmorphic cross-platform EPUB/TXT reader"
+authors = ["Zenith Reader"]
+edition = "2024"
+rust-version = "1.96"
+
+[lib]
+name = "zenith_reader_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+base64 = "0.22"
+encoding_rs = "0.8"
+mime_guess = "2"
+percent-encoding = "2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+roxmltree = "0.20"
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+walkdir = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }

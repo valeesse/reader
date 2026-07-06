@@ -1,0 +1,771 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import { Check, ChevronLeft, ChevronRight, Download, LoaderCircle, X } from 'lucide-react';
+import { EpubNavigator, EpubPreferences, ReadiumFrameClickEvent, ReadiumLocator } from './vendor/readium-navigator';
+import { AppSettings, Book, ReaderTocItem } from './types';
+import { useAppContext } from './store/AppStore';
+import { getProgress, saveProgress } from './lib/storage';
+import {
+  createReadiumPublicationFromPath,
+  deserializeReadiumLocator,
+  progressionFromLocator,
+  ReadiumPublicationLike,
+  serializeReadiumLocator,
+} from './lib/readiumPublication';
+import { saveImageFromSource } from './lib/native';
+
+const DOUBLE_PAGE_CENTER_GAP = 56;
+const EPUB_PREFETCH_RADIUS = 5;
+
+export function ReadiumEpubViewerNext({
+  book,
+  chromeVisible,
+  onProgressChange,
+  onToggleChrome,
+  onTocChange,
+  tocTarget,
+  seekProgress,
+}: {
+  book: Book;
+  chromeVisible: boolean;
+  onProgressChange: (progress: number) => void;
+  onToggleChrome: () => void;
+  onTocChange: (items: ReaderTocItem[]) => void;
+  tocTarget: ReaderTocItem | null;
+  seekProgress: number | null;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const navigatorRef = useRef<EpubNavigator | null>(null);
+  const publicationRef = useRef<ReadiumPublicationLike | null>(null);
+  const { settings } = useAppContext();
+  const [loading, setLoading] = useState(true);
+  const [pageLabel, setPageLabel] = useState('');
+  const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
+  const [savingImage, setSavingImage] = useState(false);
+  const [saveStatus, setSaveStatus] = useState('');
+  const settingsRef = useRef(settings);
+  const onProgressChangeRef = useRef(onProgressChange);
+  const onToggleChromeRef = useRef(onToggleChrome);
+  const loadingResolvedRef = useRef(false);
+  const lastPreferencesKeyRef = useRef('');
+  const lastEmittedProgressRef = useRef(-1);
+  const lastSavedLocationRef = useRef('');
+  const pendingProgressRef = useRef<ReturnType<typeof createProgressPayload> | null>(null);
+  const progressSaveTimerRef = useRef<number | null>(null);
+  const previewImageRef = useRef(previewImage);
+  const suppressChromeToggleUntilRef = useRef(0);
+  const wheelReadyAtRef = useRef(0);
+  const wheelNavigatingRef = useRef(false);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+
+  useEffect(() => {
+    onProgressChangeRef.current = onProgressChange;
+  }, [onProgressChange]);
+
+  useEffect(() => {
+    onToggleChromeRef.current = onToggleChrome;
+  }, [onToggleChrome]);
+
+  useEffect(() => {
+    previewImageRef.current = previewImage;
+  }, [previewImage]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const flushProgressSave = () => {
+      const payload = pendingProgressRef.current;
+      if (!payload) return;
+      pendingProgressRef.current = null;
+      lastSavedLocationRef.current = payload.location;
+      saveProgress(payload).catch((error) => {
+        console.warn('Failed to save Readium progress', error);
+      });
+    };
+
+    const queueProgressSave = (locator: ReadiumLocator) => {
+      const location = serializeReadiumLocator(locator);
+      if (!location || location === lastSavedLocationRef.current) return;
+      pendingProgressRef.current = createProgressPayload(book.id, location);
+      if (progressSaveTimerRef.current !== null) return;
+      progressSaveTimerRef.current = window.setTimeout(() => {
+        progressSaveTimerRef.current = null;
+        flushProgressSave();
+      }, 700);
+    };
+
+    const openPreview = (image: { src: string; name: string }) => {
+      suppressChromeToggleUntilRef.current = Date.now() + 450;
+      setPreviewImage(image);
+      setSaveStatus('');
+    };
+
+    const handlePointer = (event: ReadiumFrameClickEvent) => {
+      if (handleReadiumClick(event, openPreview)) return true;
+      if (event.doNotDisturb || previewImageRef.current || Date.now() < suppressChromeToggleUntilRef.current) return true;
+      return false;
+    };
+
+    const resolveLoading = (forceReveal: boolean) => {
+      if (cancelled || loadingResolvedRef.current) return;
+      loadingResolvedRef.current = true;
+      if (forceReveal) revealReadiumFrames(containerRef.current);
+      setLoading(false);
+    };
+
+    const init = async () => {
+      try {
+        setLoading(true);
+        loadingResolvedRef.current = false;
+        const container = containerRef.current;
+        if (!container) return;
+
+        const publication = await createReadiumPublicationFromPath(book.path, book.title);
+        if (cancelled) {
+          publication.close();
+          return;
+        }
+
+        publicationRef.current = publication;
+        onTocChange(toTocItems(publication));
+        const storedProgress = await getProgress(book.id);
+        lastSavedLocationRef.current = storedProgress?.location || '';
+        const initialPosition = deserializeReadiumLocator(storedProgress?.location);
+        if (initialPosition?.href) {
+          publication.prefetchAroundHref(initialPosition.href, EPUB_PREFETCH_RADIUS).catch(() => {});
+        } else {
+          publication.prefetchAroundHref(publication.readingOrder.items[0]?.href || '', EPUB_PREFETCH_RADIUS).catch(() => {});
+        }
+        const initialPreferences = createReadiumPreferences(settingsRef.current);
+        lastPreferencesKeyRef.current = preferenceKey(initialPreferences);
+        const navigator = new EpubNavigator(
+          container,
+          publication,
+          {
+            frameLoaded: (wnd) => {
+              installImagePreview(wnd, openPreview, () => resolveLoading(false));
+              installReadiumWheel(wnd, navigateByWheel);
+              applyReadiumFrameSettings(wnd.document, settingsRef.current);
+            },
+            positionChanged: (locator) => {
+              const progress = progressionFromLocator(locator, publication);
+              publication.prefetchAroundHref(locator.href, EPUB_PREFETCH_RADIUS).catch(() => {});
+              if (Math.abs(progress - lastEmittedProgressRef.current) >= 0.001) {
+                lastEmittedProgressRef.current = progress;
+                setPageLabel(formatProgressLabel(progress));
+                onProgressChangeRef.current(progress);
+              }
+              queueProgressSave(locator);
+            },
+            click: handlePointer,
+            tap: handlePointer,
+            contextMenu: () => {},
+            miscPointer: () => {
+              if (Date.now() < suppressChromeToggleUntilRef.current || previewImageRef.current) return;
+              onToggleChromeRef.current();
+            },
+          },
+          publication.positions,
+          initialPosition,
+          {
+            preferences: initialPreferences,
+            defaults: createReadiumDefaults(settingsRef.current),
+          },
+        );
+
+        navigatorRef.current = navigator;
+        forceReadiumLayoutSettings(navigator, settingsRef.current);
+        const loadingFallback = window.setTimeout(() => resolveLoading(true), 1800);
+        navigator.load()
+          .then(() => {
+            forceReadiumLayoutSettings(navigator, settingsRef.current);
+            resolveLoading(false);
+          })
+          .catch((error) => {
+            console.error('Readium navigator failed to load', error);
+            resolveLoading(true);
+          })
+          .finally(() => window.clearTimeout(loadingFallback));
+      } catch (error) {
+        console.error('Failed to load EPUB with Readium', error);
+        resolveLoading(true);
+      }
+    };
+
+    init();
+
+    return () => {
+      cancelled = true;
+      onTocChange([]);
+      if (progressSaveTimerRef.current !== null) {
+        window.clearTimeout(progressSaveTimerRef.current);
+        progressSaveTimerRef.current = null;
+      }
+      flushProgressSave();
+      const navigator = navigatorRef.current;
+      navigatorRef.current = null;
+      navigator?.destroy?.();
+      publicationRef.current?.close();
+      publicationRef.current = null;
+    };
+  }, [book.id, book.path, book.title]);
+
+  useEffect(() => {
+    const navigator = navigatorRef.current;
+    if (!navigator) return;
+    const before = navigator.currentLocator;
+    const preferences = createReadiumPreferences(settings);
+    const key = preferenceKey(preferences);
+    if (key === lastPreferencesKeyRef.current) return;
+    lastPreferencesKeyRef.current = key;
+    navigator.submitPreferences(new EpubPreferences(preferences)).then(() => {
+      forceReadiumLayoutSettings(navigator, settings);
+      return navigator.resizeHandler?.();
+    }).then(() => {
+      if (before) navigator.go(before, false, () => {});
+    }).catch((error) => {
+      console.warn('Failed to apply Readium preferences', error);
+    });
+  }, [settings]);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    const navigator = navigatorRef.current;
+    if (!element || !navigator) return;
+    let timer: number | null = null;
+    const observer = new ResizeObserver(() => {
+      const before = navigator.currentLocator;
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        forceReadiumLayoutSettings(navigator, settingsRef.current);
+        navigator.resizeHandler?.().then(() => {
+          forceReadiumLayoutSettings(navigator, settingsRef.current);
+          if (before) navigator.go(before, false, () => {});
+        }).catch(() => {});
+      }, 90);
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [loading]);
+
+  useEffect(() => {
+    if (!tocTarget?.href) return;
+    const publication = publicationRef.current;
+    const navigator = navigatorRef.current;
+    const link = publication?.linkWithHref(tocTarget.href) || publication?.toc.findWithHref(tocTarget.href);
+    if (link && navigator) {
+      navigator.go(link.locator, false, () => {});
+    }
+  }, [tocTarget]);
+
+  useEffect(() => {
+    if (seekProgress === null) return;
+    const publication = publicationRef.current;
+    const navigator = navigatorRef.current;
+    if (!publication || !navigator || publication.positions.length === 0) return;
+    const index = Math.max(0, Math.min(publication.positions.length - 1, Math.round(seekProgress * (publication.positions.length - 1))));
+    navigator.go(publication.positions[index], false, () => {});
+  }, [seekProgress]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (previewImage) return;
+      if (event.key === 'ArrowLeft') {
+        navigatorRef.current?.goBackward(false, () => {});
+      } else if (event.key === 'ArrowRight') {
+        navigatorRef.current?.goForward(false, () => {});
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewImage]);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+    const handleWheel = (event: WheelEvent) => navigateByWheel(event);
+    element.addEventListener('wheel', handleWheel, { passive: false, capture: true });
+    return () => element.removeEventListener('wheel', handleWheel, { capture: true });
+  }, [loading]);
+
+  const navigateByWheel = (event: WheelEvent) => {
+    if (event.ctrlKey || previewImageRef.current) return;
+    const dominantDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    if (Math.abs(dominantDelta) < 20) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const now = performance.now();
+    if (now < wheelReadyAtRef.current || wheelNavigatingRef.current) return;
+    wheelReadyAtRef.current = now + 280;
+    wheelNavigatingRef.current = true;
+    const done = () => {
+      window.setTimeout(() => {
+        wheelNavigatingRef.current = false;
+      }, 80);
+    };
+
+    if (dominantDelta > 0) {
+      navigatorRef.current?.goForward(false, done);
+    } else {
+      navigatorRef.current?.goBackward(false, done);
+    }
+  };
+
+  const closePreview = () => {
+    if (savingImage) return;
+    setPreviewImage(null);
+    setSaveStatus('');
+  };
+
+  const savePreviewImage = async () => {
+    if (!previewImage) return;
+    try {
+      setSavingImage(true);
+      setSaveStatus('');
+      await saveImageFromSource(previewImage.src, previewImage.name);
+      setSaveStatus('已保存');
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? error.message : '保存失败');
+    } finally {
+      setSavingImage(false);
+    }
+  };
+
+  const goBackward = (event: React.MouseEvent | React.PointerEvent) => {
+    event.stopPropagation();
+    navigatorRef.current?.goBackward(false, () => {});
+  };
+
+  const goForward = (event: React.MouseEvent | React.PointerEvent) => {
+    event.stopPropagation();
+    navigatorRef.current?.goForward(false, () => {});
+  };
+
+  return (
+    <div className="group relative h-full w-full select-none overflow-hidden" onWheel={(event) => navigateByWheel(event.nativeEvent)}>
+      <div
+        className="absolute inset-0 box-border"
+        style={{
+          paddingLeft: `${settings.pageMargins.left}px`,
+          paddingRight: `${settings.pageMargins.right}px`,
+          paddingTop: `${settings.pageMargins.top}px`,
+          paddingBottom: `${settings.pageMargins.bottom}px`,
+        }}
+      >
+        <div ref={containerRef} className="readium-container h-full w-full" />
+      </div>
+
+      <div className="pointer-events-none absolute left-3 top-1/2 z-40 -translate-y-1/2">
+        <button
+          className={`pointer-events-auto flex h-11 w-11 items-center justify-center rounded-[5px] border border-black/10 bg-white/75 shadow-lg backdrop-blur-xl transition-all hover:scale-105 active:scale-95 dark:border-white/10 dark:bg-[#1C1C1E]/75 ${chromeVisible ? 'opacity-0 group-hover:opacity-100' : 'opacity-0'}`}
+          onClick={goBackward}
+          onPointerDown={(event) => event.stopPropagation()}
+          title="上一页"
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+      </div>
+
+      <div className="pointer-events-none absolute right-3 top-1/2 z-40 -translate-y-1/2">
+        <button
+          className={`pointer-events-auto flex h-11 w-11 items-center justify-center rounded-[5px] border border-black/10 bg-white/75 shadow-lg backdrop-blur-xl transition-all hover:scale-105 active:scale-95 dark:border-white/10 dark:bg-[#1C1C1E]/75 ${chromeVisible ? 'opacity-0 group-hover:opacity-100' : 'opacity-0'}`}
+          onClick={goForward}
+          onPointerDown={(event) => event.stopPropagation()}
+          title="下一页"
+        >
+          <ChevronRight className="h-5 w-5" />
+        </button>
+      </div>
+
+      {pageLabel && (
+        <div className={`absolute bottom-8 left-1/2 z-30 -translate-x-1/2 rounded-[5px] border border-black/10 bg-white/70 px-3 py-1.5 text-[11px] font-medium text-black/55 shadow-sm backdrop-blur-xl transition-opacity dark:border-white/10 dark:bg-[#1C1C1E]/70 dark:text-white/55 ${chromeVisible ? 'opacity-100' : 'opacity-0'}`}>
+          {pageLabel}
+        </div>
+      )}
+
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-inherit">
+          <LoaderCircle className="h-7 w-7 animate-spin text-[#007AFF]" />
+        </div>
+      )}
+
+      <AnimatePresence>
+        {previewImage && (
+          <motion.div
+            className="fixed inset-0 z-[80] flex items-center justify-center bg-black/72 p-4 backdrop-blur-xl"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={closePreview}
+          >
+            <motion.div
+              className="relative max-h-[92vh] max-w-[96vw]"
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.97, y: 10 }}
+              transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <img
+                src={previewImage.src}
+                alt={previewImage.name}
+                className="max-h-[86vh] max-w-[96vw] rounded-[5px] object-contain shadow-2xl"
+                draggable={false}
+              />
+              <div className="absolute right-3 top-3 flex items-center gap-2">
+                <button
+                  onClick={savePreviewImage}
+                  disabled={savingImage}
+                  className="flex h-10 items-center gap-2 rounded-[5px] border border-white/50 bg-white/88 px-3 text-sm font-medium text-[#1C1C1E] shadow-lg backdrop-blur-xl transition-all hover:bg-white active:scale-95 disabled:opacity-70"
+                >
+                  {savingImage ? <LoaderCircle className="h-4 w-4 animate-spin" /> : saveStatus === '已保存' ? <Check className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+                  {saveStatus === '已保存' ? '已保存' : '保存'}
+                </button>
+                <button
+                  onClick={closePreview}
+                  className="flex h-10 w-10 items-center justify-center rounded-[5px] border border-white/50 bg-white/88 text-[#1C1C1E] shadow-lg backdrop-blur-xl transition-all hover:bg-white active:scale-95"
+                  title="关闭"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              {saveStatus && saveStatus !== '已保存' && (
+                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-[5px] bg-black/70 px-3 py-1.5 text-xs text-white backdrop-blur-md">
+                  {saveStatus}
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function toTocItems(publication: ReadiumPublicationLike): ReaderTocItem[] {
+  const source = publication.toc.items.length > 0 ? publication.toc.items : publication.readingOrder.items;
+  return source.map((link, index) => ({
+    id: `${link.href}-${index}`,
+    title: link.title || `章节 ${index + 1}`,
+    href: link.href,
+    index,
+  }));
+}
+
+function createReadiumPreferences(settings: ReturnType<typeof useAppContext>['settings']) {
+  const columns = settings.pageMode === 'double' ? 2 : 1;
+  const lineLengths = readiumLineLengths(settings.pageMode);
+  return {
+    backgroundColor: themeColors(settings.theme).background,
+    textColor: themeColors(settings.theme).text,
+    fontFamily: settings.fontFamily,
+    fontSize: settings.fontSize / 18,
+    lineHeight: settings.lineHeight,
+    paragraphSpacing: settings.paragraphSpacing,
+    letterSpacing: settings.letterSpacing,
+    columnCount: columns,
+    pageGutter: 0,
+    scroll: false,
+    scrollPaddingTop: 0,
+    scrollPaddingRight: 0,
+    scrollPaddingBottom: 0,
+    scrollPaddingLeft: 0,
+    ...lineLengths,
+  };
+}
+
+function readiumLineLengths(pageMode: AppSettings['pageMode']) {
+  if (pageMode === 'double') {
+    return {
+      optimalLineLength: 38,
+      minimalLineLength: 24,
+      maximalLineLength: null,
+    };
+  }
+
+  return {
+    optimalLineLength: 68,
+    minimalLineLength: 35,
+    maximalLineLength: 95,
+  };
+}
+
+function createReadiumDefaults(settings: ReturnType<typeof useAppContext>['settings']) {
+  return {
+    ...createReadiumPreferences(settings),
+  };
+}
+
+function themeColors(theme: 'light' | 'dark' | 'sepia') {
+  if (theme === 'dark') return { background: '#121212', text: '#e5e7eb' };
+  if (theme === 'sepia') return { background: '#FDFCF8', text: '#5b4636' };
+  return { background: '#ffffff', text: '#111827' };
+}
+
+function preferenceKey(preferences: Record<string, unknown>) {
+  return JSON.stringify(preferences);
+}
+
+function createProgressPayload(bookId: string, location: string) {
+  return {
+    bookId,
+    location,
+    updatedAt: Date.now(),
+  };
+}
+
+function forceReadiumLayoutSettings(navigator: EpubNavigator, settings: AppSettings) {
+  const columns = settings.pageMode === 'double' ? 2 : 1;
+  const centerGap = readiumCenterGap(settings);
+  const internal = navigator as EpubNavigator & {
+    _css?: {
+      userProperties?: { colCount?: number | null };
+      rsProperties?: { colCount?: number | null; colGap?: number | null; pageGutter?: number | null };
+    };
+    _cframes?: Array<{ iframe?: HTMLIFrameElement; window?: Window }>;
+    pool?: { setPerPage?: (columns: number | null) => void };
+  };
+
+  if (internal._css?.userProperties) {
+    internal._css.userProperties.colCount = columns;
+  }
+  if (internal._css?.rsProperties) {
+    internal._css.rsProperties.colCount = columns;
+    internal._css.rsProperties.colGap = centerGap;
+    internal._css.rsProperties.pageGutter = 0;
+  }
+  internal.pool?.setPerPage?.(columns);
+
+  for (const frame of internal._cframes || []) {
+    const doc = frame.iframe?.contentDocument || frame.window?.document;
+    if (doc) applyReadiumFrameSettings(doc, settings);
+  }
+}
+
+function applyReadiumFrameSettings(doc: Document, settings: AppSettings) {
+  const root = doc.documentElement;
+  const columns = settings.pageMode === 'double' ? 2 : 1;
+  const centerGap = readiumCenterGap(settings);
+  root.style.setProperty('--USER__colCount', String(columns));
+  root.style.setProperty('--RS__colCount', String(columns));
+  root.style.setProperty('--RS__colGap', `${centerGap}px`);
+  root.style.removeProperty('--RS__colWidth');
+  root.style.setProperty('--RS__pageGutter', '0px');
+  root.style.setProperty('--ZENITH__pageMarginTop', '0px');
+  root.style.setProperty('--ZENITH__pageMarginRight', '0px');
+  root.style.setProperty('--ZENITH__pageMarginBottom', '0px');
+  root.style.setProperty('--ZENITH__pageMarginLeft', '0px');
+  root.style.setProperty('--RS__scrollPaddingTop', '0px');
+  root.style.setProperty('--RS__scrollPaddingRight', '0px');
+  root.style.setProperty('--RS__scrollPaddingBottom', '0px');
+  root.style.setProperty('--RS__scrollPaddingLeft', '0px');
+}
+
+function readiumCenterGap(settings: AppSettings) {
+  return settings.pageMode === 'double' ? DOUBLE_PAGE_CENTER_GAP : 0;
+}
+
+function installReadiumWheel(wnd: Window, onWheel: (event: WheelEvent) => void) {
+  const doc = wnd.document;
+  if (doc.documentElement.dataset.zenithReadiumWheelBound === 'true') return;
+  doc.documentElement.dataset.zenithReadiumWheelBound = 'true';
+  const handler = (event: WheelEvent) => onWheel(event);
+  wnd.addEventListener('wheel', handler, { passive: false, capture: true });
+  doc.addEventListener('wheel', handler, { passive: false, capture: true });
+}
+
+function installImagePreview(
+  wnd: Window,
+  onOpen: (image: { src: string; name: string }) => void,
+  onReady: () => void,
+) {
+  const doc = wnd.document;
+  onReady();
+  installReadiumFrameStyles(doc);
+  if (!doc || doc.body.dataset.zenithReadiumImageBound === 'true') return;
+  doc.body.dataset.zenithReadiumImageBound = 'true';
+  const boundImages = new WeakSet<Element>();
+  let lastOpenedAt = 0;
+
+  const isImageEvent = (event: Event) => {
+    const target = event.target as Element | null;
+    return target?.closest?.('img, svg image') as Element | null;
+  };
+
+  const isPrimaryActivation = (event: Event) => {
+    if ('button' in event && typeof event.button === 'number') return event.button === 0;
+    return true;
+  };
+
+  const stopImagePointer = (event: Event) => {
+    if (!isPrimaryActivation(event) || !isImageEvent(event)) return;
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+  };
+
+  const openFromEvent = (event: Event) => {
+    if (!isPrimaryActivation(event)) return;
+    const image = isImageEvent(event);
+    if (!image) return;
+    const now = Date.now();
+    if (now - lastOpenedAt < 260) return;
+    lastOpenedAt = now;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    const src = getImageSource(image);
+    if (src) {
+      onOpen({ src, name: getImageName(image) });
+    }
+  };
+
+  const bindImage = (image: Element) => {
+    if (boundImages.has(image)) return;
+    boundImages.add(image);
+    image.addEventListener('pointerdown', stopImagePointer, true);
+    image.addEventListener('pointerup', openFromEvent, true);
+    image.addEventListener('mousedown', stopImagePointer, true);
+    image.addEventListener('mouseup', openFromEvent, true);
+    image.addEventListener('touchend', openFromEvent, { capture: true, passive: false });
+    image.addEventListener('click', openFromEvent, true);
+  };
+
+  const bindImages = () => {
+    doc.querySelectorAll('img, svg image').forEach(bindImage);
+  };
+
+  bindImages();
+  const observer = new MutationObserver(bindImages);
+  observer.observe(doc.documentElement, { childList: true, subtree: true });
+
+  doc.addEventListener('contextmenu', (event) => event.stopPropagation(), true);
+  doc.addEventListener('pointerdown', stopImagePointer, true);
+  doc.addEventListener('pointerup', openFromEvent, true);
+  doc.addEventListener('mousedown', stopImagePointer, true);
+  doc.addEventListener('mouseup', openFromEvent, true);
+  doc.addEventListener('touchend', openFromEvent, { capture: true, passive: false });
+  doc.addEventListener('click', openFromEvent, true);
+  wnd.addEventListener('click', openFromEvent, true);
+}
+
+function handleReadiumClick(event: ReadiumFrameClickEvent, onOpen: (image: { src: string; name: string }) => void) {
+  const image = imageFromInteractiveElement(event.interactiveElement);
+  if (!image) return false;
+  onOpen(image);
+  return true;
+}
+
+function imageFromInteractiveElement(value?: string) {
+  if (!value || (!value.includes('<img') && !value.includes('<image'))) return null;
+  const doc = new DOMParser().parseFromString(value, 'text/html');
+  const image = doc.querySelector('img, svg image');
+  const src = image ? getImageSource(image) : '';
+  if (!src) return null;
+  return {
+    src,
+    name: image ? getImageName(image) : 'image',
+  };
+}
+
+function getImageSource(image: Element) {
+  const tagName = image.tagName.toLowerCase();
+  if (tagName === 'img') {
+    return image.getAttribute('currentSrc') || (image as HTMLImageElement).currentSrc || image.getAttribute('src') || (image as HTMLImageElement).src || '';
+  }
+  return image.getAttribute('href') || image.getAttribute('xlink:href') || image.getAttributeNS('http://www.w3.org/1999/xlink', 'href') || '';
+}
+
+function getImageName(image: Element) {
+  const tagName = image.tagName.toLowerCase();
+  if (tagName === 'img') {
+    return image.getAttribute('alt') || image.getAttribute('title') || image.getAttribute('aria-label') || 'image';
+  }
+  return image.getAttribute('aria-label') || image.getAttribute('title') || 'image';
+}
+
+function formatProgressLabel(progress: number) {
+  return `${Math.max(0, Math.min(100, Math.round(progress * 100)))}%`;
+}
+
+function installReadiumFrameStyles(doc: Document) {
+  if (!doc?.head || doc.getElementById('zenith-readium-frame-style')) return;
+  const style = doc.createElement('style');
+  style.id = 'zenith-readium-frame-style';
+  style.textContent = `
+    :root {
+      -webkit-column-gap: var(--RS__colGap, 0px) !important;
+      -moz-column-gap: var(--RS__colGap, 0px) !important;
+      column-gap: var(--RS__colGap, 0px) !important;
+    }
+
+    :root:not([style*="readium-scroll-on"]) body {
+      padding-block-start: 0 !important;
+      padding-inline-end: 0 !important;
+      padding-block-end: 0 !important;
+      padding-inline-start: 0 !important;
+    }
+
+    img {
+      border-radius: 5px !important;
+      cursor: zoom-in !important;
+      display: block;
+      height: auto;
+      max-width: 100%;
+      object-fit: contain;
+    }
+
+    body > img,
+    body > picture,
+    body > svg {
+      margin-inline: auto !important;
+    }
+
+    body:has(img):not(:has(p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote)) {
+      align-items: center !important;
+      box-sizing: border-box !important;
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 28px !important;
+      justify-content: center !important;
+      min-height: 100vh !important;
+      padding: 24px !important;
+    }
+
+    body:has(img):not(:has(p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote)) img {
+      margin: 0 auto !important;
+      max-height: calc(100vh - 48px) !important;
+      width: auto !important;
+    }
+
+    body:has(img):not(:has(p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote)) > *,
+    body:has(img):not(:has(p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote)) :is(div, section, figure) {
+      align-items: center !important;
+      box-sizing: border-box !important;
+      display: flex !important;
+      flex-wrap: wrap !important;
+      gap: 28px !important;
+      justify-content: center !important;
+      margin-inline: auto !important;
+      max-width: 100% !important;
+    }
+  `;
+  doc.head.appendChild(style);
+}
+
+function revealReadiumFrames(container: HTMLElement | null) {
+  container?.querySelectorAll('iframe.readium-navigator-iframe').forEach((frame) => {
+    const iframe = frame as HTMLIFrameElement;
+    iframe.style.removeProperty('visibility');
+    iframe.style.removeProperty('opacity');
+    iframe.style.removeProperty('pointer-events');
+    iframe.removeAttribute('aria-hidden');
+  });
+}

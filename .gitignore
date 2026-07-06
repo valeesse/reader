@@ -1,0 +1,12 @@
+node_modules/
+build/
+dist/
+coverage/
+src-tauri/target/
+.vite/
+.turbo/
+.DS_Store
+Thumbs.db
+*.log
+.env*
+!.env.example
