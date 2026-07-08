@@ -3,6 +3,7 @@ import { useAppContext } from './store/AppStore';
 import { Book } from './types';
 import { BookOpen, GitMerge, Layers, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { BookCover } from './components/BookCover';
+import { sortBooksInSeries } from './lib/series';
 
 export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void }) {
   const { series, books, createSeries, updateSeries, deleteSeries, autoCreateMetadataSeries, mergeSeries } = useAppContext();
@@ -70,6 +71,20 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
     }
   };
 
+  const mergeSourceIdFor = (event: React.DragEvent) => {
+    return event.dataTransfer.getData('text/plain') || draggingSeriesId;
+  };
+
+  const canAcceptMerge = (sourceId: string | undefined, targetId: string) => {
+    return Boolean(sourceId) && sourceId !== targetId;
+  };
+
+  const handleMergeDrop = async (sourceId: string | undefined, targetId: string) => {
+    setDraggingSeriesId(undefined);
+    if (!canAcceptMerge(sourceId, targetId)) return;
+    await mergeSeries(sourceId!, targetId);
+  };
+
   return (
     <div className="flex-1 flex flex-col relative bg-white/70 dark:bg-[#121212]/70">
       <header className="h-14 border-b border-black/5 dark:border-white/5 flex items-center justify-between px-8 bg-white/80 dark:bg-[#121212]/80 backdrop-blur-md sticky top-0 z-10">
@@ -107,46 +122,54 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
             </div>
           ) : (
             series.map((item) => {
-              const seriesBooks = item.bookIds
-                .map((bookId) => books.find((book) => book.id === bookId))
-                .filter((book): book is Book => Boolean(book));
+              const seriesBooks = sortBooksInSeries(
+                item.bookIds
+                  .map((bookId) => books.find((book) => book.id === bookId))
+                  .filter((book): book is Book => Boolean(book)),
+              );
               const isDropTarget = draggingSeriesId && draggingSeriesId !== item.id;
 
               return (
                 <section
                   key={item.id}
                   draggable
+                  className={`relative rounded-[5px] bg-[#F2F2F7]/80 dark:bg-[#1C1C1E]/80 border p-5 shadow-sm transition-colors ${
+                    isDropTarget
+                      ? 'border-[#007AFF]/60 bg-[#007AFF]/8'
+                      : 'border-black/5 dark:border-white/5'
+                  }`}
                   onDragStart={(event) => {
                     setDraggingSeriesId(item.id);
                     event.dataTransfer.setData('text/plain', item.id);
                     event.dataTransfer.effectAllowed = 'move';
                   }}
                   onDragEnd={() => setDraggingSeriesId(undefined)}
-                  onDragOver={(event) => {
-                    if (!isDropTarget) return;
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = 'move';
-                  }}
-                  onDrop={async (event) => {
-                    event.preventDefault();
-                    const sourceId = event.dataTransfer.getData('text/plain') || draggingSeriesId;
-                    setDraggingSeriesId(undefined);
-                    if (sourceId && sourceId !== item.id) {
-                      await mergeSeries(sourceId, item.id);
-                    }
-                  }}
-                  className={`rounded-[5px] bg-[#F2F2F7]/80 dark:bg-[#1C1C1E]/80 border p-5 shadow-sm transition-colors ${
-                    isDropTarget
-                      ? 'border-[#007AFF]/60 bg-[#007AFF]/8'
-                      : 'border-black/5 dark:border-white/5'
-                  }`}
                 >
+                  {isDropTarget && (
+                    <div
+                      className="absolute inset-0 z-10 rounded-[5px] border-2 border-dashed border-[#007AFF]/70 bg-[#007AFF]/8"
+                      onDragEnter={(event) => {
+                        if (!canAcceptMerge(mergeSourceIdFor(event), item.id)) return;
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = 'move';
+                      }}
+                      onDragOver={(event) => {
+                        if (!canAcceptMerge(mergeSourceIdFor(event), item.id)) return;
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = 'move';
+                      }}
+                      onDrop={async (event) => {
+                        event.preventDefault();
+                        await handleMergeDrop(mergeSourceIdFor(event), item.id);
+                      }}
+                    />
+                  )}
                   <div className="flex items-start justify-between gap-4">
-                    <div>
+                    <div className="relative z-20">
                       <h3 className="font-semibold text-lg text-[#1C1C1E] dark:text-white">{item.name}</h3>
                       <p className="text-sm text-black/50 dark:text-white/50">{seriesBooks.length} 本书籍</p>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="relative z-20 flex gap-2">
                       {isDropTarget && (
                         <div className="flex h-8 items-center gap-1 rounded-[5px] bg-[#007AFF]/10 px-2 text-xs text-[#007AFF]">
                           <GitMerge className="h-3.5 w-3.5" />
@@ -168,7 +191,7 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
                       </button>
                     </div>
                   </div>
-                  <div className="mt-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div className="relative z-20 mt-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
                     {seriesBooks.map((book, index) => (
                       <button
                         key={book.id}

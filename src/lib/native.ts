@@ -2,7 +2,7 @@ import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AppSettings, Book } from '../types';
+import { AppSettings, Book, WebDavBook } from '../types';
 
 type NativeBook = Book;
 
@@ -196,4 +196,28 @@ export async function uploadWebDavSnapshot(
 
 export async function downloadWebDavSnapshot(config: AppSettings['webDavConfig']) {
   return invoke<string | null>('webdav_download_snapshot', { config });
+}
+
+export async function listWebDavBooks(config: AppSettings['webDavConfig']) {
+  return invoke<WebDavBook[]>('webdav_list_books', { config });
+}
+
+export async function cacheWebDavBook(
+  config: AppSettings['webDavConfig'],
+  remotePath: string,
+) {
+  return invoke<string>('webdav_cache_book', { config, remotePath });
+}
+
+export async function downloadWebDavBook(
+  config: AppSettings['webDavConfig'],
+  remotePath: string,
+  suggestedName: string,
+) {
+  const targetPath = await save({
+    title: '下载 WebDAV 图书',
+    defaultPath: suggestedName,
+  });
+  if (!targetPath) return;
+  await invoke('webdav_download_book_to_path', { config, remotePath, targetPath });
 }

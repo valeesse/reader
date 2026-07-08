@@ -1,12 +1,12 @@
 use base64::{Engine as _, engine::general_purpose};
 use encoding_rs::{GBK, UTF_8};
 use percent_encoding::percent_decode_str;
-use reqwest::StatusCode;
+use reqwest::{Method, StatusCode, Url};
 use roxmltree::Document;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fs::{self, File},
     io::Read,
     path::{Path, PathBuf},
@@ -23,7 +23,6 @@ const EPUB_BOOK_CACHE_LIMIT: usize = 5;
 const EPUB_RESOURCE_CACHE_LIMIT: usize = 96;
 const PERSISTENT_CACHE_VERSION: u8 = 2;
 const TXT_PERSISTENT_CACHE_MAX_BYTES: u64 = 80 * 1024 * 1024;
-const TRANSPARENT_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/luzcLwAAAABJRU5ErkJggg==";
 
 #[derive(Default)]
 struct ReaderState {
@@ -160,6 +159,32 @@ struct WebDavConfig {
     url: String,
     username: String,
     password: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WebDavBook {
+    id: String,
+    title: String,
+    author: String,
+    #[serde(rename = "type")]
+    book_type: String,
+    path: String,
+    file_name: String,
+    added_at: u64,
+    source: String,
+    remote_path: String,
+    size: Option<u64>,
+    modified_at: Option<u64>,
+}
+
+#[derive(Debug)]
+struct WebDavEntry {
+    remote_path: String,
+    file_name: String,
+    is_dir: bool,
+    size: Option<u64>,
+    modified_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -454,16 +479,7 @@ fn read_epub_resource(
     href: String,
 ) -> Result<EpubResourcePayload, String> {
     let normalized_href = strip_fragment(&normalize_zip_path(&href));
-    let resource = match read_cached_epub_resource(&state, &path, &href) {
-        Ok(resource) => resource,
-        Err(error) if is_probably_bitmap_href(&normalized_href) => {
-            eprintln!(
-                "EPUB missing bitmap resource, using transparent placeholder: path={path}, href={normalized_href}, error={error}"
-            );
-            missing_bitmap_placeholder()
-        }
-        Err(error) => return Err(error),
-    };
+    let resource = read_cached_epub_resource(&state, &path, &href)?;
     if is_epub_text_resource(&resource.media_type) {
         let (text, _, _) = UTF_8.decode(&resource.bytes);
         Ok(EpubResourcePayload {
@@ -583,6 +599,87 @@ async fn webdav_download_snapshot(config: WebDavConfig) -> Result<Option<String>
         .await
         .map(Some)
         .map_err(|err| format!("WebDAV 响应解析失败: {err}"))
+}
+
+#[tauri::command]
+async fn webdav_list_books(config: WebDavConfig) -> Result<Vec<WebDavBook>, String> {
+    let client = reqwest::Client::new();
+    let base_url = webdav_base_url(&config)?;
+    let mut pending = VecDeque::from([base_url.clone()]);
+    let mut visited = HashSet::new();
+    let mut books = Vec::new();
+
+    while let Some(current_url) = pending.pop_front() {
+        let current_key = current_url.as_str().to_string();
+        if !visited.insert(current_key) {
+            continue;
+        }
+
+        let entries = webdav_list_directory(&client, &config, &base_url, &current_url).await?;
+        for entry in entries {
+            if entry.is_dir {
+                if let Ok(child_url) = webdav_url_for_remote_path(&config, &entry.remote_path) {
+                    pending.push_back(child_url);
+                }
+                continue;
+            }
+
+            let extension = Path::new(&entry.file_name)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if extension != "epub" && extension != "txt" {
+                continue;
+            }
+
+            let (title, author) = parse_filename_metadata_str(&entry.file_name);
+            books.push(WebDavBook {
+                id: stable_remote_book_id(&entry.remote_path),
+                title,
+                author,
+                book_type: extension,
+                path: entry.remote_path.clone(),
+                file_name: entry.file_name,
+                added_at: entry.modified_at.unwrap_or_else(now_millis),
+                source: "webdav".to_string(),
+                remote_path: entry.remote_path,
+                size: entry.size,
+                modified_at: entry.modified_at,
+            });
+        }
+    }
+
+    books.sort_by(|a, b| a.remote_path.cmp(&b.remote_path));
+    Ok(books)
+}
+
+#[tauri::command]
+async fn webdav_cache_book(
+    app: AppHandle,
+    config: WebDavConfig,
+    remote_path: String,
+) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let bytes = webdav_download_file_bytes(&client, &config, &remote_path).await?;
+    let target_path = webdav_cached_book_path(&app, &remote_path)?;
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| format!("创建缓存目录失败: {err}"))?;
+    }
+    fs::write(&target_path, bytes).map_err(|err| format!("写入缓存文件失败: {err}"))?;
+    Ok(target_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn webdav_download_book_to_path(
+    config: WebDavConfig,
+    remote_path: String,
+    target_path: String,
+) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let bytes = webdav_download_file_bytes(&client, &config, &remote_path).await?;
+    fs::write(&target_path, bytes).map_err(|err| format!("保存下载文件失败: {err}"))?;
+    Ok(())
 }
 
 fn decode_txt_to_utf8(bytes: &[u8]) -> (String, String) {
@@ -1241,10 +1338,6 @@ fn read_zip_bytes_flexible(
         return Ok((candidate, bytes));
     }
 
-    eprintln!(
-        "EPUB resource lookup failed: requested={path}, normalized={normalized}, file_name={}",
-        file_name_lower.unwrap_or_default()
-    );
     Err(format!("EPUB 缺少资源: {path}"))
 }
 
@@ -1273,27 +1366,6 @@ fn is_epub_text_resource(media_type: &str) -> bool {
                 | "application/json"
                 | "image/svg+xml"
         )
-}
-
-fn is_probably_bitmap_href(href: &str) -> bool {
-    matches!(
-        strip_fragment(href)
-            .rsplit('.')
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-        "jpg" | "jpeg" | "png" | "gif" | "webp" | "avif"
-    )
-}
-
-fn missing_bitmap_placeholder() -> EpubCachedResource {
-    EpubCachedResource {
-        bytes: general_purpose::STANDARD
-            .decode(TRANSPARENT_PNG_BASE64)
-            .unwrap_or_default(),
-        media_type: "image/png".to_string(),
-    }
 }
 
 fn parse_epub_metadata(
@@ -1531,10 +1603,24 @@ fn resolve_epub_path(opf_path: &str, href: &str) -> String {
 
 fn parse_filename_metadata(path: &Path) -> (String, String) {
     let stem = fallback_title(path);
+    parse_filename_metadata_from_stem(&stem)
+}
+
+fn parse_filename_metadata_str(file_name: &str) -> (String, String) {
+    let stem = Path::new(file_name)
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or(file_name)
+        .trim()
+        .to_string();
+    parse_filename_metadata_from_stem(&stem)
+}
+
+fn parse_filename_metadata_from_stem(stem: &str) -> (String, String) {
     if let Some((author, title)) = stem.split_once(" - ") {
         return (title.trim().to_string(), author.trim().to_string());
     }
-    (stem, "Unknown Author".to_string())
+    (stem.to_string(), "Unknown Author".to_string())
 }
 
 fn fallback_title(path: &Path) -> String {
@@ -1555,6 +1641,10 @@ fn stable_book_id(path: &Path) -> String {
             .iter()
             .fold(0u64, |acc, byte| (acc << 8) | u64::from(*byte))
     )
+}
+
+fn stable_remote_book_id(remote_path: &str) -> String {
+    format!("webdav-{}", hash_string(remote_path))
 }
 
 fn now_millis() -> u64 {
@@ -1683,6 +1773,192 @@ fn hash_string(value: &str) -> String {
         .collect()
 }
 
+async fn webdav_list_directory(
+    client: &reqwest::Client,
+    config: &WebDavConfig,
+    base_url: &Url,
+    directory_url: &Url,
+) -> Result<Vec<WebDavEntry>, String> {
+    let response = client
+        .request(Method::from_bytes(b"PROPFIND").map_err(|err| err.to_string())?, directory_url.clone())
+        .basic_auth(&config.username, config.password.clone())
+        .header("depth", "1")
+        .header("content-type", "application/xml; charset=utf-8")
+        .body(
+            r#"<?xml version="1.0" encoding="utf-8" ?>
+<propfind xmlns="DAV:">
+  <prop>
+    <displayname />
+    <getcontentlength />
+    <getlastmodified />
+    <resourcetype />
+  </prop>
+</propfind>"#,
+        )
+        .send()
+        .await
+        .map_err(|err| format!("WebDAV 目录读取失败: {err}"))?;
+
+    if !response.status().is_success() && response.status().as_u16() != 207 {
+        return Err(format!("WebDAV 目录读取失败，服务器返回 {}", response.status()));
+    }
+
+    let body = response
+        .text()
+        .await
+        .map_err(|err| format!("WebDAV 目录响应解析失败: {err}"))?;
+    parse_webdav_multistatus(base_url, directory_url, &body)
+}
+
+fn parse_webdav_multistatus(
+    base_url: &Url,
+    directory_url: &Url,
+    xml: &str,
+) -> Result<Vec<WebDavEntry>, String> {
+    let doc = Document::parse(xml).map_err(|err| format!("WebDAV XML 解析失败: {err}"))?;
+    let directory_href = directory_url.path().trim_end_matches('/').to_string();
+    let mut entries = Vec::new();
+
+    for response in doc
+        .descendants()
+        .filter(|node| node.tag_name().name() == "response")
+    {
+        let href_value = response
+            .children()
+            .find(|node| node.tag_name().name() == "href")
+            .and_then(|node| node.text())
+            .map(str::trim)
+            .unwrap_or_default();
+        if href_value.is_empty() {
+            continue;
+        }
+
+        let Ok(absolute_url) = base_url.join(href_value) else {
+            continue;
+        };
+        let absolute_path = absolute_url.path().trim_end_matches('/').to_string();
+        if absolute_path == directory_href {
+            continue;
+        }
+
+        let prop = response
+            .descendants()
+            .find(|node| node.tag_name().name() == "prop");
+        let is_dir = prop
+            .and_then(|node| {
+                node.children()
+                    .find(|child| child.tag_name().name() == "resourcetype")
+            })
+            .map(|node| {
+                node.children()
+                    .any(|child| child.tag_name().name() == "collection")
+            })
+            .unwrap_or(false);
+        let remote_path = webdav_remote_path_from_url(base_url, &absolute_url)?;
+        let file_name = remote_path
+            .rsplit('/')
+            .next()
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| href_value.trim_end_matches('/').rsplit('/').next().unwrap_or("untitled"))
+            .to_string();
+        let size = prop
+            .and_then(|node| {
+                node.children()
+                    .find(|child| child.tag_name().name() == "getcontentlength")
+            })
+            .and_then(|node| node.text())
+            .and_then(|value| value.trim().parse::<u64>().ok());
+
+        entries.push(WebDavEntry {
+            remote_path,
+            file_name,
+            is_dir,
+            size,
+            modified_at: None,
+        });
+    }
+
+    Ok(entries)
+}
+
+async fn webdav_download_file_bytes(
+    client: &reqwest::Client,
+    config: &WebDavConfig,
+    remote_path: &str,
+) -> Result<Vec<u8>, String> {
+    let target = webdav_url_for_remote_path(config, remote_path)?;
+    let response = client
+        .get(target)
+        .basic_auth(&config.username, config.password.clone())
+        .send()
+        .await
+        .map_err(|err| format!("WebDAV 文件下载失败: {err}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("WebDAV 文件下载失败，服务器返回 {}", response.status()));
+    }
+
+    response
+        .bytes()
+        .await
+        .map(|bytes| bytes.to_vec())
+        .map_err(|err| format!("WebDAV 文件读取失败: {err}"))
+}
+
+fn webdav_base_url(config: &WebDavConfig) -> Result<Url, String> {
+    let base = config.url.trim();
+    if base.is_empty() {
+        return Err("请填写 WebDAV 地址".into());
+    }
+    let with_trailing_slash = if base.ends_with('/') {
+        base.to_string()
+    } else {
+        format!("{base}/")
+    };
+    Url::parse(&with_trailing_slash).map_err(|err| format!("WebDAV 地址无效: {err}"))
+}
+
+fn webdav_url_for_remote_path(config: &WebDavConfig, remote_path: &str) -> Result<Url, String> {
+    let mut url = webdav_base_url(config)?;
+    {
+        let mut segments = url
+            .path_segments_mut()
+            .map_err(|_| "WebDAV 地址不支持路径拼接".to_string())?;
+        segments.pop_if_empty();
+        for segment in remote_path.split('/').filter(|segment| !segment.is_empty()) {
+            segments.push(segment);
+        }
+    }
+    Ok(url)
+}
+
+fn webdav_remote_path_from_url(base_url: &Url, absolute_url: &Url) -> Result<String, String> {
+    let base_path = base_url.path().trim_end_matches('/');
+    let absolute_path = absolute_url.path();
+    if !absolute_path.starts_with(base_path) {
+        return Err("WebDAV 返回了不在当前目录下的路径".into());
+    }
+    let relative = absolute_path
+        .trim_start_matches(base_path)
+        .trim_start_matches('/');
+    Ok(percent_decode_str(relative).decode_utf8_lossy().to_string())
+}
+
+fn webdav_cached_book_path(app: &AppHandle, remote_path: &str) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|err| err.to_string())?
+        .join("webdav-books");
+    fs::create_dir_all(&dir).map_err(|err| format!("创建 WebDAV 图书缓存失败: {err}"))?;
+    let extension = Path::new(remote_path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .filter(|ext| !ext.is_empty())
+        .unwrap_or("book");
+    Ok(dir.join(format!("{}.{}", hash_string(remote_path), extension)))
+}
+
 fn trim_txt_cache(books: &mut HashMap<String, TxtBookCache>) {
     while books.len() > TXT_BOOK_CACHE_LIMIT {
         let Some(path) = books
@@ -1712,14 +1988,15 @@ fn trim_epub_cache(books: &mut HashMap<String, EpubBookCache>) {
 }
 
 fn webdav_state_url(config: &WebDavConfig) -> Result<String, String> {
-    let base = config.url.trim();
-    if base.is_empty() {
-        return Err("请填写 WebDAV 地址".into());
+    let mut url = webdav_base_url(config)?;
+    {
+        let mut segments = url
+            .path_segments_mut()
+            .map_err(|_| "WebDAV 地址不支持状态文件路径".to_string())?;
+        segments.pop_if_empty();
+        segments.push("zenith-reader-state.json");
     }
-    Ok(format!(
-        "{}/zenith-reader-state.json",
-        base.trim_end_matches('/')
-    ))
+    Ok(url.to_string())
 }
 
 pub fn run() {
@@ -1737,7 +2014,10 @@ pub fn run() {
             close_epub_book,
             write_binary_file,
             webdav_upload_snapshot,
-            webdav_download_snapshot
+            webdav_download_snapshot,
+            webdav_list_books,
+            webdav_cache_book,
+            webdav_download_book_to_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

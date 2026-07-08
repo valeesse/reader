@@ -1,11 +1,11 @@
 import React from 'react';
-import { Book as BookIcon, Folder, Settings as SettingsIcon, BookOpen, Layers } from 'lucide-react';
+import { Book as BookIcon, Cloud, Settings as SettingsIcon, BookOpen, Layers } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useAppContext } from '../store/AppStore';
 
 interface SidebarProps {
-  currentView: 'library' | 'series' | 'settings';
-  onChangeView: (view: 'library' | 'series' | 'settings') => void;
+  currentView: 'library' | 'webdav' | 'series' | 'settings';
+  onChangeView: (view: 'library' | 'webdav' | 'series' | 'settings') => void;
 }
 
 export function Sidebar({ currentView, onChangeView }: SidebarProps) {
@@ -40,6 +40,19 @@ export function Sidebar({ currentView, onChangeView }: SidebarProps) {
             "ml-auto py-0.5 px-2 rounded-full text-xs font-mono",
             currentView === 'library' ? "bg-black/20" : "bg-black/5 dark:bg-white/10"
           )}>{books.length}</span>
+        </button>
+
+        <button
+          onClick={() => onChangeView('webdav')}
+          className={cn(
+            "w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg font-medium transition-colors",
+            currentView === 'webdav'
+              ? "bg-[#007AFF] text-white shadow-sm"
+              : "text-black/70 dark:text-white/70 hover:bg-black/5 dark:hover:bg-white/5"
+          )}
+        >
+          <Cloud className="w-4 h-4" />
+          WebDAV
         </button>
         
         <button

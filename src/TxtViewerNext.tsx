@@ -40,6 +40,7 @@ export function TxtViewerNext({
   const [loading, setLoading] = useState(true);
   const [layoutReady, setLayoutReady] = useState(false);
   const [pageMetrics, setPageMetrics] = useState<PageMetrics>({ pageWidth: 0, pageStep: 1, spreadCount: 1 });
+  const [pageCounter, setPageCounter] = useState('');
 
   const contentRef = useRef<HTMLDivElement>(null);
   const flowRef = useRef<HTMLDivElement>(null);
@@ -233,6 +234,9 @@ export function TxtViewerNext({
     const totalChars = totalCharsRef.current;
     const progress = totalChars > 0 ? clamp(anchor / totalChars, 0, 1) : 0;
     onProgressChange(progress);
+    const estimatedPages = estimateTotalPages();
+    const currentPage = Math.max(1, Math.min(estimatedPages, Math.round(progress * (estimatedPages - 1)) + 1));
+    setPageCounter(`${currentPage} / ${estimatedPages}`);
   };
 
   const persistProgress = (scrollPercentage: number) => {
@@ -279,6 +283,12 @@ export function TxtViewerNext({
 
     const pages = element ? Math.max(1, element.scrollHeight / Math.max(1, element.clientHeight)) : 1;
     return Math.max(500, Math.min(9000, Math.round((rangeLength / pages) * pagesPerSpread)));
+  };
+
+  const estimateTotalPages = () => {
+    const totalChars = totalCharsRef.current;
+    const charsPerSpread = Math.max(1, estimateCharsPerSpread());
+    return Math.max(1, Math.ceil(totalChars / charsPerSpread));
   };
 
   const rangeForAnchor = (anchor: number, totalChars = totalCharsRef.current) => {
@@ -637,6 +647,11 @@ export function TxtViewerNext({
       {!layoutReady && !textWindow.text && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-inherit">
           <LoaderCircle className="h-7 w-7 animate-spin text-[#007AFF]" />
+        </div>
+      )}
+      {pageCounter && (
+        <div className="absolute bottom-5 right-5 z-30 rounded-[5px] border border-black/10 bg-white/78 px-3 py-1.5 text-[11px] font-medium text-black/60 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-[#1C1C1E]/78 dark:text-white/60">
+          {pageCounter}
         </div>
       )}
     </div>

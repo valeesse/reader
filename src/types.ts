@@ -1,4 +1,5 @@
 export type BookType = 'epub' | 'txt';
+export type BookSource = 'local' | 'webdav';
 
 export interface Book {
   id: string;
@@ -12,6 +13,8 @@ export interface Book {
   seriesIndex?: number;
   seriesId?: string;
   addedAt: number;
+  source?: BookSource;
+  remotePath?: string;
 }
 
 export interface Series {
@@ -66,6 +69,20 @@ export interface SyncSnapshot {
   progress: ReadingProgress[];
   lastReadBookId?: string;
   updatedAt: number;
+}
+
+export interface WebDavBook {
+  id: string;
+  title: string;
+  author: string;
+  type: BookType;
+  path: string;
+  fileName: string;
+  addedAt: number;
+  source: 'webdav';
+  remotePath: string;
+  size?: number;
+  modifiedAt?: number;
 }
 
 export const defaultSettings: AppSettings = {

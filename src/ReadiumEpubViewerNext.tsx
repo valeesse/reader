@@ -40,6 +40,7 @@ export function ReadiumEpubViewerNext({
   const { settings } = useAppContext();
   const [loading, setLoading] = useState(true);
   const [pageLabel, setPageLabel] = useState('');
+  const [pageCounter, setPageCounter] = useState('');
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
   const [savingImage, setSavingImage] = useState(false);
   const [saveStatus, setSaveStatus] = useState('');
@@ -156,6 +157,7 @@ export function ReadiumEpubViewerNext({
               if (Math.abs(progress - lastEmittedProgressRef.current) >= 0.001) {
                 lastEmittedProgressRef.current = progress;
                 setPageLabel(formatProgressLabel(progress));
+                setPageCounter(formatPageCounter(progress, publication.positions.length));
                 onProgressChangeRef.current(progress);
               }
               queueProgressSave(locator);
@@ -387,6 +389,12 @@ export function ReadiumEpubViewerNext({
       {pageLabel && (
         <div className={`absolute bottom-8 left-1/2 z-30 -translate-x-1/2 rounded-[5px] border border-black/10 bg-white/70 px-3 py-1.5 text-[11px] font-medium text-black/55 shadow-sm backdrop-blur-xl transition-opacity dark:border-white/10 dark:bg-[#1C1C1E]/70 dark:text-white/55 ${chromeVisible ? 'opacity-100' : 'opacity-0'}`}>
           {pageLabel}
+        </div>
+      )}
+
+      {pageCounter && (
+        <div className="absolute bottom-5 right-5 z-30 rounded-[5px] border border-black/10 bg-white/78 px-3 py-1.5 text-[11px] font-medium text-black/60 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-[#1C1C1E]/78 dark:text-white/60">
+          {pageCounter}
         </div>
       )}
 
@@ -694,6 +702,12 @@ function getImageName(image: Element) {
 
 function formatProgressLabel(progress: number) {
   return `${Math.max(0, Math.min(100, Math.round(progress * 100)))}%`;
+}
+
+function formatPageCounter(progress: number, totalPages: number) {
+  const safeTotal = Math.max(1, totalPages);
+  const current = Math.max(1, Math.min(safeTotal, Math.round(progress * (safeTotal - 1)) + 1));
+  return `${current} / ${safeTotal}`;
 }
 
 function installReadiumFrameStyles(doc: Document) {

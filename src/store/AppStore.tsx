@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import { Book, Series, AppSettings, ReadingProgress, defaultSettings } from '../types';
+import { inferBookSeries, sortBooksInSeries } from '../lib/series';
 import {
   getAllProgress,
   getBooks,
@@ -249,13 +250,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 }
 
 function createMetadataSeries(books: Book[], existingSeries: Series[]) {
-  const seriesByName = new Map(existingSeries.map((item) => [item.name.trim().toLocaleLowerCase(), { ...item }]));
   const grouped = new Map<string, Array<{ book: Book; seriesName: string; seriesIndex?: number; inferred: boolean }>>();
 
   for (const book of books) {
+    const inferredSeries = inferBookSeries(book);
     const metadataSeriesName = book.seriesName?.trim();
-    const inferredSeries = metadataSeriesName ? undefined : inferBookSeries(book);
-    const seriesName = metadataSeriesName || inferredSeries?.name;
+    const seriesName = inferredSeries?.name || metadataSeriesName;
     if (!seriesName) continue;
     const key = seriesName.toLocaleLowerCase();
     grouped.set(key, [
@@ -263,8 +263,8 @@ function createMetadataSeries(books: Book[], existingSeries: Series[]) {
       {
         book,
         seriesName,
-        seriesIndex: book.seriesIndex ?? inferredSeries?.index,
-        inferred: !metadataSeriesName,
+        seriesIndex: inferredSeries?.index ?? book.seriesIndex,
+        inferred: Boolean(inferredSeries),
       },
     ]);
   }
@@ -273,8 +273,17 @@ function createMetadataSeries(books: Book[], existingSeries: Series[]) {
     return { books, series: existingSeries, stats: emptyAutoCreateSeriesResult() };
   }
 
+  const groupedBookIds = new Set(
+    Array.from(grouped.values()).flatMap((items) => items.map(({ book }) => book.id)),
+  );
+  const nextSeries = existingSeries
+    .map((item) => ({
+      ...item,
+      bookIds: item.bookIds.filter((bookId) => !groupedBookIds.has(bookId)),
+    }))
+    .filter((item) => item.bookIds.length > 0);
+  const seriesByName = new Map(nextSeries.map((item) => [item.name.trim().toLocaleLowerCase(), { ...item }]));
   const bookSeriesMap = new Map<string, string>();
-  const nextSeries = [...existingSeries];
   let createdCount = 0;
   let updatedCount = 0;
   let eligibleGroups = 0;
@@ -285,14 +294,10 @@ function createMetadataSeries(books: Book[], existingSeries: Series[]) {
     eligibleGroups += 1;
 
     const displayName = groupedBooks[0].seriesName;
-    const orderedIds = [...groupedBooks]
-      .sort((a, b) => {
-        const indexA = a.seriesIndex ?? Number.MAX_SAFE_INTEGER;
-        const indexB = b.seriesIndex ?? Number.MAX_SAFE_INTEGER;
-        if (indexA !== indexB) return indexA - indexB;
-        return (a.book.fileName || a.book.title).localeCompare(b.book.fileName || b.book.title, 'zh-Hans-CN');
-      })
-      .map(({ book }) => book.id);
+    const orderedIds = sortBooksInSeries(groupedBooks.map(({ book, seriesIndex }) => ({
+      ...book,
+      seriesIndex: seriesIndex ?? book.seriesIndex,
+    }))).map((book) => book.id);
 
     const existing = seriesByName.get(key);
     if (existing) {
@@ -321,7 +326,11 @@ function createMetadataSeries(books: Book[], existingSeries: Series[]) {
   return {
     books: books.map((book) => {
       const seriesId = bookSeriesMap.get(book.id);
-      return seriesId ? { ...book, seriesId } : book;
+      if (seriesId) return { ...book, seriesId };
+      if (groupedBookIds.has(book.id) && book.seriesId) {
+        return { ...book, seriesId: undefined };
+      }
+      return book;
     }),
     series: nextSeries,
     stats: {
@@ -338,28 +347,6 @@ function emptyAutoCreateSeriesResult(): AutoCreateSeriesResult {
     updatedCount: 0,
     eligibleGroups: 0,
   };
-}
-
-function inferBookSeries(book: Book): { name: string; index: number } | undefined {
-  const baseName = (book.fileName || book.title)
-    .replace(/\.[a-z0-9]+$/i, '')
-    .replace(/[［【（(][^］】）)]*[］】）)]\s*$/g, '')
-    .trim();
-  const patterns = [
-    /^(.*?)(?:第\s*)?(\d+(?:\.\d+)?)\s*(?:卷|巻|册|冊|集|话|話|部|册目)?\s*$/u,
-    /^(.*?)[\s._-]+(?:vol(?:ume)?\.?\s*)?(\d+(?:\.\d+)?)\s*$/iu,
-  ];
-
-  for (const pattern of patterns) {
-    const match = baseName.match(pattern);
-    if (!match) continue;
-    const name = match[1].replace(/[\s._-]+$/g, '').trim();
-    const index = Number(match[2]);
-    if (name.length < 2 || !Number.isFinite(index)) continue;
-    return { name, index };
-  }
-
-  return undefined;
 }
 
 export function useAppContext() {

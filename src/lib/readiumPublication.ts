@@ -314,10 +314,7 @@ class EpubResourceManager {
     const normalized = stripHash(normalizeZipPath(href));
     const existing = this.payloads.get(normalized);
     if (existing) return existing;
-    const payload = readEpubResource(this.path, normalized).catch((error) => {
-      console.warn('Failed to read EPUB resource', { bookPath: this.path, href: normalized, error });
-      throw error;
-    });
+    const payload = readEpubResource(this.path, normalized);
     this.payloads.set(normalized, payload);
     return payload;
   }
@@ -380,7 +377,11 @@ class EpubResourceManager {
       } else {
         const [pathPart, suffix = ''] = rawUrl.split(/(?=[?#])/);
         const resolved = resolveZipPath(baseDir, pathPart);
-        parts.push(`url(${quote}${await this.blobUrlFor(resolved)}${suffix}${quote})`);
+        try {
+          parts.push(`url(${quote}${await this.blobUrlFor(resolved)}${suffix}${quote})`);
+        } catch {
+          parts.push(match[0]);
+        }
       }
       lastIndex = regex.lastIndex;
     }
@@ -501,7 +502,9 @@ async function rewriteElementUrl(element: Element, attribute: string, baseDir: s
   if (!value || isExternalUrl(value) || value.startsWith('#')) return;
   const [pathPart, suffix = ''] = value.split(/(?=[?#])/);
   const resolved = resolveZipPath(baseDir, pathPart);
-  element.setAttribute(attribute, `${await resolveUrl(resolved)}${suffix}`);
+  try {
+    element.setAttribute(attribute, `${await resolveUrl(resolved)}${suffix}`);
+  } catch {}
 }
 
 function parseXml(text: string, type: DOMParserSupportedType) {

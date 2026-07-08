@@ -3,6 +3,7 @@ import { AppProvider, useAppContext } from './store/AppStore';
 import { Sidebar } from './components/Sidebar';
 import { Library } from './components/Library';
 import { SettingsView } from './components/SettingsView';
+import { WebDavLibrary } from './components/WebDavLibrary';
 import { SeriesView } from './SeriesViewNext';
 import { Book } from './types';
 import { isTauriApp, onLibraryScanProgress, scanLibraryPath, selectLibraryDirectory, showMainWindow } from './lib/native';
@@ -24,7 +25,7 @@ function MainLayout() {
   const initialReadingBook = !isLoading && lastReadBookId
     ? books.find((item) => item.id === lastReadBookId) || null
     : null;
-  const [currentView, setCurrentView] = useState<'library' | 'series' | 'settings'>('library');
+  const [currentView, setCurrentView] = useState<'library' | 'webdav' | 'series' | 'settings'>('library');
   const [readingBook, setReadingBook] = useState<Book | null>(() => initialReadingBook);
   const [startupResolved, setStartupResolved] = useState(() => !isLoading);
   const [scanMessage, setScanMessage] = useState('');
@@ -162,6 +163,7 @@ function MainLayout() {
               className="flex-1 flex min-w-0"
             >
               {currentView === 'library' && <Library onReadBook={setReadingBook} />}
+              {currentView === 'webdav' && <WebDavLibrary onReadBook={setReadingBook} />}
               {currentView === 'series' && <SeriesView onReadBook={setReadingBook} />}
               {currentView === 'settings' && <SettingsView onAddFiles={handleAddFiles} scanMessage={scanMessage} isScanning={isScanning} />}
             </motion.div>

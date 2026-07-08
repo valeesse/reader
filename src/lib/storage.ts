@@ -32,7 +32,7 @@ export async function saveBooks(books: Book[]) {
 }
 
 export async function getBooks(): Promise<Book[]> {
-  const books = (await get<Book[]>(KEYS.BOOKS)) || [];
+  const books = ((await get<Book[]>(KEYS.BOOKS)) || []).map(normalizeStoredBook);
   if (books.some((book) => Boolean(book.cover))) {
     void migrateEmbeddedCovers(books);
   }
@@ -106,7 +106,7 @@ export function getStartupSnapshotSync(): StartupSnapshot | undefined {
 
     return {
       version: 1,
-      books: (snapshot.books || []).map(stripBookCover),
+      books: (snapshot.books || []).map(normalizeStoredBook).map(stripBookCover),
       series: snapshot.series || [],
       settings: normalizeSettings(snapshot.settings),
       lastReadBookId: snapshot.lastReadBookId,
@@ -121,7 +121,7 @@ export function getStartupSnapshotSync(): StartupSnapshot | undefined {
 export function saveStartupSnapshot(snapshot: Omit<StartupSnapshot, 'version' | 'updatedAt'>) {
   writeStartupSnapshot({
     version: 1,
-    books: snapshot.books.map(stripBookCover),
+    books: snapshot.books.map(normalizeStoredBook).map(stripBookCover),
     series: snapshot.series,
     settings: normalizeSettings(snapshot.settings),
     lastReadBookId: snapshot.lastReadBookId,
@@ -194,6 +194,12 @@ function stripBookCover(book: Book): Book {
   return lightBook;
 }
 
+function normalizeStoredBook(book: Book): Book {
+  if (book.fileName?.trim()) return book;
+  const fileName = fileNameFromPath(book.path);
+  return fileName ? { ...book, fileName } : book;
+}
+
 function normalizeSettings(settings?: Partial<AppSettings>): AppSettings {
   return {
     ...defaultSettings,
@@ -241,4 +247,10 @@ async function migrateEmbeddedCovers(books: Book[]) {
   } catch (error) {
     console.warn('Failed to migrate embedded book covers', error);
   }
+}
+
+function fileNameFromPath(path: string) {
+  const normalized = path.replace(/[\\/]+/g, '/');
+  const segments = normalized.split('/');
+  return segments[segments.length - 1]?.trim() || '';
 }
