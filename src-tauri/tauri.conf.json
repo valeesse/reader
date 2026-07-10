@@ -35,6 +35,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "category": "Productivity"
+    "category": "Productivity",
+    "icon": ["icons/icon.ico"]
   }
 }

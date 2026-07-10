@@ -1,5 +1,5 @@
 use base64::{Engine as _, engine::general_purpose};
-use encoding_rs::{GBK, UTF_8};
+use encoding_rs::{GBK, UTF_8, UTF_16BE, UTF_16LE};
 use encoding_rs_io::DecodeReaderBytesBuilder;
 use percent_encoding::percent_decode_str;
 use reqwest::{Method, StatusCode, Url};
@@ -29,6 +29,7 @@ const EPUB_RESOURCE_CACHE_MAX_BYTES: usize = 48 * 1024 * 1024;
 const EPUB_PREFETCH_MAX_RESOURCES: usize = 16;
 const PERSISTENT_CACHE_VERSION: u8 = 3;
 const STREAM_BUFFER_BYTES: usize = 64 * 1024;
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Default)]
 struct ReaderState {
@@ -236,6 +237,9 @@ struct PersistentEpubBookCache {
     manifest_items: Vec<EpubManifestItem>,
 }
 
+type TxtIndex = (usize, Vec<(usize, usize)>, Vec<TxtChapterInfo>);
+type ParsedEpubMetadata = (String, String, Option<String>, Option<String>, Option<f64>);
+
 #[tauri::command]
 async fn scan_library(app: AppHandle, path: String) -> Result<Vec<NativeBook>, String> {
     tauri::async_runtime::spawn_blocking(move || scan_library_blocking(app, PathBuf::from(path)))
@@ -259,7 +263,7 @@ fn scan_library_blocking(app: AppHandle, root: PathBuf) -> Result<Vec<NativeBook
     {
         visited += 1;
         if !entry.file_type().is_file() {
-            if visited % 500 == 0 {
+            if visited.is_multiple_of(500) {
                 emit_scan_progress(&app, visited, matched, entry.path());
             }
             continue;
@@ -272,7 +276,7 @@ fn scan_library_blocking(app: AppHandle, root: PathBuf) -> Result<Vec<NativeBook
             .unwrap_or("")
             .to_ascii_lowercase();
         if ext != "epub" && ext != "txt" {
-            if visited % 500 == 0 {
+            if visited.is_multiple_of(500) {
                 emit_scan_progress(&app, visited, matched, path);
             }
             continue;
@@ -806,14 +810,19 @@ fn load_txt_book(
         });
     }
 
-    let source_has_bom = txt_has_utf8_bom(path)?;
-    let (data_path, encoding, total_chars, checkpoints, chapters) = if source_has_bom {
-        let data_path = create_utf8_txt_cache(app, path, signature, Some(3), None)?;
+    let bom = detect_txt_bom(path)?;
+    let (data_path, encoding, total_chars, checkpoints, chapters) = if let Some(bom) = bom {
+        let (skip, source_encoding, encoding_name) = match bom {
+            TxtBom::Utf8 => (3, None, "utf-8"),
+            TxtBom::Utf16Le => (2, Some(UTF_16LE), "utf-16le"),
+            TxtBom::Utf16Be => (2, Some(UTF_16BE), "utf-16be"),
+        };
+        let data_path = create_utf8_txt_cache(app, path, signature, Some(skip), source_encoding)?;
         let (total_chars, checkpoints, chapters) =
-            build_txt_index(&data_path).map_err(|error| format!("UTF-8 TXT 索引失败: {error}"))?;
+            build_txt_index(&data_path).map_err(|error| format!("TXT 转码索引失败: {error}"))?;
         (
             data_path,
-            "utf-8".to_string(),
+            encoding_name.to_string(),
             total_chars,
             checkpoints,
             chapters,
@@ -908,6 +917,13 @@ enum TxtIndexError {
     Io(String),
 }
 
+#[derive(Debug, Clone, Copy)]
+enum TxtBom {
+    Utf8,
+    Utf16Le,
+    Utf16Be,
+}
+
 impl std::fmt::Display for TxtIndexError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -917,9 +933,7 @@ impl std::fmt::Display for TxtIndexError {
     }
 }
 
-fn build_txt_index(
-    path: &Path,
-) -> Result<(usize, Vec<(usize, usize)>, Vec<TxtChapterInfo>), TxtIndexError> {
+fn build_txt_index(path: &Path) -> Result<TxtIndex, TxtIndexError> {
     let mut file = File::open(path)
         .map_err(|error| TxtIndexError::Io(format!("打开 TXT 索引源失败: {error}")))?;
     let mut buffer = vec![0u8; STREAM_BUFFER_BYTES];
@@ -958,7 +972,7 @@ fn build_txt_index(
             std::str::from_utf8(&combined[..valid_len]).map_err(|_| TxtIndexError::InvalidUtf8)?;
 
         for (local_byte, ch) in text.char_indices() {
-            if char_index > 0 && char_index % TXT_CHAR_CHECKPOINT_INTERVAL == 0 {
+            if char_index > 0 && char_index.is_multiple_of(TXT_CHAR_CHECKPOINT_INTERVAL) {
                 checkpoints.push((char_index, chunk_start + local_byte));
             }
             if ch == '\n' {
@@ -1069,13 +1083,22 @@ fn byte_offset_for_char(text: &str, target: usize) -> usize {
         .unwrap_or(text.len())
 }
 
-fn txt_has_utf8_bom(path: &str) -> Result<bool, String> {
+fn detect_txt_bom(path: &str) -> Result<Option<TxtBom>, String> {
     let mut file = File::open(path).map_err(|error| format!("打开 TXT 失败: {error}"))?;
     let mut prefix = [0u8; 3];
     let read = file
         .read(&mut prefix)
         .map_err(|error| format!("读取 TXT 编码标记失败: {error}"))?;
-    Ok(read == prefix.len() && prefix == [0xEF, 0xBB, 0xBF])
+    if read >= 3 && prefix == [0xEF, 0xBB, 0xBF] {
+        return Ok(Some(TxtBom::Utf8));
+    }
+    if read >= 2 && prefix[..2] == [0xFF, 0xFE] {
+        return Ok(Some(TxtBom::Utf16Le));
+    }
+    if read >= 2 && prefix[..2] == [0xFE, 0xFF] {
+        return Ok(Some(TxtBom::Utf16Be));
+    }
+    Ok(None)
 }
 
 fn create_utf8_txt_cache(
@@ -1096,7 +1119,18 @@ fn create_utf8_txt_cache(
             .seek(SeekFrom::Start(skip))
             .map_err(|error| format!("跳过 TXT 编码标记失败: {error}"))?;
     }
-    let temp_file = File::create(&temp).map_err(|error| format!("创建 TXT 缓存失败: {error}"))?;
+    write_utf8_txt_cache(source, &temp, encoding)?;
+    replace_file_atomically(&temp, &target)?;
+    clean_old_txt_data_cache_files(app, path, signature);
+    Ok(target)
+}
+
+fn write_utf8_txt_cache(
+    mut source: File,
+    target: &Path,
+    encoding: Option<&'static encoding_rs::Encoding>,
+) -> Result<(), String> {
+    let temp_file = File::create(target).map_err(|error| format!("创建 TXT 缓存失败: {error}"))?;
     let mut writer = BufWriter::with_capacity(STREAM_BUFFER_BYTES, temp_file);
     if let Some(encoding) = encoding {
         let mut decoder = DecodeReaderBytesBuilder::new()
@@ -1112,10 +1146,7 @@ fn create_utf8_txt_cache(
     writer
         .flush()
         .map_err(|error| format!("写入 TXT 缓存失败: {error}"))?;
-    drop(writer);
-    replace_file_atomically(&temp, &target)?;
-    clean_old_txt_data_cache_files(app, path, signature);
-    Ok(target)
+    Ok(())
 }
 
 fn is_txt_chapter_heading(title: &str) -> bool {
@@ -1320,65 +1351,60 @@ fn epub_toc_links(
     if let Some(nav_item) = manifest_items
         .iter()
         .find(|item| item.properties.iter().any(|property| property == "nav"))
+        && let Ok(nav) = read_zip_text(archive, &nav_item.absolute_href)
+        && let Ok(doc) = Document::parse(&nav)
     {
-        if let Ok(nav) = read_zip_text(archive, &nav_item.absolute_href) {
-            if let Ok(doc) = Document::parse(&nav) {
-                let nav_node = doc.descendants().find(|node| {
-                    node.tag_name().name() == "nav"
-                        && (node.attribute("type") == Some("toc")
-                            || node.attribute(("http://www.idpf.org/2007/ops", "type"))
-                                == Some("toc"))
-                });
-                if let Some(nav_node) = nav_node {
-                    return Ok(nav_node
-                        .descendants()
-                        .filter(|node| node.tag_name().name() == "a")
-                        .filter_map(|anchor| {
-                            let href = anchor.attribute("href")?;
-                            Some(EpubLinkInfo {
-                                href: resolve_zip_href(&zip_dirname(&nav_item.absolute_href), href),
-                                media_type: mime_from_path(href),
-                                title: anchor.text().map(|value| value.trim().to_string()),
-                                rels: vec![],
-                                properties: vec![],
-                            })
-                        })
-                        .collect());
-                }
-            }
+        let nav_node = doc.descendants().find(|node| {
+            node.tag_name().name() == "nav"
+                && (node.attribute("type") == Some("toc")
+                    || node.attribute(("http://www.idpf.org/2007/ops", "type")) == Some("toc"))
+        });
+        if let Some(nav_node) = nav_node {
+            return Ok(nav_node
+                .descendants()
+                .filter(|node| node.tag_name().name() == "a")
+                .filter_map(|anchor| {
+                    let href = anchor.attribute("href")?;
+                    Some(EpubLinkInfo {
+                        href: resolve_zip_href(&zip_dirname(&nav_item.absolute_href), href),
+                        media_type: mime_from_path(href),
+                        title: anchor.text().map(|value| value.trim().to_string()),
+                        rels: vec![],
+                        properties: vec![],
+                    })
+                })
+                .collect());
         }
     }
 
     if let Some(ncx_item) = manifest_items
         .iter()
         .find(|item| item.media_type == "application/x-dtbncx+xml")
+        && let Ok(ncx) = read_zip_text(archive, &ncx_item.absolute_href)
+        && let Ok(doc) = Document::parse(&ncx)
     {
-        if let Ok(ncx) = read_zip_text(archive, &ncx_item.absolute_href) {
-            if let Ok(doc) = Document::parse(&ncx) {
-                return Ok(doc
+        return Ok(doc
+            .descendants()
+            .filter(|node| node.tag_name().name() == "navPoint")
+            .filter_map(|point| {
+                let content = point
                     .descendants()
-                    .filter(|node| node.tag_name().name() == "navPoint")
-                    .filter_map(|point| {
-                        let content = point
-                            .descendants()
-                            .find(|node| node.tag_name().name() == "content")?;
-                        let href = content.attribute("src")?;
-                        let title = point
-                            .descendants()
-                            .find(|node| node.tag_name().name() == "text")
-                            .and_then(|node| node.text())
-                            .map(|value| value.trim().to_string());
-                        Some(EpubLinkInfo {
-                            href: resolve_zip_href(opf_dir, href),
-                            media_type: mime_from_path(href),
-                            title,
-                            rels: vec![],
-                            properties: vec![],
-                        })
-                    })
-                    .collect());
-            }
-        }
+                    .find(|node| node.tag_name().name() == "content")?;
+                let href = content.attribute("src")?;
+                let title = point
+                    .descendants()
+                    .find(|node| node.tag_name().name() == "text")
+                    .and_then(|node| node.text())
+                    .map(|value| value.trim().to_string());
+                Some(EpubLinkInfo {
+                    href: resolve_zip_href(opf_dir, href),
+                    media_type: mime_from_path(href),
+                    title,
+                    rels: vec![],
+                    properties: vec![],
+                })
+            })
+            .collect());
     }
 
     Ok(vec![])
@@ -1565,14 +1591,12 @@ fn prefetch_epub_resources_blocking(
                     media_type: mime_from_path(&href),
                     properties: vec![],
                 });
-            if !is_epub_text_resource(&item.media_type) {
-                if let Ok(file_path) =
+            if !is_epub_text_resource(&item.media_type)
+                && let Ok(file_path) =
                     epub_resource_file_path(app, path, signature, &href, &item.media_type)
-                {
-                    if file_path.is_file() {
-                        continue;
-                    }
-                }
+                && file_path.is_file()
+            {
+                continue;
             }
             missing.push((href, item));
         }
@@ -1597,10 +1621,10 @@ fn prefetch_epub_resources_blocking(
                 .epub_books
                 .lock()
                 .map_err(|_| "EPUB 缓存被占用".to_string())?;
-            if let Some(book) = books.get_mut(path) {
-                if book.signature == signature {
-                    cache_epub_resource(book, href, resource);
-                }
+            if let Some(book) = books.get_mut(path)
+                && book.signature == signature
+            {
+                cache_epub_resource(book, href, resource);
             }
         } else {
             let _ = save_epub_resource_file(app, path, signature, &href, &resource);
@@ -1657,10 +1681,10 @@ fn read_zip_bytes_flexible(
     }
 
     let decoded = percent_decode_str(path).decode_utf8_lossy().to_string();
-    if decoded != path {
-        if let Ok(bytes) = read_zip_bytes_exact(archive, &decoded) {
-            return Ok((decoded, bytes));
-        }
+    if decoded != path
+        && let Ok(bytes) = read_zip_bytes_exact(archive, &decoded)
+    {
+        return Ok((decoded, bytes));
     }
 
     let normalized = normalize_zip_path(&decoded);
@@ -1714,7 +1738,7 @@ fn read_zip_bytes_flexible(
         }
     }
 
-    let fallback_match = suffix_match.or_else(|| {
+    let fallback_match = suffix_match.or({
         if basename_ambiguous {
             None
         } else {
@@ -1761,7 +1785,7 @@ fn parse_epub_metadata(
     app: &AppHandle,
     path: &Path,
     book_id: &str,
-) -> Result<(String, String, Option<String>, Option<String>, Option<f64>), String> {
+) -> Result<ParsedEpubMetadata, String> {
     let file = File::open(path).map_err(|err| err.to_string())?;
     let mut archive = ZipArchive::new(file).map_err(|err| err.to_string())?;
     let container = read_zip_text(&mut archive, "META-INF/container.xml")?;
@@ -2099,9 +2123,10 @@ fn temporary_sibling_path(target: &Path) -> PathBuf {
         .and_then(|name| name.to_str())
         .unwrap_or("cache");
     target.with_file_name(format!(
-        ".{file_name}.{}-{}.tmp",
+        ".{file_name}.{}-{}-{}.tmp",
         std::process::id(),
-        now_millis_u128()
+        now_millis_u128(),
+        TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
     ))
 }
 
@@ -2430,7 +2455,11 @@ fn webdav_url_for_remote_path(config: &WebDavConfig, remote_path: &str) -> Resul
 fn webdav_remote_path_from_url(base_url: &Url, absolute_url: &Url) -> Result<String, String> {
     let base_path = base_url.path().trim_end_matches('/');
     let absolute_path = absolute_url.path();
-    if !absolute_path.starts_with(base_path) {
+    let is_within_base = absolute_path == base_path
+        || absolute_path
+            .strip_prefix(base_path)
+            .is_some_and(|suffix| suffix.starts_with('/'));
+    if !is_within_base {
         return Err("WebDAV 返回了不在当前目录下的路径".into());
     }
     let relative = absolute_path
@@ -2588,6 +2617,81 @@ mod tests {
     }
 
     #[test]
+    fn gbk_txt_cache_is_streamed_to_utf8() {
+        let source_path = test_path("gbk-source.txt");
+        let target_path = test_path("gbk-target.txt");
+        let expected = "第一章 中文测试\n正文\n";
+        let (encoded, _, _) = GBK.encode(expected);
+        fs::write(&source_path, encoded.as_ref()).unwrap();
+
+        write_utf8_txt_cache(File::open(&source_path).unwrap(), &target_path, Some(GBK)).unwrap();
+        let decoded = fs::read_to_string(&target_path).unwrap();
+        assert_eq!(decoded, expected);
+
+        fs::remove_file(source_path).unwrap();
+        fs::remove_file(target_path).unwrap();
+    }
+
+    #[test]
+    fn utf16_bom_is_detected_and_streamed_to_utf8() {
+        let source_path = test_path("utf16-source.txt");
+        let target_path = test_path("utf16-target.txt");
+        let expected = "第一章 UTF-16\n正文\n";
+        let mut bytes = vec![0xFF, 0xFE];
+        bytes.extend(expected.encode_utf16().flat_map(|unit| unit.to_le_bytes()));
+        fs::write(&source_path, bytes).unwrap();
+        assert!(matches!(
+            detect_txt_bom(source_path.to_str().unwrap()).unwrap(),
+            Some(TxtBom::Utf16Le)
+        ));
+
+        let mut source = File::open(&source_path).unwrap();
+        source.seek(SeekFrom::Start(2)).unwrap();
+        write_utf8_txt_cache(source, &target_path, Some(UTF_16LE)).unwrap();
+        assert_eq!(fs::read_to_string(&target_path).unwrap(), expected);
+
+        fs::remove_file(source_path).unwrap();
+        fs::remove_file(target_path).unwrap();
+    }
+
+    #[test]
+    fn stale_txt_session_cannot_read_a_newer_session() {
+        let path = test_path("session.txt");
+        let text = "第一章\n会话隔离\n";
+        fs::write(&path, text).unwrap();
+        let (total_chars, checkpoints, chapters) = build_txt_index(&path).unwrap();
+        let path_string = path.to_string_lossy().to_string();
+        let mut sessions = HashSet::new();
+        sessions.insert("current".to_string());
+        let state = ReaderState::default();
+        state.txt_books.lock().unwrap().insert(
+            path_string.clone(),
+            TxtBookCache {
+                signature: file_signature(&path_string).unwrap(),
+                last_used_at: 0,
+                active_sessions: sessions,
+                encoding: "utf-8".to_string(),
+                data_path: path.clone(),
+                total_chars,
+                total_bytes: text.len() as u64,
+                checkpoints,
+                chapters,
+            },
+        );
+
+        assert!(read_txt_window_blocking(&state, &path_string, "stale", 0, 3).is_err());
+        assert_eq!(
+            read_txt_window_blocking(&state, &path_string, "current", 0, 3)
+                .unwrap()
+                .text,
+            "第一章"
+        );
+
+        drop(state);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn epub_resource_cache_honors_lru_count_and_byte_limits() {
         let path = test_path("empty.epub");
         ZipWriter::new(File::create(&path).unwrap())
@@ -2634,5 +2738,40 @@ mod tests {
 
         drop(cache);
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn webdav_paths_must_stay_on_a_segment_boundary() {
+        let base = Url::parse("https://example.com/dav/books/").unwrap();
+        let valid = Url::parse("https://example.com/dav/books/series/book.epub").unwrap();
+        let sibling = Url::parse("https://example.com/dav/books-private/book.epub").unwrap();
+
+        assert_eq!(
+            webdav_remote_path_from_url(&base, &valid).unwrap(),
+            "series/book.epub"
+        );
+        assert!(webdav_remote_path_from_url(&base, &sibling).is_err());
+    }
+
+    #[test]
+    #[ignore = "set ZENITH_EPUB_PROBE to exercise a real EPUB"]
+    fn probe_real_epub_from_environment() {
+        let path = std::env::var("ZENITH_EPUB_PROBE").expect("ZENITH_EPUB_PROBE is required");
+        let started = std::time::Instant::now();
+        let (manifest, info) = load_epub_book(&path, "Probe").unwrap();
+        let first_href = info
+            .reading_order
+            .first()
+            .map(|link| link.href.as_str())
+            .expect("EPUB reading order must not be empty");
+        let mut archive = open_epub_archive(&path).unwrap();
+        let (_, first_resource) = read_zip_bytes_flexible(&mut archive, first_href).unwrap();
+        eprintln!(
+            "EPUB probe: {} ms, {} manifest items, {} spine items, first resource {} bytes",
+            started.elapsed().as_millis(),
+            manifest.len(),
+            info.reading_order.len(),
+            first_resource.len()
+        );
     }
 }

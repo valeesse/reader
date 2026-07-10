@@ -12,6 +12,7 @@ import {
   getLastReadBookId,
   getStartupSnapshotSync,
   saveStartupSnapshot,
+  ProgressSavedDetail,
 } from '../lib/storage';
 
 interface AppContextType {
@@ -113,14 +114,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const handleProgressSaved = (event: Event) => {
-      const detail = (event as CustomEvent<ReadingProgress | undefined>).detail;
-      if (detail?.bookId) {
-        setLastReadBookId(detail.bookId);
+      const detail = (event as CustomEvent<ProgressSavedDetail | undefined>).detail;
+      if (detail?.progress?.bookId) {
+        const savedProgress = detail.progress;
+        if (detail.lastReadBookId) setLastReadBookId(detail.lastReadBookId);
         setProgress((current) => {
-          const next = current.filter((item) => item.bookId !== detail.bookId);
-          return [...next, detail];
+          const next = current.filter((item) => item.bookId !== savedProgress.bookId);
+          return [...next, savedProgress];
         });
       } else {
+        if (detail?.lastReadBookId) setLastReadBookId(detail.lastReadBookId);
         loadProgressInIdle();
       }
     };

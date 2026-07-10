@@ -35,7 +35,7 @@ This plan covers the local TXT and EPUB reading paths from native file access th
 
 1. Identify the source by canonical path, size, and nanosecond modification time.
 2. Reuse a per-book persistent character/chapter index when the signature matches.
-3. Use a valid UTF-8 source directly. Stream non-UTF-8 input through a GBK-to-UTF-8 cache file without constructing the whole decoded book in memory.
+3. Use a valid UTF-8 source directly. Stream BOM-marked UTF-16 or GBK input through a UTF-8 cache file without constructing the whole decoded book in memory.
 4. Build character checkpoints and chapter headings with a bounded streaming scanner.
 5. Read only the byte range that covers the requested character window.
 6. Give each open reader a session ID; reads and closes must present that session.
@@ -70,3 +70,13 @@ This plan covers the local TXT and EPUB reading paths from native file access th
 
 - True page-map generation for reflowable EPUB would require layout-dependent position generation and invalidation. The current plan keeps chapter-weighted progress but labels it accurately.
 - Library scanning can be made incremental in a separate change; it is independent of the active-reader hot path.
+
+## Execution result
+
+Implemented in three reviewable milestones:
+
+- `831b188`: streaming TXT data/index pipeline, per-session native leases, per-book caches, reusable EPUB archives, batch prefetch, and byte-bounded resource LRU.
+- `2ae6d09`: deduplicated TXT windows, bounded frontend EPUB resources, direct asset URLs, fragment navigation, isolated reader lifecycle, delegated image events, and retryable errors.
+- Final hardening: monotonic progress persistence/sync merge, WebDAV path-boundary validation, seven native regression tests, strict Clippy, production frontend build, and Tauri bundle verification.
+
+The optional real-book probe was also run against a 302.06 MB EPUB in the workspace. In this environment it parsed 46 manifest items and 21 spine items and read the first resource in 7 ms. This is a smoke measurement rather than a portable benchmark, but it verifies that metadata loading does not inflate the complete archive.

@@ -10,6 +10,11 @@ export interface StartupSnapshot {
   updatedAt: number;
 }
 
+export interface ProgressSavedDetail {
+  progress?: ReadingProgress;
+  lastReadBookId?: string;
+}
+
 // Store keys
 export const KEYS = {
   BOOKS: 'zenith_books',
@@ -18,8 +23,11 @@ export const KEYS = {
   BOOK_COVER: 'zenith_book_cover_',
   SETTINGS: 'zenith_settings',
   LAST_READ: 'zenith_last_read',
+  LAST_READ_UPDATED_AT: 'zenith_last_read_updated_at',
   STARTUP_SNAPSHOT: 'zenith_startup_snapshot_v1',
 };
+
+let progressWriteQueue = Promise.resolve();
 
 export async function saveBooks(books: Book[]) {
   updateStartupSnapshot({ books: books.map(stripBookCover) });
@@ -56,12 +64,34 @@ export async function getSeries(): Promise<Series[]> {
   return (await get<Series[]>(KEYS.SERIES)) || [];
 }
 
-export async function saveProgress(progress: ReadingProgress) {
-  updateStartupSnapshot({ lastReadBookId: progress.bookId });
+export function saveProgress(progress: ReadingProgress) {
+  const write = progressWriteQueue
+    .catch(() => {})
+    .then(() => saveProgressInOrder(progress));
+  progressWriteQueue = write;
+  return write;
+}
+
+async function saveProgressInOrder(progress: ReadingProgress) {
+  const current = await get<ReadingProgress>(`${KEYS.PROGRESS}${progress.bookId}`);
+  if (current && current.updatedAt > progress.updatedAt) return;
   await set(`${KEYS.PROGRESS}${progress.bookId}`, progress);
-  await set(KEYS.LAST_READ, progress.bookId);
+
+  const lastReadUpdatedAt = (await get<number>(KEYS.LAST_READ_UPDATED_AT)) || 0;
+  const becomesLastRead = progress.updatedAt >= lastReadUpdatedAt;
+  if (becomesLastRead) {
+    await Promise.all([
+      set(KEYS.LAST_READ, progress.bookId),
+      set(KEYS.LAST_READ_UPDATED_AT, progress.updatedAt),
+    ]);
+    updateStartupSnapshot({ lastReadBookId: progress.bookId });
+  }
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('zenith:progress-saved', { detail: progress }));
+    const detail: ProgressSavedDetail = {
+      progress,
+      lastReadBookId: becomesLastRead ? progress.bookId : undefined,
+    };
+    window.dispatchEvent(new CustomEvent('zenith:progress-saved', { detail }));
   }
 }
 
@@ -156,7 +186,12 @@ export async function createSyncSnapshot(): Promise<SyncSnapshot> {
 }
 
 export async function applySyncSnapshot(snapshot: SyncSnapshot) {
+  await progressWriteQueue.catch(() => {});
   const localSettings = await getSettings();
+  const [localLastReadBookId, localLastReadUpdatedAt] = await Promise.all([
+    getLastReadBookId(),
+    get<number>(KEYS.LAST_READ_UPDATED_AT),
+  ]);
   const nextSettings = {
     ...defaultSettings,
     ...snapshot.settings,
@@ -167,24 +202,42 @@ export async function applySyncSnapshot(snapshot: SyncSnapshot) {
     },
   };
 
+  const remoteLastReadUpdatedAt = (snapshot.progress || [])
+    .find((progress) => progress.bookId === snapshot.lastReadBookId)
+    ?.updatedAt || snapshot.updatedAt;
+  const acceptRemoteLastRead = Boolean(snapshot.lastReadBookId)
+    && remoteLastReadUpdatedAt >= (localLastReadUpdatedAt || 0);
+  const nextLastReadBookId = acceptRemoteLastRead
+    ? snapshot.lastReadBookId
+    : localLastReadBookId;
+
   saveStartupSnapshot({
     books: snapshot.books || [],
     series: snapshot.series || [],
     settings: nextSettings,
-    lastReadBookId: snapshot.lastReadBookId,
+    lastReadBookId: nextLastReadBookId,
   });
 
   await saveBooks(snapshot.books || []);
   await saveSeries(snapshot.series || []);
   await saveSettings(nextSettings);
 
-  await Promise.all((snapshot.progress || []).map((progress) => set(`${KEYS.PROGRESS}${progress.bookId}`, progress)));
-  if (snapshot.lastReadBookId) {
-    await set(KEYS.LAST_READ, snapshot.lastReadBookId);
+  await Promise.all((snapshot.progress || []).map(async (progress) => {
+    const local = await get<ReadingProgress>(`${KEYS.PROGRESS}${progress.bookId}`);
+    if (!local || progress.updatedAt >= local.updatedAt) {
+      await set(`${KEYS.PROGRESS}${progress.bookId}`, progress);
+    }
+  }));
+  if (acceptRemoteLastRead && snapshot.lastReadBookId) {
+    await Promise.all([
+      set(KEYS.LAST_READ, snapshot.lastReadBookId),
+      set(KEYS.LAST_READ_UPDATED_AT, remoteLastReadUpdatedAt),
+    ]);
   }
 
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('zenith:progress-saved'));
+    const detail: ProgressSavedDetail = { lastReadBookId: nextLastReadBookId };
+    window.dispatchEvent(new CustomEvent('zenith:progress-saved', { detail }));
   }
 }
 
