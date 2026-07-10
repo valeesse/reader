@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { LoaderCircle } from 'lucide-react';
-import { Book, ReaderTocItem } from './types';
+import { Book, ReaderSeekRequest, ReaderTocItem } from './types';
 import { useAppContext } from './store/AppStore';
 import { getProgress, saveProgress } from './lib/storage';
 import { closeTxtBook, NativeTxtBookInfo, openTxtBook, readTxtWindow } from './lib/native';
@@ -22,7 +22,7 @@ export function TxtViewerNext({
   onToggleChrome,
   onTocChange,
   tocTarget,
-  seekProgress,
+  seekRequest,
 }: {
   book: Book;
   chromeVisible: boolean;
@@ -32,12 +32,14 @@ export function TxtViewerNext({
   onToggleChrome: () => void;
   onTocChange: (items: ReaderTocItem[]) => void;
   tocTarget: ReaderTocItem | null;
-  seekProgress: number | null;
+  seekRequest: ReaderSeekRequest | null;
 }) {
   const { settings } = useAppContext();
   const [bookInfo, setBookInfo] = useState<NativeTxtBookInfo | null>(null);
   const [textWindow, setTextWindow] = useState<TxtWindow>({ start: 0, end: 0, text: '' });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [reloadToken, setReloadToken] = useState(0);
   const [layoutReady, setLayoutReady] = useState(false);
   const [pageMetrics, setPageMetrics] = useState<PageMetrics>({ pageWidth: 0, pageStep: 1, spreadCount: 1 });
   const [pageCounter, setPageCounter] = useState('');
@@ -57,6 +59,7 @@ export function TxtViewerNext({
   const windowRequestIdRef = useRef(0);
   const isLoadingWindowRef = useRef(false);
   const windowCacheRef = useRef(new Map<string, TxtWindow>());
+  const windowRequestsRef = useRef(new Map<string, Promise<TxtWindow>>());
   const wheelGestureTimerRef = useRef<number | undefined>(undefined);
   const wheelGestureLockedRef = useRef(false);
   const programmaticScrollRef = useRef(false);
@@ -99,8 +102,10 @@ export function TxtViewerNext({
     const loadText = async () => {
       try {
         setLoading(true);
+        setLoadError('');
         setLayoutReady(false);
         windowCacheRef.current.clear();
+        windowRequestsRef.current.clear();
         const info = await openTxtBook(book.path);
         openedSessionId = info.sessionId;
         if (cancelled) {
@@ -128,6 +133,9 @@ export function TxtViewerNext({
         scheduleWindowPrefetch(restoredAnchor);
       } catch (error) {
         console.error('Failed to load txt', error);
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : 'TXT 加载失败');
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -137,14 +145,18 @@ export function TxtViewerNext({
     return () => {
       cancelled = true;
       windowRequestIdRef.current += 1;
+      windowRequestsRef.current.clear();
       onTocChange([]);
       if (openedSessionId) closeTxtBook(book.path, openedSessionId).catch(() => {});
       if (sessionIdRef.current === openedSessionId) sessionIdRef.current = '';
     };
-  }, [book.id, book.path]);
+  }, [book.id, book.path, reloadToken]);
 
   useEffect(() => {
+    const handlePageHide = () => flushPersistProgress();
+    window.addEventListener('pagehide', handlePageHide);
     return () => {
+      window.removeEventListener('pagehide', handlePageHide);
       if (progressFrameRef.current !== undefined) cancelAnimationFrame(progressFrameRef.current);
       if (persistTimerRef.current !== undefined) window.clearTimeout(persistTimerRef.current);
       if (prefetchTimerRef.current !== undefined) window.clearTimeout(prefetchTimerRef.current);
@@ -162,9 +174,9 @@ export function TxtViewerNext({
   }, [tocTarget, bookInfo]);
 
   useEffect(() => {
-    if (seekProgress === null || !totalCharsRef.current) return;
-    goToAnchor(Math.round(seekProgress * totalCharsRef.current), true, true);
-  }, [seekProgress]);
+    if (!seekRequest || !totalCharsRef.current) return;
+    goToAnchor(Math.round(seekRequest.progress * totalCharsRef.current), true, true);
+  }, [seekRequest, bookInfo]);
 
   const recalculatePages = useCallback(() => {
     const element = contentRef.current;
@@ -255,6 +267,8 @@ export function TxtViewerNext({
       chapterIndex: 0,
       scrollPercentage,
       updatedAt: Date.now(),
+    }).catch((error) => {
+      console.warn('Failed to save TXT progress', error);
     });
   };
 
@@ -326,6 +340,30 @@ export function TxtViewerNext({
     }
   };
 
+  const requestWindow = (range: { start: number; end: number }) => {
+    const key = cacheKeyForRange(range);
+    const cached = windowCacheRef.current.get(key);
+    if (cached) return Promise.resolve(cached);
+    const pending = windowRequestsRef.current.get(key);
+    if (pending) return pending;
+    const sessionId = sessionIdRef.current;
+    if (!sessionId) return Promise.reject(new Error('TXT 阅读会话尚未就绪'));
+
+    let request: Promise<TxtWindow>;
+    request = readTxtWindow(book.path, sessionId, range.start, range.end)
+      .then((windowValue) => {
+        if (sessionId === sessionIdRef.current) rememberWindow(windowValue);
+        return windowValue;
+      })
+      .finally(() => {
+        if (windowRequestsRef.current.get(key) === request) {
+          windowRequestsRef.current.delete(key);
+        }
+      });
+    windowRequestsRef.current.set(key, request);
+    return request;
+  };
+
   const applyWindow = (windowValue: TxtWindow, anchor: number) => {
     activeAnchorCharRef.current = clamp(Math.round(anchor), 0, totalCharsRef.current);
     latestWindowRef.current = windowValue;
@@ -336,20 +374,11 @@ export function TxtViewerNext({
   const loadWindow = async (range: { start: number; end: number }, anchor: number) => {
     const requestId = windowRequestIdRef.current + 1;
     windowRequestIdRef.current = requestId;
-    const cachedWindow = windowCacheRef.current.get(cacheKeyForRange(range));
-    if (cachedWindow) {
-      applyWindow(cachedWindow, anchor);
-      return;
-    }
-
     isLoadingWindowRef.current = true;
     setLayoutReady(false);
     try {
-      const sessionId = sessionIdRef.current;
-      if (!sessionId) throw new Error('TXT 阅读会话尚未就绪');
-      const nextWindow = await readTxtWindow(book.path, sessionId, range.start, range.end);
+      const nextWindow = await requestWindow(range);
       if (requestId !== windowRequestIdRef.current) return;
-      rememberWindow(nextWindow);
       applyWindow(nextWindow, anchor);
     } finally {
       if (requestId === windowRequestIdRef.current) {
@@ -379,11 +408,7 @@ export function TxtViewerNext({
     const key = cacheKeyForRange(range);
     if (windowCacheRef.current.has(key)) return;
 
-    const sessionId = sessionIdRef.current;
-    if (!sessionId) return;
-    const nextWindow = await readTxtWindow(book.path, sessionId, range.start, range.end);
-    if (sessionId !== sessionIdRef.current) return;
-    rememberWindow(nextWindow);
+    await requestWindow(range);
   };
 
   const scheduleWindowPrefetch = (anchor: number) => {
@@ -615,6 +640,21 @@ export function TxtViewerNext({
     return (
       <div className="absolute inset-0 flex items-center justify-center">
         <LoaderCircle className="h-7 w-7 animate-spin text-[#007AFF]" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <div className="max-w-lg text-sm text-red-600 dark:text-red-400">{loadError}</div>
+        <button
+          type="button"
+          className="rounded-[5px] bg-[#007AFF] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
+          onClick={() => setReloadToken((value) => value + 1)}
+        >
+          重新加载
+        </button>
       </div>
     );
   }

@@ -19,6 +19,8 @@ const LAYOUT = {
   reflowable: 'reflowable',
   fixed: 'fixed',
 } as const;
+const EPUB_PAYLOAD_CACHE_LIMIT = 72;
+const EPUB_BLOB_CACHE_LIMIT = 96;
 
 export type ReadiumLocatorLike = {
   href: string;
@@ -154,7 +156,7 @@ export class ReadiumLink {
     rels?: Set<string>;
     properties?: Set<string> | Record<string, unknown>;
   }) {
-    this.href = stripHash(normalizeZipPath(values.href));
+    this.href = normalizeHref(values.href);
     this.type = values.type || mimeFromPath(this.href);
     this.title = values.title;
     this.rels = values.rels;
@@ -181,11 +183,15 @@ export class ReadiumLink {
   }
 
   get locator() {
+    const fragment = fragmentFromHref(this.href);
     return createLocator({
-      href: this.href,
+      href: stripHash(this.href),
       type: this.type,
       title: this.title,
-      locations: { progression: 0 },
+      locations: {
+        progression: 0,
+        ...(fragment ? { fragments: [fragment] } : {}),
+      },
     });
   }
 }
@@ -198,13 +204,18 @@ export class LinkCollection {
   }
 
   findWithHref(href: string) {
-    const normalized = stripHash(normalizeZipPath(href));
+    const normalized = normalizeZipPath(stripHash(href));
+    return this.items.find((link) => normalizeZipPath(stripHash(link.href)) === normalized);
+  }
+
+  findExactWithHref(href: string) {
+    const normalized = normalizeHref(href);
     return this.items.find((link) => link.href === normalized);
   }
 
   findIndexWithHref(href: string) {
-    const normalized = stripHash(normalizeZipPath(href));
-    return this.items.findIndex((link) => link.href === normalized);
+    const normalized = normalizeZipPath(stripHash(href));
+    return this.items.findIndex((link) => normalizeZipPath(stripHash(link.href)) === normalized);
   }
 
   findWithRel(rel: string) {
@@ -279,7 +290,9 @@ class EpubResourceManager {
   private path: string;
   private sessionId: string;
   private payloads = new Map<string, Promise<{ href: string; mediaType: string; text?: string; base64?: string; filePath?: string }>>();
+  private payloadOrder: string[] = [];
   private blobUrls = new Map<string, string>();
+  private blobOrder: string[] = [];
 
   constructor(path: string, sessionId: string) {
     this.path = path;
@@ -320,24 +333,43 @@ class EpubResourceManager {
       URL.revokeObjectURL(url);
     }
     this.blobUrls.clear();
+    this.blobOrder = [];
+    this.payloads.clear();
+    this.payloadOrder = [];
   }
 
   private payloadFor(href: string) {
-    const normalized = stripHash(normalizeZipPath(href));
+    const normalized = normalizeZipPath(stripHash(href));
     const existing = this.payloads.get(normalized);
-    if (existing) return existing;
-    const payload = readEpubResource(this.path, this.sessionId, normalized).catch((error) => {
-      this.payloads.delete(normalized);
+    if (existing) {
+      touchKey(this.payloadOrder, normalized);
+      return existing;
+    }
+    let payload: Promise<{ href: string; mediaType: string; text?: string; base64?: string; filePath?: string }>;
+    payload = readEpubResource(this.path, this.sessionId, normalized).catch((error) => {
+      if (this.payloads.get(normalized) === payload) {
+        this.payloads.delete(normalized);
+        const index = this.payloadOrder.indexOf(normalized);
+        if (index >= 0) this.payloadOrder.splice(index, 1);
+      }
       throw error;
     });
     this.payloads.set(normalized, payload);
+    touchKey(this.payloadOrder, normalized);
+    while (this.payloadOrder.length > EPUB_PAYLOAD_CACHE_LIMIT) {
+      const oldest = this.payloadOrder.shift();
+      if (oldest) this.payloads.delete(oldest);
+    }
     return payload;
   }
 
   private async blobUrlFor(href: string) {
-    const normalized = stripHash(normalizeZipPath(href));
+    const normalized = normalizeZipPath(stripHash(href));
     const existing = this.blobUrls.get(normalized);
-    if (existing) return existing;
+    if (existing) {
+      touchKey(this.blobOrder, normalized);
+      return existing;
+    }
 
     const link = new ReadiumLink({ href: normalized });
     const payload = await this.payloadFor(normalized);
@@ -352,6 +384,14 @@ class EpubResourceManager {
         : bytesToBlobPart(base64ToBytes(payload.base64 || ''));
     const url = URL.createObjectURL(new Blob([content], { type }));
     this.blobUrls.set(normalized, url);
+    touchKey(this.blobOrder, normalized);
+    while (this.blobOrder.length > EPUB_BLOB_CACHE_LIMIT) {
+      const oldest = this.blobOrder.shift();
+      if (!oldest) break;
+      const oldUrl = this.blobUrls.get(oldest);
+      if (oldUrl) URL.revokeObjectURL(oldUrl);
+      this.blobUrls.delete(oldest);
+    }
     return url;
   }
 
@@ -535,19 +575,42 @@ function normalizeZipPath(path: string) {
     .join('/');
 }
 
+function normalizeHref(href: string) {
+  const suffixIndex = href.search(/[?#]/);
+  const path = suffixIndex >= 0 ? href.slice(0, suffixIndex) : href;
+  const suffix = suffixIndex >= 0 ? href.slice(suffixIndex) : '';
+  return `${normalizeZipPath(path)}${suffix}`;
+}
+
 function resolveZipPath(baseDir: string, href: string) {
   if (isExternalUrl(href)) return href;
   return normalizeZipPath(`${baseDir ? `${baseDir}/` : ''}${href}`);
 }
 
 function dirname(path: string) {
-  const normalized = normalizeZipPath(path);
+  const normalized = normalizeZipPath(stripHash(path));
   const index = normalized.lastIndexOf('/');
   return index >= 0 ? normalized.slice(0, index) : '';
 }
 
 function stripHash(path: string) {
   return path.split('#')[0].split('?')[0];
+}
+
+function fragmentFromHref(href: string) {
+  const fragment = href.split('#')[1]?.split('?')[0];
+  if (!fragment) return undefined;
+  try {
+    return decodeURIComponent(fragment);
+  } catch {
+    return fragment;
+  }
+}
+
+function touchKey(order: string[], key: string) {
+  const index = order.indexOf(key);
+  if (index >= 0) order.splice(index, 1);
+  order.push(key);
 }
 
 function isExternalUrl(value: string) {

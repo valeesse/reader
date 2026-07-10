@@ -38,6 +38,11 @@ export interface ReaderTocItem {
   index?: number;
 }
 
+export interface ReaderSeekRequest {
+  progress: number;
+  requestId: number;
+}
+
 export interface AppSettings {
   pageMode: 'single' | 'double';
   txtReadingFlow: 'paged' | 'scroll';

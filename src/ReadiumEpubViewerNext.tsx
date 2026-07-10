@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Check, ChevronLeft, ChevronRight, Download, LoaderCircle, X } from 'lucide-react';
 import { EpubNavigator, EpubPreferences, ReadiumFrameClickEvent, ReadiumLocator } from './vendor/readium-navigator';
-import { AppSettings, Book, ReaderTocItem } from './types';
+import { AppSettings, Book, ReaderSeekRequest, ReaderTocItem } from './types';
 import { useAppContext } from './store/AppStore';
 import { getProgress, saveProgress } from './lib/storage';
 import {
@@ -24,7 +24,7 @@ export function ReadiumEpubViewerNext({
   onToggleChrome,
   onTocChange,
   tocTarget,
-  seekProgress,
+  seekRequest,
 }: {
   book: Book;
   chromeVisible: boolean;
@@ -32,13 +32,15 @@ export function ReadiumEpubViewerNext({
   onToggleChrome: () => void;
   onTocChange: (items: ReaderTocItem[]) => void;
   tocTarget: ReaderTocItem | null;
-  seekProgress: number | null;
+  seekRequest: ReaderSeekRequest | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const navigatorRef = useRef<EpubNavigator | null>(null);
   const publicationRef = useRef<ReadiumPublicationLike | null>(null);
   const { settings } = useAppContext();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [reloadToken, setReloadToken] = useState(0);
   const [pageLabel, setPageLabel] = useState('');
   const [pageCounter, setPageCounter] = useState('');
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
@@ -120,6 +122,7 @@ export function ReadiumEpubViewerNext({
     const init = async () => {
       try {
         setLoading(true);
+        setLoadError('');
         loadingResolvedRef.current = false;
         const container = containerRef.current;
         if (!container) return;
@@ -133,6 +136,11 @@ export function ReadiumEpubViewerNext({
         publicationRef.current = publication;
         onTocChange(toTocItems(publication));
         const storedProgress = await getProgress(book.id);
+        if (cancelled) {
+          if (publicationRef.current === publication) publicationRef.current = null;
+          publication.close();
+          return;
+        }
         lastSavedLocationRef.current = storedProgress?.location || '';
         const initialPosition = deserializeReadiumLocator(storedProgress?.location);
         if (initialPosition?.href) {
@@ -183,24 +191,33 @@ export function ReadiumEpubViewerNext({
         const loadingFallback = window.setTimeout(() => resolveLoading(true), 1800);
         navigator.load()
           .then(() => {
+            if (cancelled) return;
             forceReadiumLayoutSettings(navigator, settingsRef.current);
             resolveLoading(false);
           })
           .catch((error) => {
             console.error('Readium navigator failed to load', error);
+            if (!cancelled && !loadingResolvedRef.current) {
+              setLoadError(error instanceof Error ? error.message : 'EPUB 渲染失败');
+            }
             resolveLoading(true);
           })
           .finally(() => window.clearTimeout(loadingFallback));
       } catch (error) {
         console.error('Failed to load EPUB with Readium', error);
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : 'EPUB 加载失败');
+        }
         resolveLoading(true);
       }
     };
 
+    window.addEventListener('pagehide', flushProgressSave);
     init();
 
     return () => {
       cancelled = true;
+      window.removeEventListener('pagehide', flushProgressSave);
       onTocChange([]);
       if (progressSaveTimerRef.current !== null) {
         window.clearTimeout(progressSaveTimerRef.current);
@@ -213,24 +230,30 @@ export function ReadiumEpubViewerNext({
       publicationRef.current?.close();
       publicationRef.current = null;
     };
-  }, [book.id, book.path, book.title]);
+  }, [book.id, book.path, book.title, reloadToken]);
 
   useEffect(() => {
     const navigator = navigatorRef.current;
     if (!navigator) return;
+    let cancelled = false;
     const before = navigator.currentLocator;
     const preferences = createReadiumPreferences(settings);
     const key = preferenceKey(preferences);
     if (key === lastPreferencesKeyRef.current) return;
     lastPreferencesKeyRef.current = key;
     navigator.submitPreferences(new EpubPreferences(preferences)).then(() => {
+      if (cancelled) return;
       forceReadiumLayoutSettings(navigator, settings);
       return navigator.resizeHandler?.();
     }).then(() => {
+      if (cancelled) return;
       if (before) navigator.go(before, false, () => {});
     }).catch((error) => {
       console.warn('Failed to apply Readium preferences', error);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [settings]);
 
   useEffect(() => {
@@ -260,20 +283,22 @@ export function ReadiumEpubViewerNext({
     if (!tocTarget?.href) return;
     const publication = publicationRef.current;
     const navigator = navigatorRef.current;
-    const link = publication?.linkWithHref(tocTarget.href) || publication?.toc.findWithHref(tocTarget.href);
+    const link = publication?.toc.findExactWithHref(tocTarget.href)
+      || publication?.toc.findWithHref(tocTarget.href)
+      || publication?.linkWithHref(tocTarget.href);
     if (link && navigator) {
       navigator.go(link.locator, false, () => {});
     }
-  }, [tocTarget]);
+  }, [tocTarget, loading]);
 
   useEffect(() => {
-    if (seekProgress === null) return;
+    if (!seekRequest) return;
     const publication = publicationRef.current;
     const navigator = navigatorRef.current;
     if (!publication || !navigator || publication.positions.length === 0) return;
-    const index = Math.max(0, Math.min(publication.positions.length - 1, Math.round(seekProgress * (publication.positions.length - 1))));
+    const index = Math.max(0, Math.min(publication.positions.length - 1, Math.round(seekRequest.progress * (publication.positions.length - 1))));
     navigator.go(publication.positions[index], false, () => {});
-  }, [seekProgress]);
+  }, [seekRequest, loading]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -350,8 +375,23 @@ export function ReadiumEpubViewerNext({
     navigatorRef.current?.goForward(false, () => {});
   };
 
+  if (loadError) {
+    return (
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <div className="max-w-lg text-sm text-red-600 dark:text-red-400">{loadError}</div>
+        <button
+          type="button"
+          className="rounded-[5px] bg-[#007AFF] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
+          onClick={() => setReloadToken((value) => value + 1)}
+        >
+          重新加载
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="group relative h-full w-full select-none overflow-hidden" onWheel={(event) => navigateByWheel(event.nativeEvent)}>
+    <div className="group relative h-full w-full select-none overflow-hidden">
       <div
         className="absolute inset-0 box-border"
         style={{
@@ -587,7 +627,6 @@ function installReadiumWheel(wnd: Window, onWheel: (event: WheelEvent) => void) 
   doc.documentElement.dataset.zenithReadiumWheelBound = 'true';
   const handler = (event: WheelEvent) => onWheel(event);
   wnd.addEventListener('wheel', handler, { passive: false, capture: true });
-  doc.addEventListener('wheel', handler, { passive: false, capture: true });
 }
 
 function installImagePreview(
@@ -600,7 +639,6 @@ function installImagePreview(
   installReadiumFrameStyles(doc);
   if (!doc || doc.body.dataset.zenithReadiumImageBound === 'true') return;
   doc.body.dataset.zenithReadiumImageBound = 'true';
-  const boundImages = new WeakSet<Element>();
   let lastOpenedAt = 0;
 
   const isImageEvent = (event: Event) => {
@@ -636,33 +674,9 @@ function installImagePreview(
     }
   };
 
-  const bindImage = (image: Element) => {
-    if (boundImages.has(image)) return;
-    boundImages.add(image);
-    image.addEventListener('pointerdown', stopImagePointer, true);
-    image.addEventListener('pointerup', openFromEvent, true);
-    image.addEventListener('mousedown', stopImagePointer, true);
-    image.addEventListener('mouseup', openFromEvent, true);
-    image.addEventListener('touchend', openFromEvent, { capture: true, passive: false });
-    image.addEventListener('click', openFromEvent, true);
-  };
-
-  const bindImages = () => {
-    doc.querySelectorAll('img, svg image').forEach(bindImage);
-  };
-
-  bindImages();
-  const observer = new MutationObserver(bindImages);
-  observer.observe(doc.documentElement, { childList: true, subtree: true });
-
   doc.addEventListener('contextmenu', (event) => event.stopPropagation(), true);
   doc.addEventListener('pointerdown', stopImagePointer, true);
-  doc.addEventListener('pointerup', openFromEvent, true);
-  doc.addEventListener('mousedown', stopImagePointer, true);
-  doc.addEventListener('mouseup', openFromEvent, true);
-  doc.addEventListener('touchend', openFromEvent, { capture: true, passive: false });
   doc.addEventListener('click', openFromEvent, true);
-  wnd.addEventListener('click', openFromEvent, true);
 }
 
 function handleReadiumClick(event: ReadiumFrameClickEvent, onOpen: (image: { src: string; name: string }) => void) {
@@ -707,7 +721,7 @@ function formatProgressLabel(progress: number) {
 function formatPageCounter(progress: number, totalPages: number) {
   const safeTotal = Math.max(1, totalPages);
   const current = Math.max(1, Math.min(safeTotal, Math.round(progress * (safeTotal - 1)) + 1));
-  return `${current} / ${safeTotal}`;
+  return `章节 ${current} / ${safeTotal}`;
 }
 
 function installReadiumFrameStyles(doc: Document) {

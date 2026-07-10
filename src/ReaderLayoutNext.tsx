@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Book, ReaderTocItem } from './types';
+import { Book, ReaderSeekRequest, ReaderTocItem } from './types';
 import { useAppContext } from './store/AppStore';
 import { ArrowLeftRight, ArrowUpDown, BookOpen, ChevronLeft, Columns2, List, Monitor, Moon, Settings2, StepForward, Sun } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -20,7 +20,7 @@ export function ReaderLayout({ book, onClose, onOpenBook }: ReaderLayoutProps) {
   const [tocItems, setTocItems] = useState<ReaderTocItem[]>([]);
   const [tocTarget, setTocTarget] = useState<ReaderTocItem | null>(null);
   const [readingProgress, setReadingProgress] = useState(0);
-  const [seekProgress, setSeekProgress] = useState<number | null>(null);
+  const [seekRequest, setSeekRequest] = useState<ReaderSeekRequest | null>(null);
   const currentSeries = series.find((item) => item.bookIds.includes(book.id));
   const currentIndex = currentSeries ? currentSeries.bookIds.indexOf(book.id) : -1;
   const nextBook = currentSeries && currentIndex >= 0
@@ -31,6 +31,10 @@ export function ReaderLayout({ book, onClose, onOpenBook }: ReaderLayoutProps) {
     setChromeVisible(false);
     setShowSettings(false);
     setShowToc(false);
+    setTocItems([]);
+    setTocTarget(null);
+    setReadingProgress(0);
+    setSeekRequest(null);
   }, [book.id]);
 
   useEffect(() => {
@@ -53,14 +57,14 @@ export function ReaderLayout({ book, onClose, onOpenBook }: ReaderLayoutProps) {
   }, []);
 
   const openTocItem = (item: ReaderTocItem) => {
-    setTocTarget(item);
+    setTocTarget({ ...item });
     setShowToc(false);
   };
 
   const handleSeek = (value: number) => {
     const progress = Math.max(0, Math.min(1, value));
     setReadingProgress(progress);
-    setSeekProgress(progress);
+    setSeekRequest({ progress, requestId: Date.now() });
   };
 
   return (
@@ -280,16 +284,18 @@ export function ReaderLayout({ book, onClose, onOpenBook }: ReaderLayoutProps) {
         <div className="w-full h-full min-w-0 cursor-auto" onClick={(event) => event.stopPropagation()}>
           {book.type === 'epub' ? (
             <ReadiumEpubViewerNext
+              key={book.id}
               book={book}
               chromeVisible={chromeVisible}
               onProgressChange={setReadingProgress}
               onToggleChrome={toggleChrome}
               onTocChange={setTocItems}
               tocTarget={tocTarget}
-              seekProgress={seekProgress}
+              seekRequest={seekRequest}
             />
           ) : (
             <TxtViewerNext
+              key={book.id}
               book={book}
               chromeVisible={chromeVisible}
               nextBook={nextBook}
@@ -298,7 +304,7 @@ export function ReaderLayout({ book, onClose, onOpenBook }: ReaderLayoutProps) {
               onToggleChrome={toggleChrome}
               onTocChange={setTocItems}
               tocTarget={tocTarget}
-              seekProgress={seekProgress}
+              seekRequest={seekRequest}
             />
           )}
         </div>
