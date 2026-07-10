@@ -54,12 +54,15 @@ export type ReadiumPublicationLike = {
 };
 
 export async function createReadiumPublicationFromPath(path: string, fallbackTitle: string): Promise<ReadiumPublicationLike> {
-  const book = await openEpubBook(path, fallbackTitle);
+  const opened = await openEpubBook(path, fallbackTitle);
+  const { book, sessionId } = opened;
   const readingOrder = new LinkCollection(book.readingOrder.map(nativeLinkToReadiumLink));
   const resources = new LinkCollection(book.resources.map(nativeLinkToReadiumLink));
   const toc = new LinkCollection(book.toc.map(nativeLinkToReadiumLink));
   const positions = createPositions(readingOrder.items);
-  const resourceManager = new EpubResourceManager(path);
+  const resourceManager = new EpubResourceManager(path, sessionId);
+  let lastPrefetchKey = '';
+  let lastPrefetch: Promise<void> = Promise.resolve();
 
   return {
     metadata: new ReadiumMetadata(book.metadata),
@@ -80,11 +83,18 @@ export async function createReadiumPublicationFromPath(path: string, fallbackTit
       const start = Math.max(0, index - radius);
       const end = Math.min(readingOrder.items.length, index + radius + 1);
       const hrefs = readingOrder.items.slice(start, end).map((link) => link.href);
-      await prefetchEpubResources(path, hrefs);
+      const key = hrefs.join('\n');
+      if (key === lastPrefetchKey) return lastPrefetch;
+      lastPrefetchKey = key;
+      lastPrefetch = prefetchEpubResources(path, sessionId, hrefs).catch((error) => {
+        if (lastPrefetchKey === key) lastPrefetchKey = '';
+        throw error;
+      });
+      await lastPrefetch;
     },
     close: () => {
       resourceManager.close();
-      closeEpubBook(path).catch(() => {});
+      closeEpubBook(path, sessionId).catch(() => {});
     },
   };
 }
@@ -267,11 +277,13 @@ class ReadiumResource {
 
 class EpubResourceManager {
   private path: string;
+  private sessionId: string;
   private payloads = new Map<string, Promise<{ href: string; mediaType: string; text?: string; base64?: string; filePath?: string }>>();
   private blobUrls = new Map<string, string>();
 
-  constructor(path: string) {
+  constructor(path: string, sessionId: string) {
     this.path = path;
+    this.sessionId = sessionId;
   }
 
   get(link: ReadiumLink) {
@@ -314,7 +326,10 @@ class EpubResourceManager {
     const normalized = stripHash(normalizeZipPath(href));
     const existing = this.payloads.get(normalized);
     if (existing) return existing;
-    const payload = readEpubResource(this.path, normalized);
+    const payload = readEpubResource(this.path, this.sessionId, normalized).catch((error) => {
+      this.payloads.delete(normalized);
+      throw error;
+    });
     this.payloads.set(normalized, payload);
     return payload;
   }
@@ -328,11 +343,7 @@ class EpubResourceManager {
     const payload = await this.payloadFor(normalized);
     const type = payload.mediaType || link.type;
     if (payload.filePath && type !== 'text/css' && !link.mediaType.isHTML) {
-      const response = await fetch(toLocalAssetUrl(payload.filePath));
-      if (!response.ok) throw new Error(`Failed reading cached EPUB resource ${normalized}`);
-      const url = URL.createObjectURL(await response.blob());
-      this.blobUrls.set(normalized, url);
-      return url;
+      return toLocalAssetUrl(payload.filePath);
     }
     const content = type === 'text/css'
       ? await this.rewriteCss(payload.text ?? new TextDecoder().decode(base64ToBytes(payload.base64 || '')), normalized)

@@ -19,6 +19,7 @@ export interface NativeTxtChapter {
 }
 
 export interface NativeTxtBookInfo {
+  sessionId: string;
   totalChars: number;
   totalBytes: number;
   chapters: NativeTxtChapter[];
@@ -49,6 +50,11 @@ export interface NativeEpubBookInfo {
   readingOrder: NativeEpubLink[];
   resources: NativeEpubLink[];
   toc: NativeEpubLink[];
+}
+
+export interface NativeEpubOpenResult {
+  sessionId: string;
+  book: NativeEpubBookInfo;
 }
 
 export interface NativeEpubResource {
@@ -94,31 +100,31 @@ export async function openTxtBook(path: string): Promise<NativeTxtBookInfo> {
   return invoke<NativeTxtBookInfo>('open_txt_book', { path });
 }
 
-export async function readTxtWindow(path: string, start: number, end: number): Promise<NativeTxtWindow> {
-  return invoke<NativeTxtWindow>('read_txt_window', { path, start, end });
+export async function readTxtWindow(path: string, sessionId: string, start: number, end: number): Promise<NativeTxtWindow> {
+  return invoke<NativeTxtWindow>('read_txt_window', { path, sessionId, start, end });
 }
 
-export async function closeTxtBook(path: string) {
+export async function closeTxtBook(path: string, sessionId: string) {
   if (!isTauriApp()) return;
-  await invoke('close_txt_book', { path });
+  await invoke('close_txt_book', { path, sessionId });
 }
 
-export async function openEpubBook(path: string, fallbackTitle: string): Promise<NativeEpubBookInfo> {
-  return invoke<NativeEpubBookInfo>('open_epub_book', { path, fallbackTitle });
+export async function openEpubBook(path: string, fallbackTitle: string): Promise<NativeEpubOpenResult> {
+  return invoke<NativeEpubOpenResult>('open_epub_book', { path, fallbackTitle });
 }
 
-export async function readEpubResource(path: string, href: string): Promise<NativeEpubResource> {
-  return invoke<NativeEpubResource>('read_epub_resource', { path, href });
+export async function readEpubResource(path: string, sessionId: string, href: string): Promise<NativeEpubResource> {
+  return invoke<NativeEpubResource>('read_epub_resource', { path, sessionId, href });
 }
 
-export async function prefetchEpubResources(path: string, hrefs: string[]) {
+export async function prefetchEpubResources(path: string, sessionId: string, hrefs: string[]) {
   if (!isTauriApp() || hrefs.length === 0) return;
-  await invoke('prefetch_epub_resources', { path, hrefs });
+  await invoke('prefetch_epub_resources', { path, sessionId, hrefs });
 }
 
-export async function closeEpubBook(path: string) {
+export async function closeEpubBook(path: string, sessionId: string) {
   if (!isTauriApp()) return;
-  await invoke('close_epub_book', { path });
+  await invoke('close_epub_book', { path, sessionId });
 }
 
 export function toLocalAssetUrl(path: string) {

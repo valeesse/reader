@@ -60,6 +60,7 @@ export function TxtViewerNext({
   const wheelGestureTimerRef = useRef<number | undefined>(undefined);
   const wheelGestureLockedRef = useRef(false);
   const programmaticScrollRef = useRef(false);
+  const sessionIdRef = useRef('');
 
   const layoutKey = JSON.stringify({
     pageMode: settings.pageMode,
@@ -94,14 +95,20 @@ export function TxtViewerNext({
 
   useEffect(() => {
     let cancelled = false;
+    let openedSessionId = '';
     const loadText = async () => {
       try {
         setLoading(true);
         setLayoutReady(false);
         windowCacheRef.current.clear();
         const info = await openTxtBook(book.path);
-        if (cancelled) return;
+        openedSessionId = info.sessionId;
+        if (cancelled) {
+          closeTxtBook(book.path, openedSessionId).catch(() => {});
+          return;
+        }
 
+        sessionIdRef.current = openedSessionId;
         setBookInfo(info);
         totalCharsRef.current = info.totalChars;
         onTocChange(info.chapters.map((chapter, index) => ({
@@ -129,8 +136,10 @@ export function TxtViewerNext({
     loadText();
     return () => {
       cancelled = true;
+      windowRequestIdRef.current += 1;
       onTocChange([]);
-      closeTxtBook(book.path).catch(() => {});
+      if (openedSessionId) closeTxtBook(book.path, openedSessionId).catch(() => {});
+      if (sessionIdRef.current === openedSessionId) sessionIdRef.current = '';
     };
   }, [book.id, book.path]);
 
@@ -336,7 +345,9 @@ export function TxtViewerNext({
     isLoadingWindowRef.current = true;
     setLayoutReady(false);
     try {
-      const nextWindow = await readTxtWindow(book.path, range.start, range.end);
+      const sessionId = sessionIdRef.current;
+      if (!sessionId) throw new Error('TXT 阅读会话尚未就绪');
+      const nextWindow = await readTxtWindow(book.path, sessionId, range.start, range.end);
       if (requestId !== windowRequestIdRef.current) return;
       rememberWindow(nextWindow);
       applyWindow(nextWindow, anchor);
@@ -368,7 +379,10 @@ export function TxtViewerNext({
     const key = cacheKeyForRange(range);
     if (windowCacheRef.current.has(key)) return;
 
-    const nextWindow = await readTxtWindow(book.path, range.start, range.end);
+    const sessionId = sessionIdRef.current;
+    if (!sessionId) return;
+    const nextWindow = await readTxtWindow(book.path, sessionId, range.start, range.end);
+    if (sessionId !== sessionIdRef.current) return;
     rememberWindow(nextWindow);
   };
 
