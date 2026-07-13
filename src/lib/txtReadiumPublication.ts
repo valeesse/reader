@@ -53,7 +53,7 @@ export async function createTxtReadiumPublication(
     linkWithRel: () => undefined,
     linksWithRel: () => [],
     getCover: () => undefined,
-    prefetchAroundHref: async (href, radius = 2) => manager.prefetch(href, radius),
+    prefetchAroundHref: async (href, radius = 2, direction = 0) => manager.prefetch(href, radius, direction),
     close: () => {
       manager.close();
       closeTxtBook(path, info.sessionId).catch(() => {});
@@ -136,10 +136,12 @@ class TxtResourceManager {
     return request;
   }
 
-  async prefetch(href: string, radius: number) {
+  async prefetch(href: string, radius: number, direction: -1 | 0 | 1) {
     const index = this.chunks.findIndex((chunk) => chunk.href === href.split('#')[0]);
     if (index < 0) return;
-    const targets = this.chunks.slice(Math.max(0, index - radius), index + radius + 1);
+    const start = Math.max(0, direction > 0 ? index : index - radius);
+    const end = Math.min(this.chunks.length, direction < 0 ? index + 1 : index + radius + 1);
+    const targets = this.chunks.slice(start, end);
     await Promise.all(targets.map((chunk) => this.read(new ReadiumLink({ href: chunk.href }))));
   }
 

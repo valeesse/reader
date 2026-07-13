@@ -53,7 +53,7 @@ export type ReadiumPublicationLike = {
   linkWithRel: (rel: string) => ReadiumLink | undefined;
   linksWithRel: (rel: string) => ReadiumLink[];
   getCover: () => ReadiumLink | undefined;
-  prefetchAroundHref: (href: string, radius?: number) => Promise<void>;
+  prefetchAroundHref: (href: string, radius?: number, direction?: -1 | 0 | 1) => Promise<void>;
   refinePositions?: (signal: AbortSignal) => Promise<void>;
   close: () => void;
 };
@@ -93,11 +93,11 @@ export async function createReadiumPublicationFromPath(path: string, fallbackTit
     linkWithRel: (rel) => resources.findWithRel(rel),
     linksWithRel: (rel) => resources.filterByRel(rel),
     getCover: () => resources.findWithRel('cover') || resources.items.find((link) => link.mediaType.isBitmap),
-    prefetchAroundHref: async (href, radius = 5) => {
+    prefetchAroundHref: async (href, radius = 5, direction = 0) => {
       const index = readingOrder.findIndexWithHref(href);
       if (index < 0) return;
-      const start = Math.max(0, index - radius);
-      const end = Math.min(readingOrder.items.length, index + radius + 1);
+      const start = Math.max(0, direction > 0 ? index : index - radius);
+      const end = Math.min(readingOrder.items.length, direction < 0 ? index + 1 : index + radius + 1);
       const hrefs = readingOrder.items.slice(start, end).map((link) => link.href);
       const key = hrefs.join('\n');
       if (key === lastPrefetchKey) return lastPrefetch;
@@ -530,18 +530,40 @@ async function calculatePositionCounts(
   signal: AbortSignal,
 ): Promise<EpubPositionCount[]> {
   const counts: EpubPositionCount[] = [];
-  for (const link of readingOrder) {
-    if (signal.aborted) return counts;
-    try {
-      const source = await resourceManager.sourceText(link);
-      const text = source ? new DOMParser().parseFromString(source, 'text/html').body?.textContent || '' : '';
-      counts.push({ href: link.href, count: Math.max(1, Math.ceil(text.trim().length / EPUB_POSITION_CHARS)) });
-    } catch {
-      counts.push({ href: link.href, count: 1 });
+  const worker = new Worker(new URL('./epubPosition.worker.ts', import.meta.url), { type: 'module' });
+  try {
+    for (const link of readingOrder) {
+      if (signal.aborted) return counts;
+      try {
+        const source = await resourceManager.sourceText(link);
+        const textLength = source ? await countTextInWorker(worker, source, signal) : 0;
+        counts.push({ href: link.href, count: Math.max(1, Math.ceil(textLength / EPUB_POSITION_CHARS)) });
+      } catch {
+        if (signal.aborted) return counts;
+        counts.push({ href: link.href, count: 1 });
+      }
+      await yieldToMainThread();
     }
-    await yieldToMainThread();
+  } finally {
+    worker.terminate();
   }
   return counts;
+}
+
+function countTextInWorker(worker: Worker, source: string, signal: AbortSignal) {
+  return new Promise<number>((resolve, reject) => {
+    const abort = () => reject(new DOMException('Position refinement aborted', 'AbortError'));
+    signal.addEventListener('abort', abort, { once: true });
+    worker.onmessage = (event: MessageEvent<number>) => {
+      signal.removeEventListener('abort', abort);
+      resolve(event.data);
+    };
+    worker.onerror = (event) => {
+      signal.removeEventListener('abort', abort);
+      reject(event.error || new Error(event.message));
+    };
+    worker.postMessage(source);
+  });
 }
 
 function coarsePositionCounts(readingOrder: ReadiumLink[]): EpubPositionCount[] {

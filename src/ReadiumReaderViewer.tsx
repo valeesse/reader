@@ -17,7 +17,8 @@ import { saveImageFromSource } from './lib/native';
 import { ReaderLoadError, ReaderLoading, ReaderPageCounter, ReaderViewerProps } from './components/reader/ReaderShared';
 
 const DOUBLE_PAGE_CENTER_GAP = 56;
-const RESOURCE_PREFETCH_RADIUS = 5;
+const IMMEDIATE_PREFETCH_RADIUS = 1;
+const STABLE_PREFETCH_RADIUS = 3;
 
 export function ReadiumReaderViewer({
   book,
@@ -60,6 +61,11 @@ export function ReadiumReaderViewer({
   const suppressChromeToggleUntilRef = useRef(0);
   const wheelReadyAtRef = useRef(0);
   const wheelNavigatingRef = useRef(false);
+  const stablePrefetchTimerRef = useRef<number | null>(null);
+  const refinementTimerRef = useRef<number | null>(null);
+  const refinementIdleRef = useRef<number | null>(null);
+  const refinementAbortRef = useRef<AbortController | null>(null);
+  const positionsRefinedRef = useRef(false);
 
   useEffect(() => {
     settingsRef.current = settings;
@@ -148,6 +154,7 @@ export function ReadiumReaderViewer({
         }
 
         publicationRef.current = publication;
+        positionsRefinedRef.current = !publication.refinePositions;
         onTocChange(toTocItems(publication));
         const storedProgress = await getProgress(book.id);
         if (cancelled) {
@@ -159,9 +166,9 @@ export function ReadiumReaderViewer({
         const initialPosition = deserializeReadiumLocator(storedProgress?.location)
           || legacyProgressPosition(storedProgress?.scrollPercentage, publication);
         if (initialPosition?.href) {
-          publication.prefetchAroundHref(initialPosition.href, RESOURCE_PREFETCH_RADIUS).catch(() => {});
+          publication.prefetchAroundHref(initialPosition.href, IMMEDIATE_PREFETCH_RADIUS).catch(() => {});
         } else {
-          publication.prefetchAroundHref(publication.readingOrder.items[0]?.href || '', RESOURCE_PREFETCH_RADIUS).catch(() => {});
+          publication.prefetchAroundHref(publication.readingOrder.items[0]?.href || '', IMMEDIATE_PREFETCH_RADIUS).catch(() => {});
         }
         const initialPreferences = createReadiumPreferences(settingsRef.current, book.type);
         lastPreferencesKeyRef.current = readerSettingsKey(initialPreferences, settingsRef.current);
@@ -177,7 +184,10 @@ export function ReadiumReaderViewer({
             },
             positionChanged: (locator) => {
               const progress = progressionFromLocator(locator, publication);
-              publication.prefetchAroundHref(locator.href, RESOURCE_PREFETCH_RADIUS).catch(() => {});
+              const previousProgress = lastEmittedProgressRef.current;
+              const direction: -1 | 0 | 1 = previousProgress < 0 ? 0 : progress > previousProgress ? 1 : progress < previousProgress ? -1 : 0;
+              publication.prefetchAroundHref(locator.href, IMMEDIATE_PREFETCH_RADIUS, direction).catch(() => {});
+              scheduleDeferredWork(locator.href, direction, false);
               schedulePageCounter(locator);
               if (Math.abs(progress - lastEmittedProgressRef.current) >= 0.001) {
                 lastEmittedProgressRef.current = progress;
@@ -208,6 +218,7 @@ export function ReadiumReaderViewer({
           .then(() => {
             if (cancelled) return;
             resolveLoading(false);
+            scheduleDeferredWork(initialPosition?.href || publication.readingOrder.items[0]?.href || '', 0, true);
           })
           .catch((error) => {
             console.error('Readium navigator failed to load', error);
@@ -240,6 +251,7 @@ export function ReadiumReaderViewer({
       }
       if (settingsApplyTimerRef.current !== null) window.clearTimeout(settingsApplyTimerRef.current);
       if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current);
+      cancelDeferredWork(true);
       flushProgressSave();
       const navigator = navigatorRef.current;
       navigatorRef.current = null;
@@ -252,6 +264,7 @@ export function ReadiumReaderViewer({
   useEffect(() => {
     const navigator = navigatorRef.current;
     if (!navigator) return;
+    cancelDeferredWork(true);
     const revision = ++settingsRevisionRef.current;
     const preferences = createReadiumPreferences(settings, book.type);
     const key = readerSettingsKey(preferences, settings);
@@ -270,8 +283,12 @@ export function ReadiumReaderViewer({
         if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
         lastPreferencesKeyRef.current = key;
         applyReadiumFrameSettingsToNavigator(navigator, settings, book.type);
-        if (before) navigator.go(before, false, () => revealReadiumFrames(containerRef.current));
-        else revealReadiumFrames(containerRef.current);
+        const finish = () => {
+          revealReadiumFrames(containerRef.current);
+          scheduleDeferredWork(navigator.currentLocator?.href || before?.href || '', 0, true);
+        };
+        if (before) navigator.go(before, false, finish);
+        else finish();
       });
     }, 120);
     return () => {
@@ -316,6 +333,69 @@ export function ReadiumReaderViewer({
       .catch(() => {})
       .then(operation)
       .catch((error) => console.warn('Failed to update Readium layout', error));
+  };
+
+  const cancelDeferredWork = (abortRefinement: boolean) => {
+    if (stablePrefetchTimerRef.current !== null) window.clearTimeout(stablePrefetchTimerRef.current);
+    if (refinementTimerRef.current !== null) window.clearTimeout(refinementTimerRef.current);
+    if (refinementIdleRef.current !== null) {
+      window.cancelIdleCallback(refinementIdleRef.current);
+    }
+    stablePrefetchTimerRef.current = null;
+    refinementTimerRef.current = null;
+    refinementIdleRef.current = null;
+    if (abortRefinement) {
+      refinementAbortRef.current?.abort();
+      refinementAbortRef.current = null;
+    }
+  };
+
+  const scheduleDeferredWork = (href: string, direction: -1 | 0 | 1, restartRefinement: boolean) => {
+    const publication = publicationRef.current;
+    if (!publication || !href) return;
+    if (stablePrefetchTimerRef.current !== null) window.clearTimeout(stablePrefetchTimerRef.current);
+    stablePrefetchTimerRef.current = window.setTimeout(() => {
+      stablePrefetchTimerRef.current = null;
+      publication.prefetchAroundHref(href, STABLE_PREFETCH_RADIUS, direction).catch(() => {});
+    }, 320);
+
+    if (restartRefinement) cancelPositionRefinement();
+    if (positionsRefinedRef.current || !publication.refinePositions || refinementAbortRef.current) return;
+    if (refinementTimerRef.current !== null) window.clearTimeout(refinementTimerRef.current);
+    refinementTimerRef.current = window.setTimeout(() => {
+      refinementTimerRef.current = null;
+      const run = () => {
+        refinementIdleRef.current = null;
+        if (positionsRefinedRef.current || !publication.refinePositions) return;
+        const controller = new AbortController();
+        refinementAbortRef.current = controller;
+        publication.refinePositions(controller.signal).then(() => {
+          if (!controller.signal.aborted) {
+            positionsRefinedRef.current = true;
+            const navigator = navigatorRef.current;
+            if (navigator?.currentLocator) {
+              setPageCounter(formatEpubPageCounter(navigator, navigator.currentLocator, publication));
+            }
+          }
+        }).catch((error) => {
+          if (!controller.signal.aborted) console.warn('Failed to refine publication positions', error);
+        }).finally(() => {
+          if (refinementAbortRef.current === controller) refinementAbortRef.current = null;
+        });
+      };
+      refinementIdleRef.current = window.requestIdleCallback(run, { timeout: 1500 });
+    }, 850);
+  };
+
+  const cancelPositionRefinement = () => {
+    if (refinementTimerRef.current !== null) window.clearTimeout(refinementTimerRef.current);
+    if (refinementIdleRef.current !== null) {
+      window.cancelIdleCallback(refinementIdleRef.current);
+    }
+    refinementTimerRef.current = null;
+    refinementIdleRef.current = null;
+    refinementAbortRef.current?.abort();
+    refinementAbortRef.current = null;
   };
 
   useEffect(() => {
