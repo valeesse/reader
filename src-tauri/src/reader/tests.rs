@@ -110,6 +110,11 @@ mod tests {
         let path = PathBuf::from(
             std::env::var("ZENITH_TXT_PROBE").expect("ZENITH_TXT_PROBE must point to a TXT"),
         );
+        let preview_started = std::time::Instant::now();
+        let preview = read_txt_preview_blocking(path.to_str().unwrap(), 12_000).unwrap();
+        let preview_ms = preview_started.elapsed().as_millis();
+        assert!(!preview.text.is_empty());
+        assert!(preview.text.chars().count() <= 12_000);
         let mut converted_path = None;
         let data_path = match build_txt_index(&path) {
             Ok(_) => path.clone(),
@@ -126,9 +131,11 @@ mod tests {
         assert!(checkpoints.len() > 1);
         assert!(!chapters.is_empty());
         eprintln!(
-            "real TXT: {total_chars} chars, {} checkpoints, {} chapters, converted={}",
+            "real TXT: {total_chars} chars, {} checkpoints, {} chapters, preview={} in {} ms, converted={}",
             checkpoints.len(),
             chapters.len(),
+            preview.encoding,
+            preview_ms,
             converted_path.is_some()
         );
 

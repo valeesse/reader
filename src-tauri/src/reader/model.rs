@@ -52,6 +52,13 @@ struct TxtTextWindow {
     text: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TxtPreview {
+    text: String,
+    encoding: String,
+}
+
 struct EpubBookCache {
     signature: FileSignature,
     last_used_at: u128,

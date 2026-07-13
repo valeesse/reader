@@ -5,6 +5,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan_library,
             open_txt_book,
+            read_txt_preview,
             read_txt_window,
             close_txt_book,
             open_epub_book,
@@ -21,4 +22,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-

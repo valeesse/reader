@@ -13,7 +13,7 @@ import {
   serializeReadiumLocator,
 } from './lib/readiumPublication';
 import { createReaderPublication } from './lib/readerPublication';
-import { saveImageFromSource } from './lib/native';
+import { readTxtPreview, saveImageFromSource } from './lib/native';
 import { ReaderLoadError, ReaderLoading, ReaderPageCounter, ReaderViewerProps } from './components/reader/ReaderShared';
 
 const DOUBLE_PAGE_CENTER_GAP = 56;
@@ -43,6 +43,7 @@ export function ReadiumReaderViewer({
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
   const [savingImage, setSavingImage] = useState(false);
   const [saveStatus, setSaveStatus] = useState('');
+  const [txtPreview, setTxtPreview] = useState('');
   const settingsRef = useRef(settings);
   const onProgressChangeRef = useRef(onProgressChange);
   const onToggleChromeRef = useRef(onToggleChrome);
@@ -137,17 +138,27 @@ export function ReadiumReaderViewer({
       loadingResolvedRef.current = true;
       if (forceReveal) revealReadiumFrames(containerRef.current);
       setLoading(false);
+      setTxtPreview('');
     };
 
     const init = async () => {
       try {
         setLoading(true);
         setLoadError('');
+        setTxtPreview('');
         loadingResolvedRef.current = false;
         const container = containerRef.current;
         if (!container) return;
 
-        const publication = await createReaderPublication(book);
+        const progressPromise = getProgress(book.id);
+        const publicationPromise = createReaderPublication(book);
+        const storedProgress = await progressPromise;
+        if (book.type === 'txt' && !storedProgress?.location && storedProgress?.scrollPercentage === undefined) {
+          readTxtPreview(book.path, 12_000).then((preview) => {
+            if (!cancelled && !loadingResolvedRef.current) setTxtPreview(preview.text);
+          }).catch(() => {});
+        }
+        const publication = await publicationPromise;
         if (cancelled) {
           publication.close();
           return;
@@ -156,7 +167,6 @@ export function ReadiumReaderViewer({
         publicationRef.current = publication;
         positionsRefinedRef.current = !publication.refinePositions;
         onTocChange(toTocItems(publication));
-        const storedProgress = await getProgress(book.id);
         if (cancelled) {
           if (publicationRef.current === publication) publicationRef.current = null;
           publication.close();
@@ -543,7 +553,30 @@ export function ReadiumReaderViewer({
       <ReaderPageCounter value={pageCounter} />
 
       {loading && (
-        <ReaderLoading overlay />
+        txtPreview ? (
+          <div
+            className="pointer-events-none absolute inset-0 z-20 overflow-hidden bg-inherit"
+            style={{
+              paddingLeft: `min(${settings.pageMargins.left}px, 35vw)`,
+              paddingRight: `min(${settings.pageMargins.right}px, 35vw)`,
+              paddingTop: `min(${settings.pageMargins.top}px, 30vh)`,
+              paddingBottom: `min(${settings.pageMargins.bottom}px, 30vh)`,
+            }}
+          >
+            <div
+              className="h-full overflow-hidden whitespace-pre-wrap"
+              style={{
+                color: themeColors(settings.theme).text,
+                fontFamily: settings.fontFamily,
+                fontSize: `${settings.fontSize}px`,
+                letterSpacing: `${settings.letterSpacing}em`,
+                lineHeight: settings.lineHeight,
+              }}
+            >
+              {txtPreview}
+            </div>
+          </div>
+        ) : <ReaderLoading overlay />
       )}
 
       <AnimatePresence>

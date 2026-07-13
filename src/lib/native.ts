@@ -31,6 +31,11 @@ export interface NativeTxtWindow {
   text: string;
 }
 
+export interface NativeTxtPreview {
+  text: string;
+  encoding: string;
+}
+
 export interface NativeEpubLink {
   href: string;
   mediaType: string;
@@ -99,6 +104,10 @@ export async function onLibraryScanProgress(callback: (progress: ScanProgress) =
 
 export async function openTxtBook(path: string): Promise<NativeTxtBookInfo> {
   return invoke<NativeTxtBookInfo>('open_txt_book', { path });
+}
+
+export async function readTxtPreview(path: string, maxChars = 12000): Promise<NativeTxtPreview> {
+  return invoke<NativeTxtPreview>('read_txt_preview', { path, maxChars });
 }
 
 export async function readTxtWindow(path: string, sessionId: string, start: number, end: number): Promise<NativeTxtWindow> {

@@ -9,6 +9,37 @@ async fn open_txt_book(app: AppHandle, path: String) -> Result<TxtBookInfo, Stri
     .map_err(|err| format!("TXT 打开任务中断: {err}"))?
 }
 
+#[tauri::command]
+async fn read_txt_preview(path: String, max_chars: usize) -> Result<TxtPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || read_txt_preview_blocking(&path, max_chars))
+        .await
+        .map_err(|err| format!("TXT 预读任务中断: {err}"))?
+}
+
+fn read_txt_preview_blocking(path: &str, max_chars: usize) -> Result<TxtPreview, String> {
+    let mut file = File::open(path).map_err(|error| format!("打开 TXT 预读源失败: {error}"))?;
+    let mut bytes = Vec::with_capacity(256 * 1024);
+    std::io::Read::by_ref(&mut file)
+        .take(256 * 1024)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("读取 TXT 预览失败: {error}"))?;
+    let (text, encoding) = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        (UTF_8.decode(&bytes[3..]).0.into_owned(), "utf-8")
+    } else if bytes.starts_with(&[0xFF, 0xFE]) {
+        (UTF_16LE.decode(&bytes[2..]).0.into_owned(), "utf-16le")
+    } else if bytes.starts_with(&[0xFE, 0xFF]) {
+        (UTF_16BE.decode(&bytes[2..]).0.into_owned(), "utf-16be")
+    } else if std::str::from_utf8(&bytes).is_ok() {
+        (UTF_8.decode(&bytes).0.into_owned(), "utf-8")
+    } else {
+        (GBK.decode(&bytes).0.into_owned(), "gbk")
+    };
+    Ok(TxtPreview {
+        text: text.chars().take(max_chars.clamp(1, 24_000)).collect(),
+        encoding: encoding.to_string(),
+    })
+}
+
 fn open_txt_book_blocking(
     app: &AppHandle,
     state: &ReaderState,
