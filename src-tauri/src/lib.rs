@@ -22,6 +22,7 @@ use walkdir::WalkDir;
 use zip::ZipArchive;
 
 include!("reader/model.rs");
+include!("reader/lifecycle.rs");
 include!("reader/library.rs");
 include!("reader/txt_commands.rs");
 include!("reader/epub_commands.rs");

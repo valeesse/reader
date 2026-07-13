@@ -8,7 +8,6 @@ fn load_txt_book(
             signature,
             last_used_at: now_millis_u128(),
             active_sessions: HashSet::new(),
-            encoding: index.encoding,
             data_path: PathBuf::from(index.data_path),
             total_chars: index.total_chars,
             total_bytes: index.total_bytes,
@@ -18,42 +17,26 @@ fn load_txt_book(
     }
 
     let bom = detect_txt_bom(path)?;
-    let (data_path, encoding, total_chars, checkpoints, chapters) = if let Some(bom) = bom {
-        let (skip, source_encoding, encoding_name) = match bom {
-            TxtBom::Utf8 => (3, None, "utf-8"),
-            TxtBom::Utf16Le => (2, Some(UTF_16LE), "utf-16le"),
-            TxtBom::Utf16Be => (2, Some(UTF_16BE), "utf-16be"),
+    let (data_path, total_chars, checkpoints, chapters) = if let Some(bom) = bom {
+        let (skip, source_encoding) = match bom {
+            TxtBom::Utf8 => (3, None),
+            TxtBom::Utf16Le => (2, Some(UTF_16LE)),
+            TxtBom::Utf16Be => (2, Some(UTF_16BE)),
         };
         let data_path = create_utf8_txt_cache(app, path, signature, Some(skip), source_encoding)?;
         let (total_chars, checkpoints, chapters) =
             build_txt_index(&data_path).map_err(|error| format!("TXT 转码索引失败: {error}"))?;
-        (
-            data_path,
-            encoding_name.to_string(),
-            total_chars,
-            checkpoints,
-            chapters,
-        )
+        (data_path, total_chars, checkpoints, chapters)
     } else {
         match build_txt_index(Path::new(path)) {
-            Ok((total_chars, checkpoints, chapters)) => (
-                PathBuf::from(path),
-                "utf-8".to_string(),
-                total_chars,
-                checkpoints,
-                chapters,
-            ),
+            Ok((total_chars, checkpoints, chapters)) => {
+                (PathBuf::from(path), total_chars, checkpoints, chapters)
+            }
             Err(TxtIndexError::InvalidUtf8) => {
                 let data_path = create_utf8_txt_cache(app, path, signature, None, Some(GBK))?;
                 let (total_chars, checkpoints, chapters) = build_txt_index(&data_path)
                     .map_err(|error| format!("GBK 转码后的 TXT 索引失败: {error}"))?;
-                (
-                    data_path,
-                    "gbk".to_string(),
-                    total_chars,
-                    checkpoints,
-                    chapters,
-                )
+                (data_path, total_chars, checkpoints, chapters)
             }
             Err(TxtIndexError::Io(error)) => return Err(error),
         }
@@ -62,7 +45,6 @@ fn load_txt_book(
         signature,
         last_used_at: now_millis_u128(),
         active_sessions: HashSet::new(),
-        encoding,
         data_path,
         total_chars,
         total_bytes: signature.len,
@@ -103,7 +85,6 @@ fn save_txt_index_to_persistent_cache(app: &AppHandle, path: &str, cache: &TxtBo
         version: PERSISTENT_CACHE_VERSION,
         path: path.to_string(),
         signature: cache.signature,
-        encoding: cache.encoding.clone(),
         data_path: cache.data_path.to_string_lossy().to_string(),
         data_bytes: fs::metadata(&cache.data_path)
             .map(|metadata| metadata.len())
@@ -139,4 +120,3 @@ impl std::fmt::Display for TxtIndexError {
         }
     }
 }
-

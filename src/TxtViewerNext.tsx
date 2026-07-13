@@ -260,7 +260,6 @@ export function TxtViewerNext({
     pendingPersistProgressRef.current = undefined;
     saveProgress({
       bookId: book.id,
-      chapterIndex: 0,
       scrollPercentage,
       updatedAt: Date.now(),
     }).catch((error) => {

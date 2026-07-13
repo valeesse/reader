@@ -26,10 +26,7 @@ fn open_epub_book_blocking(
             .epub_books
             .lock()
             .map_err(|_| "EPUB 缓存被占用".to_string())?;
-        books
-            .get(&path)
-            .map(|cache| cache.signature != signature)
-            .unwrap_or(true)
+        cache_requires_reload(&books, &path, signature)
     };
 
     if should_reload {
@@ -51,11 +48,7 @@ fn open_epub_book_blocking(
             .epub_books
             .lock()
             .map_err(|_| "EPUB 缓存被占用".to_string())?;
-        if books
-            .get(&path)
-            .map(|cache| cache.signature != signature)
-            .unwrap_or(true)
-        {
+        if cache_requires_reload(&books, &path, signature) {
             books.insert(path.clone(), loaded);
         }
     }
@@ -68,13 +61,12 @@ fn open_epub_book_blocking(
     let cache = books
         .get_mut(&path)
         .ok_or_else(|| "EPUB 缓存初始化失败".to_string())?;
-    cache.active_sessions.insert(session_id.clone());
-    cache.last_used_at = now_millis_u128();
+    start_book_session(cache, session_id.clone());
     let result = EpubOpenResult {
         session_id,
         book: cache.info.clone(),
     };
-    trim_epub_cache(&mut books);
+    trim_book_cache(&mut books, EPUB_BOOK_CACHE_LIMIT);
     Ok(result)
 }
 
@@ -176,10 +168,8 @@ fn close_epub_book(
         .lock()
         .map_err(|_| "EPUB 缓存被占用".to_string())?;
     if let Some(cache) = books.get_mut(&path) {
-        cache.active_sessions.remove(&session_id);
-        cache.last_used_at = now_millis_u128();
+        close_book_session(cache, &session_id);
     }
-    trim_epub_cache(&mut books);
+    trim_book_cache(&mut books, EPUB_BOOK_CACHE_LIMIT);
     Ok(())
 }
-

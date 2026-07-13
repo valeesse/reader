@@ -203,34 +203,6 @@ fn webdav_cached_book_path(app: &AppHandle, remote_path: &str) -> Result<PathBuf
     Ok(dir.join(format!("{}.{}", hash_string(remote_path), extension)))
 }
 
-fn trim_txt_cache(books: &mut HashMap<String, TxtBookCache>) {
-    while books.len() > TXT_BOOK_CACHE_LIMIT {
-        let Some(path) = books
-            .iter()
-            .filter(|(_, cache)| cache.active_sessions.is_empty())
-            .min_by_key(|(_, cache)| cache.last_used_at)
-            .map(|(path, _)| path.clone())
-        else {
-            break;
-        };
-        books.remove(&path);
-    }
-}
-
-fn trim_epub_cache(books: &mut HashMap<String, EpubBookCache>) {
-    while books.len() > EPUB_BOOK_CACHE_LIMIT {
-        let Some(path) = books
-            .iter()
-            .filter(|(_, cache)| cache.active_sessions.is_empty())
-            .min_by_key(|(_, cache)| cache.last_used_at)
-            .map(|(path, _)| path.clone())
-        else {
-            break;
-        };
-        books.remove(&path);
-    }
-}
-
 fn webdav_state_url(config: &WebDavConfig) -> Result<String, String> {
     let mut url = webdav_base_url(config)?;
     {
@@ -242,4 +214,3 @@ fn webdav_state_url(config: &WebDavConfig) -> Result<String, String> {
     }
     Ok(url.to_string())
 }
-

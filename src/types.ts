@@ -26,7 +26,6 @@ export interface Series {
 export interface ReadingProgress {
   bookId: string;
   location?: string; // epubcfi for epub
-  chapterIndex?: number; // for txt
   scrollPercentage?: number; // for txt
   updatedAt: number;
 }

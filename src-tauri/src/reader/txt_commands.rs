@@ -20,10 +20,7 @@ fn open_txt_book_blocking(
             .txt_books
             .lock()
             .map_err(|_| "TXT 缓存被占用".to_string())?;
-        books
-            .get(&path)
-            .map(|cache| cache.signature != signature)
-            .unwrap_or(true)
+        cache_requires_reload(&books, &path, signature)
     };
 
     if should_reload {
@@ -32,11 +29,7 @@ fn open_txt_book_blocking(
             .txt_books
             .lock()
             .map_err(|_| "TXT 缓存被占用".to_string())?;
-        if books
-            .get(&path)
-            .map(|cache| cache.signature != signature)
-            .unwrap_or(true)
-        {
+        if cache_requires_reload(&books, &path, signature) {
             books.insert(path.clone(), loaded);
         }
     }
@@ -49,15 +42,14 @@ fn open_txt_book_blocking(
     let cache = books
         .get_mut(&path)
         .ok_or_else(|| "TXT 缓存初始化失败".to_string())?;
-    cache.active_sessions.insert(session_id.clone());
-    cache.last_used_at = now_millis_u128();
+    start_book_session(cache, session_id.clone());
     let info = TxtBookInfo {
         session_id,
         total_chars: cache.total_chars,
         total_bytes: cache.total_bytes,
         chapters: cache.chapters.clone(),
     };
-    trim_txt_cache(&mut books);
+    trim_book_cache(&mut books, TXT_BOOK_CACHE_LIMIT);
     Ok(info)
 }
 
@@ -93,13 +85,7 @@ fn read_txt_window_blocking(
     let cache = books
         .get_mut(path)
         .ok_or_else(|| "TXT 尚未打开".to_string())?;
-    if cache.signature != signature {
-        return Err("TXT 文件已变更，请重新打开".to_string());
-    }
-    if !cache.active_sessions.contains(session_id) {
-        return Err("TXT 阅读会话已失效".to_string());
-    }
-    cache.last_used_at = now_millis_u128();
+    validate_book_session(cache, signature, session_id, "TXT")?;
     let start = start.min(cache.total_chars);
     let end = end.max(start).min(cache.total_chars);
     let text = read_txt_char_range(cache, start, end)?;
@@ -118,10 +104,8 @@ fn close_txt_book(
         .lock()
         .map_err(|_| "TXT 缓存被占用".to_string())?;
     if let Some(cache) = books.get_mut(&path) {
-        cache.active_sessions.remove(&session_id);
-        cache.last_used_at = now_millis_u128();
+        close_book_session(cache, &session_id);
     }
-    trim_txt_cache(&mut books);
+    trim_book_cache(&mut books, TXT_BOOK_CACHE_LIMIT);
     Ok(())
 }
-

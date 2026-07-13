@@ -81,14 +81,7 @@ fn validate_epub_session(state: &ReaderState, path: &str, session_id: &str) -> R
     let book = books
         .get_mut(path)
         .ok_or_else(|| "EPUB 尚未打开".to_string())?;
-    if book.signature != signature {
-        return Err("EPUB 文件已变更，请重新打开".to_string());
-    }
-    if !book.active_sessions.contains(session_id) {
-        return Err("EPUB 阅读会话已失效".to_string());
-    }
-    book.last_used_at = now_millis_u128();
-    Ok(())
+    validate_book_session(book, signature, session_id, "EPUB")
 }
 
 fn epub_manifest_item_for_href(
@@ -245,4 +238,3 @@ fn trim_epub_resource_cache(book: &mut EpubBookCache, max_count: usize, max_byte
         }
     }
 }
-
