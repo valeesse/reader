@@ -97,6 +97,7 @@ struct EpubBookInfo {
 #[serde(rename_all = "camelCase")]
 struct EpubOpenResult {
     session_id: String,
+    cache_key: String,
     book: EpubBookInfo,
 }
 
@@ -214,4 +215,3 @@ struct PersistentEpubBookCache {
 
 type TxtIndex = (usize, Vec<(usize, usize)>, Vec<TxtChapterInfo>);
 type ParsedEpubMetadata = (String, String, Option<String>, Option<String>, Option<f64>);
-

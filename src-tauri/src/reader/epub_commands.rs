@@ -64,6 +64,7 @@ fn open_epub_book_blocking(
     start_book_session(cache, session_id.clone());
     let result = EpubOpenResult {
         session_id,
+        cache_key: format!("{}-{}", cache.signature.len, cache.signature.modified_ns),
         book: cache.info.clone(),
     };
     trim_book_cache(&mut books, EPUB_BOOK_CACHE_LIMIT);

@@ -54,6 +54,7 @@ export interface NativeEpubBookInfo {
 
 export interface NativeEpubOpenResult {
   sessionId: string;
+  cacheKey: string;
   book: NativeEpubBookInfo;
 }
 

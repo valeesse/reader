@@ -7,6 +7,7 @@ import {
   openEpubBook,
   toLocalAssetUrl,
 } from './native';
+import { EpubPositionCount, getCachedEpubPositionCounts, saveCachedEpubPositionCounts } from './publicationPositionCache';
 
 const EPUB_PROFILE = 'https://readium.org/webpub-manifest/profiles/epub';
 const READING_PROGRESSION = {
@@ -53,6 +54,7 @@ export type ReadiumPublicationLike = {
   linksWithRel: (rel: string) => ReadiumLink[];
   getCover: () => ReadiumLink | undefined;
   prefetchAroundHref: (href: string, radius?: number) => Promise<void>;
+  refinePositions?: (signal: AbortSignal) => Promise<void>;
   close: () => void;
 };
 
@@ -68,12 +70,13 @@ export type ReadiumResourceLike = {
 
 export async function createReadiumPublicationFromPath(path: string, fallbackTitle: string): Promise<ReadiumPublicationLike> {
   const opened = await openEpubBook(path, fallbackTitle);
-  const { book, sessionId } = opened;
+  const { book, sessionId, cacheKey } = opened;
   const readingOrder = new LinkCollection(book.readingOrder.map(nativeLinkToReadiumLink));
   const resources = new LinkCollection(book.resources.map(nativeLinkToReadiumLink));
   const toc = new LinkCollection(book.toc.map(nativeLinkToReadiumLink));
   const resourceManager = new EpubResourceManager(path, sessionId);
-  const positions = await createPositions(readingOrder.items, resourceManager);
+  const cachedCounts = await getCachedEpubPositionCounts(path, cacheKey).catch(() => undefined);
+  const positions = createPositionsFromCounts(readingOrder.items, cachedCounts || coarsePositionCounts(readingOrder.items));
   let lastPrefetchKey = '';
   let lastPrefetch: Promise<void> = Promise.resolve();
 
@@ -104,6 +107,13 @@ export async function createReadiumPublicationFromPath(path: string, fallbackTit
         throw error;
       });
       await lastPrefetch;
+    },
+    refinePositions: cachedCounts ? undefined : async (signal) => {
+      const counts = await calculatePositionCounts(readingOrder.items, resourceManager, signal);
+      if (signal.aborted) return;
+      const refined = createPositionsFromCounts(readingOrder.items, counts);
+      positions.splice(0, positions.length, ...refined);
+      await saveCachedEpubPositionCounts(path, cacheKey, counts);
     },
     close: () => {
       resourceManager.close();
@@ -514,16 +524,33 @@ function nativeLinkToReadiumLink(link: NativeEpubLink) {
   });
 }
 
-async function createPositions(readingOrder: ReadiumLink[], resourceManager: EpubResourceManager) {
-  const counts = await Promise.all(readingOrder.map(async (link) => {
+async function calculatePositionCounts(
+  readingOrder: ReadiumLink[],
+  resourceManager: EpubResourceManager,
+  signal: AbortSignal,
+): Promise<EpubPositionCount[]> {
+  const counts: EpubPositionCount[] = [];
+  for (const link of readingOrder) {
+    if (signal.aborted) return counts;
     try {
       const source = await resourceManager.sourceText(link);
       const text = source ? new DOMParser().parseFromString(source, 'text/html').body?.textContent || '' : '';
-      return Math.max(1, Math.ceil(text.trim().length / EPUB_POSITION_CHARS));
+      counts.push({ href: link.href, count: Math.max(1, Math.ceil(text.trim().length / EPUB_POSITION_CHARS)) });
     } catch {
-      return 1;
+      counts.push({ href: link.href, count: 1 });
     }
-  }));
+    await yieldToMainThread();
+  }
+  return counts;
+}
+
+function coarsePositionCounts(readingOrder: ReadiumLink[]): EpubPositionCount[] {
+  return readingOrder.map((link) => ({ href: link.href, count: 1 }));
+}
+
+function createPositionsFromCounts(readingOrder: ReadiumLink[], rawCounts: EpubPositionCount[]) {
+  const countByHref = new Map(rawCounts.map((item) => [normalizeZipPath(stripHash(item.href)), Math.max(1, Math.round(item.count))]));
+  const counts = readingOrder.map((link) => countByHref.get(normalizeZipPath(stripHash(link.href))) || 1);
   const total = Math.max(1, counts.reduce((sum, count) => sum + count, 0));
   let position = 0;
   return readingOrder.flatMap((link, linkIndex) => Array.from({ length: counts[linkIndex] }, (_, localIndex) => {
@@ -539,6 +566,10 @@ async function createPositions(readingOrder: ReadiumLink[], resourceManager: Epu
       },
     });
   }));
+}
+
+function yieldToMainThread() {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 }
 
 export function createLocator(values: {
