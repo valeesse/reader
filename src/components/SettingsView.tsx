@@ -100,7 +100,7 @@ export function SettingsView({
                   onClick={() => updateSettings({ theme: t.value as any })}
                   className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-medium transition-all ${
                     settings.theme === t.value 
-                      ? 'bg-white dark:bg-[#2C2C2E] shadow-sm text-[#1C1C1E] dark:text-white' 
+                      ? 'bg-white dark:bg-[#2C2C2E] text-[#1C1C1E] dark:text-white'
                       : 'text-black/50 dark:text-white/50 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'
                   }`}
                 >
@@ -124,7 +124,7 @@ export function SettingsView({
                     <button
                       key={mode}
                       onClick={() => updateSettings({ pageMode: mode })}
-                      className={`flex-1 rounded-md py-1.5 text-xs ${settings.pageMode === mode ? 'bg-white shadow-sm dark:bg-[#3A3A3C]' : 'text-black/50 dark:text-white/50'}`}
+                      className={`flex-1 rounded-md py-1.5 text-xs ${settings.pageMode === mode ? 'bg-white dark:bg-[#3A3A3C]' : 'text-black/50 dark:text-white/50'}`}
                     >
                       {mode === 'single' ? '单页' : '双页'}
                     </button>
@@ -138,7 +138,7 @@ export function SettingsView({
                     <button
                       key={flow}
                       onClick={() => updateSettings({ txtReadingFlow: flow })}
-                      className={`flex-1 rounded-md py-1.5 text-xs ${settings.txtReadingFlow === flow ? 'bg-white shadow-sm dark:bg-[#3A3A3C]' : 'text-black/50 dark:text-white/50'}`}
+                      className={`flex-1 rounded-md py-1.5 text-xs ${settings.txtReadingFlow === flow ? 'bg-white dark:bg-[#3A3A3C]' : 'text-black/50 dark:text-white/50'}`}
                     >
                       {flow === 'paged' ? '翻页' : '滚动'}
                     </button>

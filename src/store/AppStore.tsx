@@ -247,6 +247,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateSettings = async (newSettings: Partial<AppSettings>) => {
     const updated = normalizeSettings({ ...settingsRef.current, ...newSettings });
+    if (JSON.stringify(updated) === JSON.stringify(settingsRef.current)) return;
     settingsRef.current = updated;
     setSettingsState(updated);
     scheduleSettingsSave(updated);

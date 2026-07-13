@@ -19,6 +19,39 @@
   cursor: pointer;
 }
 
+.reader-setting-range {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 18px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.reader-setting-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(to right, #007aff 0 var(--range-progress), rgba(0, 0, 0, 0.1) var(--range-progress) 100%);
+}
+
+.reader-setting-range::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border: 0;
+  border-radius: 50%;
+  background: #007aff;
+  box-shadow: 0 2px 7px rgba(0, 122, 255, 0.3);
+}
+
+.dark .reader-setting-range::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, #0a84ff 0 var(--range-progress), rgba(255, 255, 255, 0.16) var(--range-progress) 100%);
+}
+
 .reader-progress-range::-webkit-slider-runnable-track {
   height: 6px;
   border-radius: 999px;

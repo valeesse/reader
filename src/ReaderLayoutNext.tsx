@@ -166,10 +166,11 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
       <AnimatePresence>
         {showSettings && chromeVisible && (
           <motion.div
-            initial={{ opacity: 0, y: -12, scale: 0.94, filter: 'blur(8px)' }}
-            animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
-            exit={{ opacity: 0, y: -12, scale: 0.96, filter: 'blur(8px)' }}
-            transition={{ type: 'spring', stiffness: 360, damping: 30, mass: 0.8 }}
+            initial={{ opacity: 0, x: 10, y: -8, scale: 0.97 }}
+            animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
+            exit={{ opacity: 0, x: 8, y: -6, scale: 0.98 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 34, mass: 0.7 }}
+            style={{ transformOrigin: 'top right' }}
             className="absolute top-16 right-5 w-[min(390px,calc(100vw-32px))] max-h-[calc(100vh-92px)] overflow-y-auto bg-white/88 dark:bg-[#1C1C1E]/88 backdrop-blur-2xl border border-black/10 dark:border-white/10 shadow-2xl rounded-[5px] p-4 z-50"
             onClick={(event) => event.stopPropagation()}
           >
@@ -353,7 +354,7 @@ function SegmentButton({
       {active && (
         <motion.span
           layoutId={layoutId}
-          className="absolute inset-0 rounded-[5px] bg-white dark:bg-[#2C2C2E] shadow-sm"
+          className="absolute inset-0 rounded-[5px] bg-white dark:bg-[#2C2C2E]"
           transition={{ type: 'spring', stiffness: 420, damping: 34 }}
         />
       )}
@@ -380,7 +381,7 @@ function SliderRow({
   onChange: (value: number) => void,
 }) {
   const [draft, setDraft] = useState(value);
-  const commitFrameRef = useRef<number | null>(null);
+  const commitTimerRef = useRef<number | null>(null);
   const pendingValueRef = useRef(value);
 
   useEffect(() => {
@@ -388,23 +389,23 @@ function SliderRow({
     pendingValueRef.current = value;
   }, [value]);
   useEffect(() => () => {
-    if (commitFrameRef.current !== null) cancelAnimationFrame(commitFrameRef.current);
+    if (commitTimerRef.current !== null) window.clearTimeout(commitTimerRef.current);
   }, []);
 
   const scheduleCommit = (next: number) => {
     setDraft(next);
     pendingValueRef.current = next;
-    if (commitFrameRef.current !== null) return;
-    commitFrameRef.current = requestAnimationFrame(() => {
-      commitFrameRef.current = null;
+    if (commitTimerRef.current !== null) return;
+    commitTimerRef.current = window.setTimeout(() => {
+      commitTimerRef.current = null;
       onChange(pendingValueRef.current);
-    });
+    }, 32);
   };
 
   const commitNow = () => {
-    if (commitFrameRef.current !== null) {
-      cancelAnimationFrame(commitFrameRef.current);
-      commitFrameRef.current = null;
+    if (commitTimerRef.current !== null) {
+      window.clearTimeout(commitTimerRef.current);
+      commitTimerRef.current = null;
     }
     onChange(pendingValueRef.current);
   };
@@ -421,7 +422,8 @@ function SliderRow({
         onChange={(event) => scheduleCommit(parseFloat(event.target.value))}
         onPointerUp={commitNow}
         onKeyUp={commitNow}
-        className="min-w-0 flex-1 accent-[#007AFF]"
+        className="reader-setting-range min-w-0 flex-1"
+        style={{ '--range-progress': `${((draft - min) / (max - min)) * 100}%` } as React.CSSProperties}
       />
       <span className="w-12 text-right text-xs tabular-nums text-black/45 dark:text-white/45">
         {Number.isInteger(draft) ? draft : draft.toFixed(step < 0.1 ? 2 : 1)}{unit}

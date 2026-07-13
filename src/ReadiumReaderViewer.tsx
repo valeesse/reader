@@ -19,6 +19,10 @@ import { ReaderLoadError, ReaderLoading, ReaderPageCounter, ReaderViewerProps } 
 const DOUBLE_PAGE_CENTER_GAP = 56;
 const IMMEDIATE_PREFETCH_RADIUS = 1;
 const STABLE_PREFETCH_RADIUS = 3;
+// Readium's CJK stylesheet renders generated Chinese TXT at a 14px base,
+// while typical EPUB content here renders at 16px with our 18px scale base.
+// 15.75 keeps the same setting perceptually equal across both formats.
+const TXT_FONT_SCALE_BASE = 15.75;
 
 export function ReadiumReaderViewer({
   book,
@@ -50,7 +54,6 @@ export function ReadiumReaderViewer({
   const onToggleChromeRef = useRef(onToggleChrome);
   const onPresentableRef = useRef(onPresentable);
   const loadingResolvedRef = useRef(false);
-  const lastPreferencesKeyRef = useRef('');
   const settingsApplyTimerRef = useRef<number | null>(null);
   const resizeTimerRef = useRef<number | null>(null);
   const settingsRevisionRef = useRef(0);
@@ -194,7 +197,6 @@ export function ReadiumReaderViewer({
           publication.prefetchAroundHref(publication.readingOrder.items[0]?.href || '', IMMEDIATE_PREFETCH_RADIUS).catch(() => {});
         }
         const initialPreferences = createReadiumPreferences(settingsRef.current, book.type);
-        lastPreferencesKeyRef.current = readerSettingsKey(initialPreferences, settingsRef.current);
         const navigator = new EpubNavigator(
           container,
           publication,
@@ -296,8 +298,6 @@ export function ReadiumReaderViewer({
     cancelDeferredWork(true);
     const revision = ++settingsRevisionRef.current;
     const preferences = createReadiumPreferences(settings, book.type);
-    const key = readerSettingsKey(preferences, settings);
-    if (key === lastPreferencesKeyRef.current) return;
     applyReadiumFrameSettingsToNavigator(navigator, settings, book.type);
     if (settingsApplyTimerRef.current !== null) window.clearTimeout(settingsApplyTimerRef.current);
     settingsApplyTimerRef.current = window.setTimeout(() => {
@@ -309,15 +309,16 @@ export function ReadiumReaderViewer({
         try {
           suppressResizeUntilRef.current = performance.now() + 500;
           await navigator.submitPreferences(new EpubPreferences(preferences));
-          if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
           await navigator.resizeHandler?.();
           await waitForLayoutFrames();
-          if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
-          lastPreferencesKeyRef.current = key;
-          applyReadiumFrameSettingsToNavigator(navigator, settings, book.type);
+          if (navigatorRef.current !== navigator) return;
+          const isLatest = revision === settingsRevisionRef.current;
+          applyReadiumFrameSettingsToNavigator(navigator, isLatest ? settings : settingsRef.current, book.type);
           if (before) await navigateToLocator(navigator, before);
           revealReadiumFrames(containerRef.current, navigator);
-          scheduleDeferredWork(navigator.currentLocator?.href || before?.href || '', 0, true);
+          if (isLatest) {
+            scheduleDeferredWork(navigator.currentLocator?.href || before?.href || '', 0, true);
+          }
         } finally {
           layoutRestoringRef.current = false;
         }
@@ -692,7 +693,7 @@ function createReadiumPreferences(settings: ReturnType<typeof useAppContext>['se
     backgroundColor: themeColors(settings.theme).background,
     textColor: themeColors(settings.theme).text,
     fontFamily: settings.fontFamily,
-    fontSize: settings.fontSize / 18,
+    fontSize: readiumFontScale(settings.fontSize, bookType),
     lineHeight: settings.lineHeight,
     paragraphSpacing: settings.paragraphSpacing,
     letterSpacing: settings.letterSpacing,
@@ -753,10 +754,6 @@ function themeColors(theme: 'light' | 'dark' | 'sepia') {
   return { background: '#ffffff', text: '#111827' };
 }
 
-function readerSettingsKey(preferences: Record<string, unknown>, settings: AppSettings) {
-  return JSON.stringify({ preferences, pageMargins: settings.pageMargins });
-}
-
 function createProgressPayload(bookId: string, location: string) {
   return {
     bookId,
@@ -782,7 +779,7 @@ function applyReadiumFrameSettings(doc: Document, settings: AppSettings, bookTyp
   root.style.setProperty('--USER__backgroundColor', colors.background);
   root.style.setProperty('--USER__textColor', colors.text);
   root.style.setProperty('--USER__fontFamily', settings.fontFamily);
-  root.style.setProperty('--USER__fontSize', String(settings.fontSize / 18));
+  root.style.setProperty('--USER__fontSize', String(readiumFontScale(settings.fontSize, bookType)));
   root.style.setProperty('--USER__lineHeight', String(settings.lineHeight));
   root.style.setProperty('--USER__paraSpacing', `${settings.paragraphSpacing}em`);
   root.style.setProperty('--USER__letterSpacing', `${settings.letterSpacing}em`);
@@ -806,6 +803,10 @@ function applyReadiumFrameSettings(doc: Document, settings: AppSettings, bookTyp
 
 function isScrollingTxt(bookType: 'epub' | 'txt', settings: AppSettings) {
   return bookType === 'txt' && settings.txtReadingFlow === 'scroll';
+}
+
+function readiumFontScale(fontSize: number, bookType: 'epub' | 'txt') {
+  return fontSize / (bookType === 'txt' ? TXT_FONT_SCALE_BASE : 18);
 }
 
 function readiumCenterGap(settings: AppSettings) {
