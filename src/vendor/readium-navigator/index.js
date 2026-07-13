@@ -4754,7 +4754,12 @@ class Dt {
       this.registry.forEach((i, n) => {
         performance.now() - i.time > qs && (console.warn(n, "event for", i.key, "was never handled!"), this.registry.delete(n));
       });
-    }, 5e3), window.addEventListener("message", this.handler), this.send("_ping", void 0);
+    }, 5e3), window.addEventListener("message", this.handler), this.startHandshake();
+  }
+  startHandshake() {
+    window.clearInterval(this.pingTimer), this._ready = !1, this.send("_ping", void 0), this.pingTimer = window.setInterval(() => {
+      this._ready ? window.clearInterval(this.pingTimer) : this.send("_ping", void 0);
+    }, 50);
   }
   set listener(t) {
     this.listenerBuffer.length > 0 && this.listenerBuffer.forEach((e) => t(e[0], e[1])), this.listenerBuffer = [], this._listener = t;
@@ -4766,7 +4771,7 @@ class Dt {
     this.registry.delete(t);
   }
   halt() {
-    this._ready = !1, window.removeEventListener("message", this.handler), clearInterval(this.gc), this._listener = void 0, this.registry.clear();
+    this._ready = !1, window.clearInterval(this.pingTimer), window.removeEventListener("message", this.handler), clearInterval(this.gc), this._listener = void 0, this.registry.clear();
   }
   resume() {
     window.addEventListener("message", this.handler), this._ready = !0;
@@ -4787,8 +4792,8 @@ class Dt {
           return;
         }
         // @ts-ignore
-        case "_pong":
-          this._ready = !0;
+      case "_pong":
+        this._ready = !0, window.clearInterval(this.pingTimer);
         default: {
           if (!this.ready) return;
           typeof this._listener == "function" ? this._listener(e.key, e.data) : this.listenerBuffer.push([e.key, e.data]);

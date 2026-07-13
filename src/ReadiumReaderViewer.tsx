@@ -145,7 +145,7 @@ export function ReadiumReaderViewer({
     const resolveLoading = (forceReveal: boolean) => {
       if (cancelled || loadingResolvedRef.current) return;
       loadingResolvedRef.current = true;
-      if (forceReveal) revealReadiumFrames(containerRef.current);
+      if (forceReveal) revealReadiumFrames(containerRef.current, navigatorRef.current);
       setLoading(false);
       setTxtPreview('');
       onPresentableRef.current?.();
@@ -316,7 +316,7 @@ export function ReadiumReaderViewer({
           lastPreferencesKeyRef.current = key;
           applyReadiumFrameSettingsToNavigator(navigator, settings, book.type);
           if (before) await navigateToLocator(navigator, before);
-          revealReadiumFrames(containerRef.current);
+          revealReadiumFrames(containerRef.current, navigator);
           scheduleDeferredWork(navigator.currentLocator?.href || before?.href || '', 0, true);
         } finally {
           layoutRestoringRef.current = false;
@@ -350,7 +350,7 @@ export function ReadiumReaderViewer({
             await waitForLayoutFrames();
             if (navigatorRef.current !== navigator) return;
             if (before) await navigateToLocator(navigator, before);
-            revealReadiumFrames(containerRef.current);
+            revealReadiumFrames(containerRef.current, navigator);
           } finally {
             layoutRestoringRef.current = false;
           }
@@ -1011,9 +1011,14 @@ function installReadiumFrameStyles(doc: Document) {
   doc.head.appendChild(style);
 }
 
-function revealReadiumFrames(container: HTMLElement | null) {
-  container?.querySelectorAll('iframe.readium-navigator-iframe').forEach((frame) => {
-    const iframe = frame as HTMLIFrameElement;
+function revealReadiumFrames(container: HTMLElement | null, navigator: EpubNavigator | null) {
+  if (!container || !navigator) return;
+  const activeFrames = (navigator as EpubNavigator & {
+    _cframes?: Array<{ iframe?: HTMLIFrameElement }>;
+  })._cframes || [];
+  activeFrames.forEach((frame) => {
+    const iframe = frame.iframe;
+    if (!iframe || !container.contains(iframe)) return;
     iframe.style.removeProperty('visibility');
     iframe.style.removeProperty('opacity');
     iframe.style.removeProperty('pointer-events');
