@@ -6,10 +6,16 @@ import {
   ReadiumPublicationLike,
   ReadiumResourceLike,
 } from './readiumPublication';
+import { adaptiveReaderBudget, estimateStringBytes, ReaderContentCache, ReaderWorkScheduler } from './readerCacheCoordinator';
 
-const TXT_RESOURCE_CHARS = 48 * 1024;
+// Keep paginated TXT resources small enough that a page turn never forces the
+// browser to recalculate the geometry of tens of thousands of CJK glyphs.
+const TXT_TARGET_RESOURCE_CHARS = 12 * 1024;
+const TXT_MIN_RESOURCE_CHARS = 8 * 1024;
+const TXT_MAX_RESOURCE_CHARS = 16 * 1024;
 const TXT_POSITION_CHARS = 1024;
 const TXT_RESOURCE_CACHE_LIMIT = 12;
+const TXT_RESOURCE_CACHE_BYTES = adaptiveReaderBudget(24 * 1024 * 1024, 12 * 1024 * 1024);
 
 type TxtChunk = {
   href: string;
@@ -54,6 +60,9 @@ export async function createTxtReadiumPublication(
     linksWithRel: () => [],
     getCover: () => undefined,
     prefetchAroundHref: async (href, radius = 2, direction = 0) => manager.prefetch(href, radius, direction),
+    prepareContentAroundHref: async (href, radius = 2, direction = 0) => manager.prefetch(href, radius, direction),
+    advancePrefetchGeneration: () => manager.advanceGeneration(),
+    contentKey: `${path}:${info.totalBytes}:${info.totalChars}:txt-content-v2`,
     close: () => {
       manager.close();
       closeTxtBook(path, info.sessionId).catch(() => {});
@@ -62,19 +71,45 @@ export async function createTxtReadiumPublication(
 }
 
 function createChunks(info: NativeTxtBookInfo): TxtChunk[] {
-  const count = Math.max(1, Math.ceil(info.totalChars / TXT_RESOURCE_CHARS));
-  return Array.from({ length: count }, (_, index) => {
-    const start = index * TXT_RESOURCE_CHARS;
-    const end = Math.min(info.totalChars, start + TXT_RESOURCE_CHARS);
-    const chapter = [...info.chapters].reverse().find((item) => item.startIndex <= start)
-      || info.chapters.find((item) => item.startIndex < end);
-    return {
-      href: `txt/chunk-${String(index).padStart(6, '0')}.xhtml`,
+  const chunks: TxtChunk[] = [];
+  const chapters = info.chapters;
+  let start = 0;
+  while (start < info.totalChars || chunks.length === 0) {
+    const minimum = Math.min(info.totalChars, start + TXT_MIN_RESOURCE_CHARS);
+    const ideal = Math.min(info.totalChars, start + TXT_TARGET_RESOURCE_CHARS);
+    const maximum = Math.min(info.totalChars, start + TXT_MAX_RESOURCE_CHARS);
+    let chapterBoundary: number | undefined;
+    for (let index = lowerBoundChapter(chapters, minimum); index < chapters.length; index++) {
+      const position = chapters[index].startIndex;
+      if (position > maximum) break;
+      if (chapterBoundary === undefined || Math.abs(position - ideal) < Math.abs(chapterBoundary - ideal)) {
+        chapterBoundary = position;
+      }
+    }
+    const end = Math.max(start, chapterBoundary ?? ideal);
+    const chapter = chapters[Math.max(0, lowerBoundChapter(chapters, start + 1) - 1)]
+      || chapters[lowerBoundChapter(chapters, end)];
+    chunks.push({
+      href: `txt/chunk-${String(chunks.length).padStart(6, '0')}.xhtml`,
       start,
       end,
-      title: chapter?.title || `文本 ${index + 1}`,
-    };
-  });
+      title: chapter?.title || `文本 ${chunks.length + 1}`,
+    });
+    if (end >= info.totalChars) break;
+    start = end;
+  }
+  return chunks;
+}
+
+function lowerBoundChapter(chapters: NativeTxtBookInfo['chapters'], position: number) {
+  let low = 0;
+  let high = chapters.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (chapters[middle].startIndex < position) low = middle + 1;
+    else high = middle;
+  }
+  return low;
 }
 
 function createTxtPositions(chunks: TxtChunk[], totalChars: number) {
@@ -98,13 +133,21 @@ function createTxtPositions(chunks: TxtChunk[], totalChars: number) {
 }
 
 function chunkForPosition(chunks: TxtChunk[], position: number) {
-  const index = Math.min(chunks.length - 1, Math.max(0, Math.floor(position / TXT_RESOURCE_CHARS)));
-  return chunks[index];
+  let low = 0;
+  let high = chunks.length - 1;
+  while (low <= high) {
+    const middle = (low + high) >>> 1;
+    const chunk = chunks[middle];
+    if (position < chunk.start) high = middle - 1;
+    else if (position >= chunk.end && middle < chunks.length - 1) low = middle + 1;
+    else return chunk;
+  }
+  return chunks[Math.max(0, Math.min(chunks.length - 1, low))];
 }
 
 class TxtResourceManager {
-  private cache = new Map<string, Promise<string>>();
-  private order: string[] = [];
+  private cache = new ReaderContentCache<string>('txt-xhtml', TXT_RESOURCE_CACHE_LIMIT, TXT_RESOURCE_CACHE_BYTES);
+  private scheduler = new ReaderWorkScheduler(2);
   private closed = false;
 
   constructor(
@@ -121,19 +164,12 @@ class TxtResourceManager {
     if (this.closed) throw new Error('TXT 阅读会话已关闭');
     const chunk = this.chunks.find((item) => item.href === link.href.split('#')[0]);
     if (!chunk) throw new Error(`TXT 虚拟资源不存在: ${link.href}`);
-    const existing = this.cache.get(chunk.href);
-    if (existing) {
-      this.touch(chunk.href);
-      return existing;
-    }
-    const request = readTxtWindow(this.path, this.info.sessionId, chunk.start, chunk.end)
-      .then((window) => txtWindowToXhtml(window.text, window.start, this.info));
-    this.cache.set(chunk.href, request);
-    this.touch(chunk.href);
-    request.catch(() => {
-      if (this.cache.get(chunk.href) === request) this.cache.delete(chunk.href);
+    return this.cache.getOrCreate(chunk.href, async () => {
+      const window = await readTxtWindow(this.path, this.info.sessionId, chunk.start, chunk.end);
+      const xhtml = txtWindowToXhtml(window.text, window.start, this.info);
+      this.cache.updateSize(chunk.href, estimateStringBytes(xhtml));
+      return xhtml;
     });
-    return request;
   }
 
   async prefetch(href: string, radius: number, direction: -1 | 0 | 1) {
@@ -142,23 +178,24 @@ class TxtResourceManager {
     const start = Math.max(0, direction > 0 ? index : index - radius);
     const end = Math.min(this.chunks.length, direction < 0 ? index + 1 : index + radius + 1);
     const targets = this.chunks.slice(start, end);
-    await Promise.all(targets.map((chunk) => this.read(new ReadiumLink({ href: chunk.href }))));
+    await Promise.all(targets.map((chunk, targetIndex) => this.scheduler.schedule(
+      `content:${chunk.href}`,
+      targetIndex === 0 ? 1 : 2,
+      async (signal) => {
+        await this.read(new ReadiumLink({ href: chunk.href }));
+        if (signal.aborted) throw new DOMException('Stale TXT prefetch', 'AbortError');
+      },
+    )));
+  }
+
+  advanceGeneration() {
+    this.scheduler.advanceGeneration(2);
   }
 
   close() {
     this.closed = true;
     this.cache.clear();
-    this.order = [];
-  }
-
-  private touch(href: string) {
-    const index = this.order.indexOf(href);
-    if (index >= 0) this.order.splice(index, 1);
-    this.order.push(href);
-    while (this.order.length > TXT_RESOURCE_CACHE_LIMIT) {
-      const oldest = this.order.shift();
-      if (oldest) this.cache.delete(oldest);
-    }
+    this.scheduler.close();
   }
 }
 
@@ -175,7 +212,7 @@ class TxtResource implements ReadiumResourceLike {
 }
 
 function txtWindowToXhtml(text: string, start: number, info: NativeTxtBookInfo) {
-  const textLength = Array.from(text).length;
+  const textLength = codePointLength(text);
   const chapterOffsets = new Map(info.chapters
     .filter((chapter) => chapter.startIndex >= start && chapter.startIndex < start + textLength)
     .map((chapter) => [chapter.startIndex, chapter]));
@@ -188,11 +225,20 @@ function txtWindowToXhtml(text: string, start: number, info: NativeTxtBookInfo) 
     const html = chapter
       ? `<h2 id="txt-${chapter.startIndex}">${content}</h2>`
       : `<p>${content}</p>`;
-    offset += Array.from(segment).length;
+    offset += codePointLength(segment);
     return html;
   }).join('');
   const windowTitle = info.chapters.find((chapter) => chapter.startIndex >= start && chapter.startIndex < start + textLength)?.title || 'TXT';
-  return `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" lang="zh"><head><meta charset="utf-8"/><title>${escapeHtml(windowTitle)}</title></head><body>${body}</body></html>`;
+  return `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" lang="zh" data-zenith-fast-pages="true"><head><meta charset="utf-8"/><title>${escapeHtml(windowTitle)}</title></head><body>${body}</body></html>`;
+}
+
+function codePointLength(value: string) {
+  let count = 0;
+  for (let index = 0; index < value.length; index++, count++) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length) index++;
+  }
+  return count;
 }
 
 function createTxtMetadata(title: string, author?: string) {

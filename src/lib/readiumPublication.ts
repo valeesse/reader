@@ -8,6 +8,7 @@ import {
   toLocalAssetUrl,
 } from './native';
 import { EpubPositionCount, getCachedEpubPositionCounts, saveCachedEpubPositionCounts } from './publicationPositionCache';
+import { adaptiveReaderBudget, estimateStringBytes, ReaderContentCache, ReaderWorkScheduler } from './readerCacheCoordinator';
 
 const EPUB_PROFILE = 'https://readium.org/webpub-manifest/profiles/epub';
 const READING_PROGRESSION = {
@@ -22,7 +23,11 @@ const LAYOUT = {
 } as const;
 const EPUB_PAYLOAD_CACHE_LIMIT = 72;
 const EPUB_BLOB_CACHE_LIMIT = 96;
+const EPUB_BLOB_CACHE_BYTES = adaptiveReaderBudget(48 * 1024 * 1024, 24 * 1024 * 1024);
+const EPUB_FRONTEND_CACHE_BYTES = adaptiveReaderBudget(48 * 1024 * 1024, 24 * 1024 * 1024);
+const EPUB_TRANSFORMED_CACHE_BYTES = adaptiveReaderBudget(32 * 1024 * 1024, 16 * 1024 * 1024);
 const EPUB_POSITION_CHARS = 1024;
+const epubRewriteWarnings = new Set<string>();
 
 export type ReadiumLocatorLike = {
   href: string;
@@ -61,6 +66,9 @@ export type ReadiumPublicationLike = {
   linksWithRel: (rel: string) => ReadiumLink[];
   getCover: () => ReadiumLink | undefined;
   prefetchAroundHref: (href: string, radius?: number, direction?: -1 | 0 | 1) => Promise<void>;
+  prepareContentAroundHref: (href: string, radius?: number, direction?: -1 | 0 | 1) => Promise<void>;
+  advancePrefetchGeneration: () => void;
+  contentKey: string;
   refinePositions?: (signal: AbortSignal) => Promise<void>;
   close: () => void;
 };
@@ -115,6 +123,17 @@ export async function createReadiumPublicationFromPath(path: string, fallbackTit
       });
       await lastPrefetch;
     },
+    prepareContentAroundHref: async (href, radius = 2, direction = 0) => {
+      const index = readingOrder.findIndexWithHref(href);
+      if (index < 0) return;
+      const start = Math.max(0, direction > 0 ? index : index - radius);
+      const end = Math.min(readingOrder.items.length, direction < 0 ? index + 1 : index + radius + 1);
+      const targets = readingOrder.items.slice(start, end);
+      await prefetchEpubResources(path, sessionId, targets.map((link) => link.href));
+      await resourceManager.prepare(targets, direction);
+    },
+    advancePrefetchGeneration: () => resourceManager.advanceGeneration(),
+    contentKey: `${cacheKey}:epub-content-v2`,
     refinePositions: cachedCounts ? undefined : async (signal) => {
       const counts = await calculatePositionCounts(readingOrder.items, resourceManager, signal);
       if (signal.aborted) return;
@@ -164,17 +183,30 @@ export function progressionFromLocator(locator: any, publication: ReadiumPublica
   return page.current / page.total;
 }
 
+const publicationPositionRanges = new WeakMap<object, Map<string, { first: number; count: number }>>();
+
 export function pageFromLocator(locator: any, publication: ReadiumPublicationLike) {
   const positions = publication.positions;
   const total = Math.max(1, positions.length);
-  const hrefPositions = positions
-    .map((position, index) => ({ position, index }))
-    .filter(({ position }) => publication.readingOrder.findWithHref(position.href)?.href === publication.readingOrder.findWithHref(locator?.href || '')?.href);
-  if (hrefPositions.length === 0) return { current: 1, total };
+  let ranges = publicationPositionRanges.get(publication as object);
+  if (!ranges) {
+    ranges = new Map();
+    positions.forEach((position, index) => {
+      const href = position.href.split('#')[0];
+      const existing = ranges?.get(href);
+      if (existing) existing.count += 1;
+      else ranges?.set(href, { first: index, count: 1 });
+    });
+    publicationPositionRanges.set(publication as object, ranges);
+  }
+  const normalizedHref = publication.readingOrder.findWithHref(locator?.href || '')?.href
+    || `${locator?.href || ''}`.split('#')[0];
+  const range = ranges.get(normalizedHref);
+  if (!range) return { current: 1, total };
 
   const local = clamp(typeof locator?.locations?.progression === 'number' ? locator.locations.progression : 0, 0, 1);
-  const localIndex = Math.min(hrefPositions.length - 1, Math.floor(local * hrefPositions.length));
-  return { current: hrefPositions[localIndex].index + 1, total };
+  const localIndex = Math.min(range.count - 1, Math.floor(local * range.count));
+  return { current: range.first + localIndex + 1, total };
 }
 
 export class ReadiumLink {
@@ -325,10 +357,15 @@ class ReadiumResource {
 class EpubResourceManager {
   private path: string;
   private sessionId: string;
-  private payloads = new Map<string, Promise<{ href: string; mediaType: string; text?: string; base64?: string; filePath?: string }>>();
-  private payloadOrder: string[] = [];
+  private payloads = new ReaderContentCache<{ href: string; mediaType: string; text?: string | null; base64?: string | null; filePath?: string | null }>(
+    'epub-payload', EPUB_PAYLOAD_CACHE_LIMIT, EPUB_FRONTEND_CACHE_BYTES,
+  );
+  private transformed = new ReaderContentCache<string>('epub-transformed', 24, EPUB_TRANSFORMED_CACHE_BYTES);
+  private scheduler = new ReaderWorkScheduler(2);
   private blobUrls = new Map<string, string>();
   private blobOrder: string[] = [];
+  private blobSizes = new Map<string, number>();
+  private blobBytes = 0;
 
   constructor(path: string, sessionId: string) {
     this.path = path;
@@ -356,17 +393,42 @@ class EpubResourceManager {
       return new Uint8Array(await response.arrayBuffer());
     }
     if (payload.base64) return base64ToBytes(payload.base64);
-    if (payload.text !== undefined) return new TextEncoder().encode(payload.text);
+    if (typeof payload.text === 'string') return new TextEncoder().encode(payload.text);
     return undefined;
   }
 
   async readAsString(link: ReadiumLink) {
+    const normalized = normalizeZipPath(stripHash(link.href));
+    if (link.mediaType.isHTML || link.type === 'text/css') {
+      return this.transformed.getOrCreate(normalized, async () => {
+        const payload = await this.payloadFor(link.href);
+        const text = payload.text ?? (payload.base64 ? new TextDecoder().decode(base64ToBytes(payload.base64)) : undefined);
+        if (typeof text !== 'string') return '';
+        const result = link.mediaType.isHTML
+          ? await this.rewriteHtml(text, link.href)
+          : await this.rewriteCss(text, link.href);
+        this.transformed.updateSize(normalized, estimateStringBytes(result));
+        return result;
+      });
+    }
     const payload = await this.payloadFor(link.href);
     const text = payload.text ?? (payload.base64 ? new TextDecoder().decode(base64ToBytes(payload.base64)) : undefined);
-    if (text === undefined) return undefined;
-    if (link.mediaType.isHTML) return this.rewriteHtml(text, link.href);
-    if (link.type === 'text/css') return this.rewriteCss(text, link.href);
     return text;
+  }
+
+  async prepare(links: ReadiumLink[], direction: -1 | 0 | 1) {
+    await Promise.all(links.map((link, index) => this.scheduler.schedule(
+      `content:${link.href}`,
+      index === 0 ? 1 : direction === 0 ? 2 : 1,
+      async (signal) => {
+        await this.readAsString(link);
+        if (signal.aborted) throw new DOMException('Stale EPUB prefetch', 'AbortError');
+      },
+    )));
+  }
+
+  advanceGeneration() {
+    this.scheduler.advanceGeneration(2);
   }
 
   close() {
@@ -375,33 +437,23 @@ class EpubResourceManager {
     }
     this.blobUrls.clear();
     this.blobOrder = [];
+    this.blobSizes.clear();
+    this.blobBytes = 0;
     this.payloads.clear();
-    this.payloadOrder = [];
+    this.transformed.clear();
+    this.scheduler.close();
   }
 
   private payloadFor(href: string) {
     const normalized = normalizeZipPath(stripHash(href));
-    const existing = this.payloads.get(normalized);
-    if (existing) {
-      touchKey(this.payloadOrder, normalized);
-      return existing;
-    }
-    let payload: Promise<{ href: string; mediaType: string; text?: string; base64?: string; filePath?: string }>;
-    payload = readEpubResource(this.path, this.sessionId, normalized).catch((error) => {
-      if (this.payloads.get(normalized) === payload) {
-        this.payloads.delete(normalized);
-        const index = this.payloadOrder.indexOf(normalized);
-        if (index >= 0) this.payloadOrder.splice(index, 1);
-      }
-      throw error;
+    return this.payloads.getOrCreate(normalized, async () => {
+      const payload = await readEpubResource(this.path, this.sessionId, normalized);
+      const bytes = typeof payload.text === 'string'
+        ? estimateStringBytes(payload.text)
+        : payload.base64 ? Math.ceil(payload.base64.length * 0.75) : 256;
+      this.payloads.updateSize(normalized, bytes);
+      return payload;
     });
-    this.payloads.set(normalized, payload);
-    touchKey(this.payloadOrder, normalized);
-    while (this.payloadOrder.length > EPUB_PAYLOAD_CACHE_LIMIT) {
-      const oldest = this.payloadOrder.shift();
-      if (oldest) this.payloads.delete(oldest);
-    }
-    return payload;
   }
 
   private async blobUrlFor(href: string) {
@@ -416,31 +468,33 @@ class EpubResourceManager {
     const payload = await this.payloadFor(normalized);
     const type = payload.mediaType || link.type;
     if (payload.filePath && type !== 'text/css' && !link.mediaType.isHTML) {
-      const response = await fetch(toLocalAssetUrl(payload.filePath));
-      if (!response.ok) throw new Error(`Failed reading cached EPUB resource ${normalized}`);
-      const url = URL.createObjectURL(await response.blob());
-      this.rememberBlobUrl(normalized, url);
-      return url;
+      return toLocalAssetUrl(payload.filePath);
     }
     const content = type === 'text/css'
       ? await this.rewriteCss(payload.text ?? new TextDecoder().decode(base64ToBytes(payload.base64 || '')), normalized)
-      : payload.text !== undefined
+      : typeof payload.text === 'string'
         ? payload.text
         : bytesToBlobPart(base64ToBytes(payload.base64 || ''));
-    const url = URL.createObjectURL(new Blob([content], { type }));
-    this.rememberBlobUrl(normalized, url);
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    this.rememberBlobUrl(normalized, url, blob.size);
     return url;
   }
 
-  private rememberBlobUrl(href: string, url: string) {
+  private rememberBlobUrl(href: string, url: string, bytes: number) {
+    const previousBytes = this.blobSizes.get(href) || 0;
+    this.blobBytes += bytes - previousBytes;
     this.blobUrls.set(href, url);
+    this.blobSizes.set(href, bytes);
     touchKey(this.blobOrder, href);
-    while (this.blobOrder.length > EPUB_BLOB_CACHE_LIMIT) {
+    while (this.blobOrder.length > EPUB_BLOB_CACHE_LIMIT || this.blobBytes > EPUB_BLOB_CACHE_BYTES) {
       const oldest = this.blobOrder.shift();
       if (!oldest) break;
       const oldUrl = this.blobUrls.get(oldest);
       if (oldUrl) URL.revokeObjectURL(oldUrl);
+      this.blobBytes = Math.max(0, this.blobBytes - (this.blobSizes.get(oldest) || 0));
       this.blobUrls.delete(oldest);
+      this.blobSizes.delete(oldest);
     }
   }
 
@@ -479,7 +533,8 @@ class EpubResourceManager {
         const resolved = resolveZipPath(baseDir, pathPart);
         try {
           parts.push(`url(${quote}${await this.blobUrlFor(resolved)}${suffix}${quote})`);
-        } catch {
+        } catch (error) {
+          warnEpubRewriteOnce(`css:${resolved}`, 'Failed to rewrite EPUB CSS resource URL', { href, resolved, error });
           parts.push(match[0]);
         }
       }
@@ -680,7 +735,16 @@ async function rewriteElementUrl(element: Element, attribute: string, baseDir: s
   const resolved = resolveZipPath(baseDir, pathPart);
   try {
     element.setAttribute(attribute, `${await resolveUrl(resolved)}${suffix}`);
-  } catch {}
+  } catch (error) {
+    warnEpubRewriteOnce(`html:${resolved}`, 'Failed to rewrite EPUB resource URL', { attribute, value, resolved, error });
+  }
+}
+
+function warnEpubRewriteOnce(key: string, message: string, detail: Record<string, unknown>) {
+  if (epubRewriteWarnings.has(key)) return;
+  epubRewriteWarnings.add(key);
+  if (epubRewriteWarnings.size > 100) epubRewriteWarnings.delete(epubRewriteWarnings.values().next().value!);
+  console.warn(message, detail);
 }
 
 function parseXml(text: string, type: DOMParserSupportedType) {

@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAppContext } from '../store/AppStore';
-import { Cloud, Check, DownloadCloud, LoaderCircle, Moon, Plus, Sun, Monitor, Folder, UploadCloud } from 'lucide-react';
+import { Cloud, Check, Database, DownloadCloud, LoaderCircle, Moon, Plus, Sun, Monitor, Folder, Trash2, UploadCloud } from 'lucide-react';
 import { motion } from 'motion/react';
 import { applySyncSnapshot, createSyncSnapshot } from '../lib/storage';
-import { downloadWebDavSnapshot, uploadWebDavSnapshot } from '../lib/native';
+import { clearReaderCache, downloadWebDavSnapshot, getReaderCacheStats, ReaderCacheStats, uploadWebDavSnapshot } from '../lib/native';
 import { SyncSnapshot } from '../types';
 import { READER_FONT_OPTIONS, READING_SETTING_LIMITS } from '../lib/readingSettings';
 
@@ -18,6 +18,13 @@ export function SettingsView({
 }) {
   const { settings, updateSettings, reloadState } = useAppContext();
   const [syncStatus, setSyncStatus] = useState('');
+  const [cacheStats, setCacheStats] = useState<ReaderCacheStats>();
+  const [cacheStatus, setCacheStatus] = useState('');
+  const [clearingCache, setClearingCache] = useState(false);
+
+  useEffect(() => {
+    getReaderCacheStats().then(setCacheStats).catch(() => {});
+  }, []);
 
   const canSync = settings.webDavConfig.enabled && settings.webDavConfig.url.trim() && settings.webDavConfig.username.trim();
 
@@ -45,6 +52,20 @@ export function SettingsView({
       setSyncStatus('已从 WebDAV 恢复同步数据。');
     } catch (error) {
       setSyncStatus(error instanceof Error ? error.message : '下载失败。');
+    }
+  };
+
+  const clearCache = async () => {
+    setClearingCache(true);
+    setCacheStatus('');
+    try {
+      await clearReaderCache();
+      setCacheStats(await getReaderCacheStats());
+      setCacheStatus('阅读缓存已清理；书籍原文件不会被删除。');
+    } catch (error) {
+      setCacheStatus(error instanceof Error ? error.message : '缓存清理失败。');
+    } finally {
+      setClearingCache(false);
     }
   };
 
@@ -82,6 +103,34 @@ export function SettingsView({
             {scanMessage && (
               <p className="mt-4 text-xs text-black/50 dark:text-white/50">{scanMessage}</p>
             )}
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <h3 className="text-[11px] font-semibold text-black/40 dark:text-white/40 uppercase tracking-wider pl-1">阅读缓存</h3>
+          <div className="bg-[#F2F2F7] dark:bg-[#1C1C1E] border border-black/5 dark:border-white/5 rounded-2xl p-5 shadow-sm">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="p-2 bg-[#007AFF]/10 rounded-lg text-[#007AFF]">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-medium text-sm text-[#1C1C1E] dark:text-white">本地派生缓存</h4>
+                  <p className="text-xs text-black/50 dark:text-white/50">
+                    {cacheStats ? `${formatBytes(cacheStats.bytes)} · ${cacheStats.files} 个文件 · 上限 ${formatBytes(cacheStats.maxBytes)}` : '正在统计缓存…'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={clearCache}
+                disabled={clearingCache}
+                className="flex items-center justify-center gap-2 bg-red-500/10 text-red-600 dark:text-red-400 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-500/15 disabled:opacity-50"
+              >
+                {clearingCache ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                清理
+              </button>
+            </div>
+            {cacheStatus && <p className="mt-3 text-xs text-black/50 dark:text-white/50">{cacheStatus}</p>}
           </div>
         </section>
 
@@ -332,4 +381,11 @@ export function SettingsView({
       </div>
     </div>
   );
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }

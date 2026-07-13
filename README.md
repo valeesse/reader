@@ -16,6 +16,7 @@ Zenith Reader 是一个基于 Tauri 2、Rust、React 19 和 Readium 的本地桌
 - 支持系列书籍组织与续读下一卷
 - 支持通过 WebDAV 同步阅读进度、系列信息和偏好设置
 - 提供按书签名隔离的原生索引与资源缓存，提升应用重启后的恢复速度
+- 持久化阅读缓存使用全局磁盘预算，可在设置中查看占用并安全清理
 
 ## 为什么做这个项目
 
@@ -90,6 +91,9 @@ EPUB 的 manifest、spine、toc 和资源读取放在 Rust 侧完成，前端主
 - 文本资源使用同时受数量和字节约束的 LRU 缓存
 - 图片、字体等二进制资源持久化到磁盘，并通过 Tauri asset URL 直接提供给 Readium，避免重复 Blob 拷贝
 - 前端对资源 Promise、Blob URL 和相邻章节预取做去重与上限控制
+- 相邻 reading-order 资源会推进到完成 HTML/CSS 重写、字体/关键图片准备和隐藏 iframe 排版的 L1 状态
+- 内容与版面使用不同缓存键；主题只重绘，字号、窗口、单双页等布局变化只淘汰版面层
+- 运行期缓存同时受数量和字节预算约束，并可取消已经失去阅读方向价值的后台工作
 - 目录中的 `#fragment` 会保留为 Readium locator fragment
 
 ### 按书暖缓存
@@ -140,6 +144,7 @@ pnpm dev
 ```bash
 pnpm lint
 pnpm build
+pnpm test:reader:real # packaged app must be running with CDP enabled
 cargo fmt --check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml

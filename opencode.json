@@ -1,0 +1,32 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "coderplan": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Coder Plan",
+      "options": {
+        "baseURL": "https://api.coderplan.ai/v1"
+      },
+      "models": {        
+        "gpt-5.5": {
+          "name": "GPT-5.5"
+        },
+        "gpt-5.6-sol": {
+          "name": "GPT-5.6 Sol"
+        },
+        "gpt-5.6-terra": {
+          "name": "GPT-5.6 Terra"
+        },
+        "gpt-5.6-luna": {
+          "name": "GPT-5.6 Luna"
+        },
+        "claude-opus-4-8": {
+          "name": "Claude Opus 4.8"
+        },
+        "claude-opus-4-7": {
+          "name": "Claude Opus 4.7"
+        }
+      }
+    }
+  }
+}

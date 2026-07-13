@@ -66,9 +66,15 @@ export interface NativeEpubOpenResult {
 export interface NativeEpubResource {
   href: string;
   mediaType: string;
-  text?: string;
-  base64?: string;
-  filePath?: string;
+  text?: string | null;
+  base64?: string | null;
+  filePath?: string | null;
+}
+
+export interface ReaderCacheStats {
+  bytes: number;
+  files: number;
+  maxBytes: number;
 }
 
 export function isTauriApp() {
@@ -139,6 +145,16 @@ export async function closeEpubBook(path: string, sessionId: string) {
 
 export function toLocalAssetUrl(path: string) {
   return convertFileSrc(path);
+}
+
+export async function getReaderCacheStats() {
+  if (!isTauriApp()) return { bytes: 0, files: 0, maxBytes: 0 } satisfies ReaderCacheStats;
+  return invoke<ReaderCacheStats>('reader_cache_stats');
+}
+
+export async function clearReaderCache() {
+  if (!isTauriApp()) return;
+  await invoke('clear_reader_cache');
 }
 
 export async function saveImageFromSource(src: string, suggestedName = 'image') {

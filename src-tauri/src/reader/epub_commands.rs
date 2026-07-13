@@ -41,7 +41,7 @@ fn open_epub_book_blocking(
             resource_cache: HashMap::new(),
             resource_order: VecDeque::new(),
             resource_bytes: 0,
-            archive: open_epub_archive(&path)?,
+            archive: Arc::new(Mutex::new(open_epub_archive(&path)?)),
         };
         save_epub_book_to_persistent_cache(app, &path, &loaded);
         let mut books = state

@@ -9,6 +9,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "build": "tsc --noEmit && vite build",
+    "test:reader:real": "node scripts/reader-real-scenario.mjs",
     "preview": "vite preview",
     "clean": "rimraf dist src-tauri/target",
     "lint": "tsc --noEmit"

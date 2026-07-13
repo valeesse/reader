@@ -1,6 +1,20 @@
 pub fn run() {
     tauri::Builder::default()
         .manage(ReaderState::default())
+        .setup(|app| {
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let state = handle.state::<ReaderState>();
+                let Ok(_txt_guard) = state.txt_books.lock() else {
+                    return;
+                };
+                let Ok(_epub_guard) = state.epub_books.lock() else {
+                    return;
+                };
+                let _ = trim_reader_disk_cache(&handle, READER_DISK_CACHE_MAX_BYTES);
+            });
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             scan_library,
@@ -12,6 +26,8 @@ pub fn run() {
             read_epub_resource,
             prefetch_epub_resources,
             close_epub_book,
+            reader_cache_stats,
+            clear_reader_cache,
             write_binary_file,
             webdav_upload_snapshot,
             webdav_download_snapshot,

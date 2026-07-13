@@ -12,6 +12,12 @@
   max-height: 100%;
 }
 
+.readium-container.readium-initializing iframe {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 .reader-progress-range {
   appearance: none;
   -webkit-appearance: none;

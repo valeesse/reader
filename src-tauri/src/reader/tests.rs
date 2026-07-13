@@ -221,7 +221,9 @@ mod tests {
             resource_cache: HashMap::new(),
             resource_order: VecDeque::new(),
             resource_bytes: 0,
-            archive: open_epub_archive(path.to_str().unwrap()).unwrap(),
+            archive: Arc::new(Mutex::new(
+                open_epub_archive(path.to_str().unwrap()).unwrap(),
+            )),
         };
 
         for (href, size) in [("a", 3usize), ("b", 4), ("c", 5)] {
@@ -242,6 +244,25 @@ mod tests {
 
         drop(cache);
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn persistent_reader_cache_honors_disk_budget() {
+        let root = test_path("disk-cache");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.cache"), [1u8; 8]).unwrap();
+        fs::write(root.join("b.cache"), [2u8; 8]).unwrap();
+
+        trim_cache_directory(&root, 8).unwrap();
+        let remaining = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.metadata().ok())
+            .map(|metadata| metadata.len())
+            .sum::<u64>();
+        assert!(remaining <= 8);
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

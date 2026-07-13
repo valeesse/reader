@@ -6,6 +6,7 @@ const EPUB_RESOURCE_CACHE_MAX_BYTES: usize = 48 * 1024 * 1024;
 const EPUB_PREFETCH_MAX_RESOURCES: usize = 16;
 const PERSISTENT_CACHE_VERSION: u8 = 3;
 const STREAM_BUFFER_BYTES: usize = 64 * 1024;
+const READER_DISK_CACHE_MAX_BYTES: u64 = 1024 * 1024 * 1024;
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Default)]
@@ -68,7 +69,7 @@ struct EpubBookCache {
     resource_cache: HashMap<String, EpubCachedResource>,
     resource_order: VecDeque<String>,
     resource_bytes: usize,
-    archive: ZipArchive<File>,
+    archive: Arc<Mutex<ZipArchive<File>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -218,6 +219,14 @@ struct PersistentEpubBookCache {
     signature: FileSignature,
     info: EpubBookInfo,
     manifest_items: Vec<EpubManifestItem>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReaderCacheStats {
+    bytes: u64,
+    files: usize,
+    max_bytes: u64,
 }
 
 type TxtIndex = (usize, Vec<(usize, usize)>, Vec<TxtChapterInfo>);

@@ -23,6 +23,130 @@ fn reader_cache_dir(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+fn trim_reader_disk_cache(app: &AppHandle, max_bytes: u64) -> Result<(), String> {
+    let app_cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|err| err.to_string())?;
+    trim_cache_directories(
+        &[app_cache.join("reader-cache"), app_cache.join("epub-resources")],
+        max_bytes,
+    )
+}
+
+#[cfg(test)]
+fn trim_cache_directory(root: &Path, max_bytes: u64) -> Result<(), String> {
+    trim_cache_directories(&[root.to_path_buf()], max_bytes)
+}
+
+fn trim_cache_directories(roots: &[PathBuf], max_bytes: u64) -> Result<(), String> {
+    let mut files = roots
+        .iter()
+        .filter(|root| root.is_dir())
+        .flat_map(|root| WalkDir::new(root).into_iter())
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .filter_map(|entry| {
+            let metadata = entry.metadata().ok()?;
+            let modified = metadata.modified().unwrap_or(UNIX_EPOCH);
+            Some((entry.into_path(), metadata.len(), modified))
+        })
+        .collect::<Vec<_>>();
+    let mut total = files.iter().map(|(_, len, _)| *len).sum::<u64>();
+    if total <= max_bytes {
+        return Ok(());
+    }
+    files.sort_by_key(|(_, _, modified)| *modified);
+    for (path, len, _) in files {
+        if total <= max_bytes {
+            break;
+        }
+        if fs::remove_file(path).is_ok() {
+            total = total.saturating_sub(len);
+        }
+    }
+    Ok(())
+}
+
+fn reader_cache_roots(app: &AppHandle) -> Result<Vec<PathBuf>, String> {
+    let app_cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|err| err.to_string())?;
+    Ok(vec![
+        app_cache.join("reader-cache"),
+        app_cache.join("epub-resources"),
+    ])
+}
+
+#[tauri::command]
+async fn reader_cache_stats(app: AppHandle) -> Result<ReaderCacheStats, String> {
+    tauri::async_runtime::spawn_blocking(move || reader_cache_stats_blocking(&app))
+        .await
+        .map_err(|error| format!("阅读缓存统计任务中断: {error}"))?
+}
+
+fn reader_cache_stats_blocking(app: &AppHandle) -> Result<ReaderCacheStats, String> {
+    let mut bytes = 0u64;
+    let mut files = 0usize;
+    for root in reader_cache_roots(app)? {
+        if !root.is_dir() {
+            continue;
+        }
+        for entry in WalkDir::new(root).into_iter().filter_map(Result::ok) {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            if let Ok(metadata) = entry.metadata() {
+                bytes = bytes.saturating_add(metadata.len());
+                files += 1;
+            }
+        }
+    }
+    Ok(ReaderCacheStats {
+        bytes,
+        files,
+        max_bytes: READER_DISK_CACHE_MAX_BYTES,
+    })
+}
+
+#[tauri::command]
+async fn clear_reader_cache(app: AppHandle) -> Result<(), String> {
+    let task_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = task_app.state::<ReaderState>();
+        clear_reader_cache_blocking(&task_app, &state)
+    })
+    .await
+    .map_err(|error| format!("阅读缓存清理任务中断: {error}"))?
+}
+
+fn clear_reader_cache_blocking(app: &AppHandle, state: &ReaderState) -> Result<(), String> {
+    let mut txt_books = state
+        .txt_books
+        .lock()
+        .map_err(|_| "TXT 缓存被占用".to_string())?;
+    let mut epub_books = state
+        .epub_books
+        .lock()
+        .map_err(|_| "EPUB 缓存被占用".to_string())?;
+    if txt_books.values().any(|book| !book.active_sessions.is_empty())
+        || epub_books
+            .values()
+            .any(|book| !book.active_sessions.is_empty())
+    {
+        return Err("请先退出阅读页面再清理缓存".to_string());
+    }
+    txt_books.clear();
+    epub_books.clear();
+    for root in reader_cache_roots(app)? {
+        if root.exists() {
+            fs::remove_dir_all(&root).map_err(|error| format!("清理阅读缓存失败: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
 fn txt_index_cache_path(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
     Ok(reader_cache_dir(app, "txt-index")?.join(format!("{}.json", hash_string(path))))
 }
@@ -204,4 +328,3 @@ fn hash_string(value: &str) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
-

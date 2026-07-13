@@ -2940,7 +2940,8 @@ const wt = class wt extends kt {
     }), e.register("decoration_activatable", wt.moduleName, (i, n) => {
       const s = i, o = this.groups.get(s.group);
       o && (o.activatable = s.activatable), n(!0);
-    }), this.resizeObserver = new ResizeObserver(() => t.requestAnimationFrame(() => this.handleResize())), this.resizeObserver.observe(t.document.documentElement), t.addEventListener("orientationchange", this.handleResizer), t.addEventListener("resize", this.handleResizer), this.styleObserver = new MutationObserver((i) => {
+    }), this.resizeObserver = { disconnect() {
+    } }, t.addEventListener("orientationchange", this.handleResizer), t.addEventListener("resize", this.handleResizer), this.styleObserver = new MutationObserver((i) => {
       i.some(
         (s) => s.type === "attributes" && s.attributeName === "style" && s.oldValue !== s.target.getAttribute("style")
       ) && this.updateHighlightStyles();
@@ -3159,7 +3160,7 @@ const Oi = "readium-column-snapper-style", Fs = 200, H = class H extends xt {
    * scrollLeft may be negative depending on the browser — Math.abs() normalizes it.
    */
   normScroll() {
-    const t = this.doc().scrollLeft || this.alreadyScrollLeft;
+    const t = this.doc().scrollLeft;
     return this.rtl ? Math.abs(t) : Math.max(0, this.wnd.scrollX > 0 ? this.wnd.scrollX : t);
   }
   reportProgress() {
@@ -3300,15 +3301,13 @@ const Oi = "readium-column-snapper-style", Fs = 200, H = class H extends xt {
         body::-webkit-scrollbar {
             display: none; /* for Chrome, Safari, and Opera */
         }
-        `, t.document.head.appendChild(i), this.resizeObserver = new ResizeObserver(() => {
-      t.requestAnimationFrame(() => {
-        t && _i(t);
-      }), this.onWidthChange();
-    }), this.resizeObserver.observe(t.document.body), this.mutationObserver = new MutationObserver((o) => {
+        `, t.document.head.appendChild(i);
+    this.resizeObserver = { disconnect() {
+    } }, this.mutationObserver = new MutationObserver((o) => {
       for (const a of o)
         if (a.target === this.wnd.document.documentElement) {
           const l = a.oldValue, d = a.target.getAttribute("style"), h = /transform\s*:\s*([^;]+)/, c = l?.match(h), u = d?.match(h);
-          (!c && !u && as(l, d) || c && !u || c && u && c[1] !== u[1]) && (t.requestAnimationFrame(() => {
+          !c && !u && as(l, d) && (t.requestAnimationFrame(() => {
             t && _i(t);
           }), this.onWidthChange());
         } else
@@ -3317,8 +3316,8 @@ const Oi = "readium-column-snapper-style", Fs = 200, H = class H extends xt {
       this.enableSnapProtection(), a(!0);
     });
     const n = (o) => {
-      const a = this.doc().scrollLeft;
-      return this.doc().scrollLeft = this.snapOffset(o), a !== this.doc().scrollLeft;
+      const a = this.doc().scrollLeft, l = this.snapOffset(o);
+      return this.doc().style.removeProperty("transform"), this.doc().scrollLeft = l, this.alreadyScrollLeft = this.doc().scrollLeft, a !== this.doc().scrollLeft;
     }, s = (o) => {
       const a = this.doc().scrollLeft, l = this.snapNormOffset(Math.max(0, Math.min(this.cachedScrollWidth - t.innerWidth, o)));
       return this.doc().scrollLeft = -l, a !== this.doc().scrollLeft;
@@ -3378,19 +3377,15 @@ const Oi = "readium-column-snapper-style", Fs = 200, H = class H extends xt {
         this.doc().scrollLeft = 0, this.reportProgress(), T(this.wnd), a(!0);
       });
     }), e.register("go_prev", H.moduleName, (o, a) => {
-      this.wnd.requestAnimationFrame(() => {
-        this.cachedScrollWidth = this.doc().scrollWidth;
-        let l;
-        const d = this.pageStride();
-        this.rtl ? l = s(this.normScroll() - d) : l = n(t.scrollX - d), this.reportProgress(), l && (T(this.wnd), this.checkSuspiciousSnap("left", d)), a(l);
-      });
+      this.cachedScrollWidth = this.doc().scrollWidth;
+      let l;
+      const d = this.pageStride();
+      this.rtl ? l = s(this.normScroll() - d) : l = n(this.normScroll() - d), this.reportProgress(), l && this.checkSuspiciousSnap("left", d), a(l);
     }), e.register("go_next", H.moduleName, (o, a) => {
-      this.wnd.requestAnimationFrame(() => {
-        this.cachedScrollWidth = this.doc().scrollWidth;
-        let l;
-        const d = this.pageStride();
-        this.rtl ? l = s(this.normScroll() + d) : l = n(t.scrollX + d), this.reportProgress(), l && (T(this.wnd), this.checkSuspiciousSnap("right", d)), a(l);
-      });
+      this.cachedScrollWidth = this.doc().scrollWidth;
+      let l;
+      const d = this.pageStride();
+      this.rtl ? l = s(this.normScroll() + d) : l = n(this.normScroll() + d), this.reportProgress(), l && this.checkSuspiciousSnap("right", d), a(l);
     }), e.register("unfocus", H.moduleName, (o, a) => {
       this.snappingCancelled = !0, T(this.wnd), a(!0);
     }), e.register("shake", H.moduleName, (o, a) => {
@@ -7135,7 +7130,7 @@ class Zr extends Pn {
   }
 }
 const Wo = Zr, Qr = (r) => {
-  const t = r.join(" ");
+  const t = [...r, "http://asset.localhost", "https://asset.localhost", "asset:"].join(" ");
   return [
     // 'self' is useless because the document is loaded from a blob: URL
     "upgrade-insecure-requests",
@@ -7355,10 +7350,8 @@ class to {
     const o = this.positions[s].href;
     this.inprogress.has(o) && await this.inprogress.get(o);
     const a = new Promise(async (l, d) => {
-      const h = [], c = [];
-      this.positions.forEach((p, f) => {
-        (f > s + Wi || f < s - Wi) && (h.includes(p.href) || h.push(p.href)), f < s + Bi && f > s - Bi && (c.includes(p.href) || c.push(p.href));
-      }), h.forEach(async (p) => {
+      const keep = new Set(this.positions.slice(Math.max(0, s - Wi), s + Wi + 1).map((p) => p.href)), h = Array.from(this.pool.keys()).filter((p) => !keep.has(p)), c = [...new Set(this.positions.slice(Math.max(0, s - Bi + 1), s + Bi).map((p) => p.href))];
+      h.forEach(async (p) => {
         c.includes(p) || this.pool.has(p) && (await this.pool.get(p)?.destroy(), this.pool.delete(p), this.pendingUpdates.has(p) && this.pendingUpdates.set(p, { inPool: !1 }));
       }), this.currentBaseURL !== void 0 && t.baseURL !== this.currentBaseURL && (this.blobs.forEach((p) => {
         this.injector?.releaseBlobUrl?.(p), URL.revokeObjectURL(p);
@@ -7409,6 +7402,43 @@ class to {
       l();
     });
     this.inprogress.set(o, a), await a, this.inprogress.delete(o);
+  }
+  async prepare(t, e, i) {
+    const n = t.readingOrder.findWithHref(e);
+    if (!n)
+      return;
+    if (this.inprogress.has(e))
+      await this.inprogress.get(e);
+    const s = this.pool.get(e);
+    if (s && this.blobs.has(e)) {
+      await s.load(i);
+      return;
+    }
+    const o = new Promise(async (a, l) => {
+      let d;
+      try {
+        let h = this.blobs.get(e);
+        h || (h = await new Nn(
+          t,
+          this.currentBaseURL || "",
+          n,
+          {
+            cssProperties: this.currentCssProperties,
+            injector: this.injector
+          }
+        ).build(), this.blobs.set(e, h));
+        d = new Mn(h, this.contentProtectionConfig, this.keyboardPeripheralsConfig);
+        await d.hide(), this.container.appendChild(d.iframe), await d.load(i), this.pool.set(e, d), a();
+      } catch (h) {
+        await d?.destroy(), l(h);
+      }
+    });
+    this.inprogress.set(e, o);
+    try {
+      await o;
+    } finally {
+      this.inprogress.delete(e);
+    }
   }
   setCSSProperties(t) {
     if (!((i, n) => {
@@ -9001,7 +9031,7 @@ const _o = `// Note: we aren't blocking some of the events right now to try and 
 })();
 `;
 async function xo(r, t) {
-  const e = r.effectiveLayout === v.fixed, i = t.filter((a) => a.mediaType.isHTML).map((a) => a.href), n = i.length > 0 ? i : [/\.xhtml$/, /\.html$/], s = [
+  const e = r.effectiveLayout === v.fixed, i = t.filter((a) => a.mediaType.isHTML).map((a) => a.href), n = i.length > 256 ? [/\.xhtml(?:$|[?#])/i, /\.html(?:$|[?#])/i] : i.length > 0 ? i : [/\.xhtml$/, /\.html$/], s = [
     // CSS Selector Generator - always injected
     {
       id: "css-selector-generator",
@@ -9176,7 +9206,9 @@ class zn extends Pn {
     }), this._keyboardPeripheralListener = (m) => {
       const p = m.detail;
       this.listeners.peripheral(p);
-    }, window.addEventListener(dt, this._keyboardPeripheralListener)), this.resizeObserver = new ResizeObserver(() => this.ownerWindow.requestAnimationFrame(async () => await this.resizeHandler())), this.resizeObserver.observe(this.container.parentElement || document.documentElement);
+    }, window.addEventListener(dt, this._keyboardPeripheralListener));
+    this.resizeObserver = { disconnect() {
+    } };
   }
   static determineLayout(t, e) {
     const i = t.metadata.effectiveLayout;
@@ -9525,6 +9557,16 @@ class zn extends Pn {
   async destroy() {
     this._suspiciousActivityListener && window.removeEventListener(ct, this._suspiciousActivityListener), this._keyboardPeripheralListener && window.removeEventListener(dt, this._keyboardPeripheralListener), this._navigatorProtector?.destroy(), this._keyboardPeripheralsManager?.destroy(), await this.framePool?.destroy(), this._decorations.clear(), this._decorationObservers.clear(), this._decorationActivationState.clear();
   }
+  async prepare(t) {
+    if (this._layout === v.fixed || !this.framePool)
+      return [];
+    const e = this.pub.readingOrder.findWithHref(t.href);
+    if (!e)
+      return [];
+    await this.framePool.prepare(this.pub, e.href, this.determineModules());
+    const i = this.framePool.pool.get(e.href)?.iframe?.contentWindow;
+    return i ? [i] : [];
+  }
   async changeResource(t) {
     if (t === 0) return !1;
     if (this._layout === v.fixed) {
@@ -9610,14 +9652,27 @@ class zn extends Pn {
       e(!1);
       return;
     }
-    this._isNavigating = !0, this._layout === v.fixed ? this.changeResource(-1).then((i) => {
-      this._isNavigating = !1, e(i);
-    }) : this._cframes[0]?.msg?.send("go_prev", void 0, async (i) => {
-      if (i)
+    const i = this._cframes[0];
+    if (this._layout !== v.fixed && !i?.msg) {
+      e(!1);
+      return;
+    }
+    this._isNavigating = !0;
+    const n = (s) => {
+      this._isNavigating = !1, console.error("Failed to go backward:", s), e(!1);
+    };
+    this._layout === v.fixed ? this.changeResource(-1).then((s) => {
+      this._isNavigating = !1, e(s);
+    }).catch(n) : i.msg.send("go_prev", void 0, async (s) => {
+      if (s)
         this._isNavigating = !1, e(!0);
       else {
-        const n = await this.changeResource(-1);
-        this._isNavigating = !1, e(n);
+        try {
+          const o = await this.changeResource(-1);
+          this._isNavigating = !1, e(o);
+        } catch (o) {
+          n(o);
+        }
       }
     });
   }
@@ -9626,14 +9681,27 @@ class zn extends Pn {
       e(!1);
       return;
     }
-    this._isNavigating = !0, this._layout === v.fixed ? this.changeResource(1).then((i) => {
-      this._isNavigating = !1, e(i);
-    }) : this._cframes[0]?.msg?.send("go_next", void 0, async (i) => {
-      if (i)
+    const i = this._cframes[0];
+    if (this._layout !== v.fixed && !i?.msg) {
+      e(!1);
+      return;
+    }
+    this._isNavigating = !0;
+    const n = (s) => {
+      this._isNavigating = !1, console.error("Failed to go forward:", s), e(!1);
+    };
+    this._layout === v.fixed ? this.changeResource(1).then((s) => {
+      this._isNavigating = !1, e(s);
+    }).catch(n) : i.msg.send("go_next", void 0, async (s) => {
+      if (s)
         this._isNavigating = !1, e(!0);
       else {
-        const n = await this.changeResource(1);
-        this._isNavigating = !1, e(n);
+        try {
+          const o = await this.changeResource(1);
+          this._isNavigating = !1, e(o);
+        } catch (o) {
+          n(o);
+        }
       }
     });
   }
@@ -9721,6 +9789,8 @@ class zn extends Pn {
       this._isNavigating = !1, i(o);
     })).then(() => {
       this.attachListener();
+    }).catch((o) => {
+      this._isNavigating = !1, console.error("Failed to go to locator:", o), i(!1);
     });
   }
   goLink(t, e, i) {

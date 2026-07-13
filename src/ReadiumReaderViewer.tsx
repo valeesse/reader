@@ -15,14 +15,19 @@ import {
 import { createReaderPublication } from './lib/readerPublication';
 import { readTxtPreview, saveImageFromSource } from './lib/native';
 import { ReaderLoadError, ReaderLoading, ReaderPageCounter, ReaderViewerProps } from './components/reader/ReaderShared';
+import { createReaderLayoutKey, createReaderSettingsLayoutFingerprint, ReaderLayoutCache } from './lib/readerLayoutCache';
+import { recordReaderMetric } from './lib/readerPerformance';
 
 const DOUBLE_PAGE_CENTER_GAP = 56;
 const IMMEDIATE_PREFETCH_RADIUS = 1;
 const STABLE_PREFETCH_RADIUS = 3;
+const WHEEL_PAGE_THRESHOLD = 80;
+const WHEEL_GESTURE_RESET_MS = 180;
 // Readium's CJK stylesheet renders generated Chinese TXT at a 14px base,
 // while typical EPUB content here renders at 16px with our 18px scale base.
 // 15.75 keeps the same setting perceptually equal across both formats.
 const TXT_FONT_SCALE_BASE = 15.75;
+const readiumPageGeometryCache = new WeakMap<Document, { viewportWidth: number; scrollWidth: number }>();
 
 export function ReadiumReaderViewer({
   book,
@@ -67,15 +72,23 @@ export function ReadiumReaderViewer({
   const progressSaveTimerRef = useRef<number | null>(null);
   const previewImageRef = useRef(previewImage);
   const suppressChromeToggleUntilRef = useRef(0);
-  const navigationReadyAtRef = useRef(0);
+  const wheelDeltaRef = useRef(0);
+  const wheelLastEventAtRef = useRef(0);
   const navigationLockedRef = useRef(false);
+  const pendingNavigationRef = useRef(0);
   const navigationUnlockTimerRef = useRef<number | null>(null);
+  const navigationRetryTimerRef = useRef<number | null>(null);
+  const navigationRetryCountRef = useRef(0);
   const stablePrefetchTimerRef = useRef<number | null>(null);
   const refinementTimerRef = useRef<number | null>(null);
   const refinementIdleRef = useRef<number | null>(null);
   const refinementAbortRef = useRef<AbortController | null>(null);
   const positionsRefinedRef = useRef(false);
   const deferredHrefRef = useRef('');
+  const deferredDirectionRef = useRef<-1 | 0 | 1>(0);
+  const layoutCacheRef = useRef(new ReaderLayoutCache(3));
+  const navigationStartedAtRef = useRef<number | null>(null);
+  const settingsLayoutFingerprintRef = useRef(createReaderSettingsLayoutFingerprint(settings, book.type));
 
   useEffect(() => {
     settingsRef.current = settings;
@@ -156,15 +169,19 @@ export function ReadiumReaderViewer({
     };
 
     const init = async () => {
+      const initStartedAt = performance.now();
       try {
         setLoading(true);
         setLoadError('');
         setTxtPreview('');
         loadingResolvedRef.current = false;
+        deferredHrefRef.current = '';
+        deferredDirectionRef.current = 0;
         const container = containerRef.current;
         if (!container) return;
 
         const progressPromise = getProgress(book.id);
+        const publicationStartedAt = performance.now();
         const publicationPromise = createReaderPublication(book);
         const storedProgress = await progressPromise;
         if (book.type === 'txt' && !storedProgress?.location && storedProgress?.scrollPercentage === undefined) {
@@ -176,6 +193,11 @@ export function ReadiumReaderViewer({
           }).catch(() => {});
         }
         const publication = await publicationPromise;
+        recordReaderMetric({
+          kind: 'load',
+          name: `${book.type}-publication`,
+          durationMs: performance.now() - publicationStartedAt,
+        });
         if (cancelled) {
           publication.close();
           return;
@@ -198,23 +220,32 @@ export function ReadiumReaderViewer({
           publication.prefetchAroundHref(publication.readingOrder.items[0]?.href || '', IMMEDIATE_PREFETCH_RADIUS).catch(() => {});
         }
         const initialPreferences = createReadiumPreferences(settingsRef.current, book.type);
+        const navigatorStartedAt = performance.now();
         const navigator = new EpubNavigator(
           container,
           publication,
           {
             frameLoaded: (wnd) => {
-              installImagePreview(wnd, openPreview, () => resolveLoading(false));
-              if (!isScrollingTxt(book.type, settingsRef.current)) installReadiumWheel(wnd, navigateByWheel);
               applyReadiumFrameSettings(wnd.document, settingsRef.current, book.type);
+              installImagePreview(wnd, openPreview);
+              if (!isScrollingTxt(book.type, settingsRef.current)) installReadiumWheel(wnd, navigateByWheel);
               watchReadiumFrameLayout(wnd, () => schedulePageCounter(navigatorRef.current?.currentLocator));
+              queueMicrotask(drainNavigationQueue);
             },
             positionChanged: (locator) => {
               if (layoutRestoringRef.current) return;
               const progress = progressionFromLocator(locator, publication);
               const previousProgress = lastEmittedProgressRef.current;
               const direction: -1 | 0 | 1 = previousProgress < 0 ? 0 : progress > previousProgress ? 1 : progress < previousProgress ? -1 : 0;
-              publication.prefetchAroundHref(locator.href, IMMEDIATE_PREFETCH_RADIUS, direction).catch(() => {});
-              scheduleDeferredWork(locator.href, direction, false);
+              // Navigation completion is the latency-critical path. Cache
+              // maintenance is intentionally started after Readium has released
+              // the turn callback; the current/adjacent resources are already
+              // covered by the immediate L1 window.
+              queueMicrotask(() => {
+                if (publicationRef.current !== publication) return;
+                publication.prefetchAroundHref(locator.href, IMMEDIATE_PREFETCH_RADIUS, direction).catch(() => {});
+                scheduleDeferredWork(locator.href, direction, false);
+              });
               schedulePageCounter(locator);
               if (Math.abs(progress - lastEmittedProgressRef.current) >= 0.001) {
                 lastEmittedProgressRef.current = progress;
@@ -238,12 +269,33 @@ export function ReadiumReaderViewer({
             defaults: createReadiumDefaults(settingsRef.current, book.type),
           },
         );
+        recordReaderMetric({
+          kind: 'load',
+          name: `${book.type}-navigator-constructor`,
+          durationMs: performance.now() - navigatorStartedAt,
+        });
 
         navigatorRef.current = navigator;
         const loadingFallback = window.setTimeout(() => resolveLoading(true), 1800);
+        const navigatorLoadStartedAt = performance.now();
         navigator.load()
-          .then(() => {
+          .then(async () => {
             if (cancelled) return;
+            applyReadiumFrameSettingsToNavigator(navigator, settingsRef.current, book.type);
+            await navigator.resizeHandler?.();
+            await waitForCurrentFrameReadiness(navigator, book.type);
+            await waitForLayoutFrames();
+            if (cancelled) return;
+            recordReaderMetric({
+              kind: 'load',
+              name: `${book.type}-navigator-load`,
+              durationMs: performance.now() - navigatorLoadStartedAt,
+            });
+            recordReaderMetric({
+              kind: 'load',
+              name: `${book.type}-presentable`,
+              durationMs: performance.now() - initStartedAt,
+            });
             resolveLoading(false);
             scheduleDeferredWork(initialPosition?.href || publication.readingOrder.items[0]?.href || '', 0, true);
           })
@@ -280,7 +332,14 @@ export function ReadiumReaderViewer({
         window.clearTimeout(navigationUnlockTimerRef.current);
         navigationUnlockTimerRef.current = null;
       }
+      if (navigationRetryTimerRef.current !== null) {
+        window.clearTimeout(navigationRetryTimerRef.current);
+        navigationRetryTimerRef.current = null;
+      }
       navigationLockedRef.current = false;
+      pendingNavigationRef.current = 0;
+      navigationRetryCountRef.current = 0;
+      layoutCacheRef.current.invalidate();
       settingsAnchorRef.current = undefined;
       if (settingsApplyTimerRef.current !== null) window.clearTimeout(settingsApplyTimerRef.current);
       if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current);
@@ -297,11 +356,17 @@ export function ReadiumReaderViewer({
   useEffect(() => {
     const navigator = navigatorRef.current;
     if (!navigator) return;
+    const layoutFingerprint = createReaderSettingsLayoutFingerprint(settings, book.type);
+    const layoutChanged = settingsLayoutFingerprintRef.current !== layoutFingerprint;
+    settingsLayoutFingerprintRef.current = layoutFingerprint;
+    applyReadiumFrameSettingsToNavigator(navigator, settings, book.type);
+    if (!layoutChanged) return;
     cancelDeferredWork(true);
+    layoutCacheRef.current.invalidate();
+    publicationRef.current?.advancePrefetchGeneration();
     const revision = ++settingsRevisionRef.current;
     const preferences = createReadiumPreferences(settings, book.type);
     settingsAnchorRef.current ||= snapshotVisibleTextLocator(navigator);
-    applyReadiumFrameSettingsToNavigator(navigator, settings, book.type);
     if (settingsApplyTimerRef.current !== null) window.clearTimeout(settingsApplyTimerRef.current);
     settingsApplyTimerRef.current = window.setTimeout(() => {
       settingsApplyTimerRef.current = null;
@@ -325,6 +390,7 @@ export function ReadiumReaderViewer({
           }
         } finally {
           layoutRestoringRef.current = false;
+          drainNavigationQueue();
         }
       });
     }, 120);
@@ -340,10 +406,20 @@ export function ReadiumReaderViewer({
     const element = containerRef.current;
     const navigator = navigatorRef.current;
     if (!element || !navigator) return;
-    const observer = new ResizeObserver(() => {
+    let observedWidth = element.clientWidth;
+    let observedHeight = element.clientHeight;
+    const observer = new ResizeObserver((entries) => {
+      const box = entries[entries.length - 1]?.contentRect;
+      if (box && Math.abs(box.width - observedWidth) < 0.5 && Math.abs(box.height - observedHeight) < 0.5) return;
+      if (box) {
+        observedWidth = box.width;
+        observedHeight = box.height;
+      }
       if (settingsApplyTimerRef.current !== null || performance.now() < suppressResizeUntilRef.current) return;
       if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current);
       resizeTimerRef.current = window.setTimeout(() => {
+        layoutCacheRef.current.invalidate();
+        publicationRef.current?.advancePrefetchGeneration();
         resizeTimerRef.current = null;
         enqueueLayout(async () => {
           if (navigatorRef.current !== navigator) return;
@@ -358,6 +434,7 @@ export function ReadiumReaderViewer({
             revealReadiumFrames(containerRef.current, navigator);
           } finally {
             layoutRestoringRef.current = false;
+            drainNavigationQueue();
           }
         });
       }, 140);
@@ -397,12 +474,19 @@ export function ReadiumReaderViewer({
   const scheduleDeferredWork = (href: string, direction: -1 | 0 | 1, restartRefinement: boolean) => {
     const publication = publicationRef.current;
     if (!publication || !href) return;
+    const shouldPrepareLayout = !deferredHrefRef.current
+      || deferredHrefRef.current !== href
+      || (direction !== 0 && deferredDirectionRef.current !== direction);
     const resourceChanged = Boolean(deferredHrefRef.current && deferredHrefRef.current !== href);
+    if (resourceChanged) publication.advancePrefetchGeneration();
     deferredHrefRef.current = href;
+    if (direction !== 0) deferredDirectionRef.current = direction;
+    if (shouldPrepareLayout) void prepareAdjacentLayouts(href, direction);
     if (stablePrefetchTimerRef.current !== null) window.clearTimeout(stablePrefetchTimerRef.current);
     stablePrefetchTimerRef.current = window.setTimeout(() => {
       stablePrefetchTimerRef.current = null;
       publication.prefetchAroundHref(href, STABLE_PREFETCH_RADIUS, direction).catch(() => {});
+      publication.prepareContentAroundHref(href, 2, direction).catch(() => {});
     }, 320);
 
     if (restartRefinement || resourceChanged) cancelPositionRefinement();
@@ -433,6 +517,43 @@ export function ReadiumReaderViewer({
     }, 850);
   };
 
+  const prepareAdjacentLayouts = async (href: string, direction: -1 | 0 | 1) => {
+    const publication = publicationRef.current;
+    const navigator = navigatorRef.current;
+    const container = containerRef.current;
+    // Pre-layout the next paginated resource in the navigator's bounded frame
+    // pool. Preparation is scheduled at background/idle priority above, keeping
+    // it out of the active page-turn path while making resource boundaries L1.
+    if (!publication || !navigator || !container || isScrollingTxt(book.type, settingsRef.current)) return;
+    const currentIndex = publication.readingOrder.findIndexWithHref(href);
+    if (currentIndex < 0) return;
+    const offsets = direction < 0 ? [-1] : [1];
+    const targets = offsets
+      .map((offset) => publication.readingOrder.items[currentIndex + offset])
+      .filter((link): link is NonNullable<typeof link> => Boolean(link));
+    await yieldForReaderPreparation();
+    if (publicationRef.current !== publication || navigatorRef.current !== navigator) return;
+    await publication.prepareContentAroundHref(href, 1, direction).catch(() => {});
+    if (publicationRef.current !== publication || navigatorRef.current !== navigator || deferredHrefRef.current !== href) return;
+    const viewport = {
+      width: container.clientWidth,
+      height: container.clientHeight,
+      devicePixelRatio: window.devicePixelRatio || 1,
+    };
+    for (const link of targets) {
+      if (publicationRef.current !== publication || navigatorRef.current !== navigator || deferredHrefRef.current !== href) return;
+      const layoutKey = `${createReaderLayoutKey(publication.contentKey, settingsRef.current, viewport, book.type)}:${link.href}`;
+      await layoutCacheRef.current.prepare(layoutKey, async () => {
+        const frames = await navigator.prepare(link.locator);
+        await Promise.all(frames.map(async (frameWindow) => {
+          applyReadiumFrameSettings(frameWindow.document, settingsRef.current, book.type);
+          await waitForFrameReadiness(frameWindow.document, book.type);
+        }));
+      });
+      await yieldForReaderPreparation();
+    }
+  };
+
   const cancelPositionRefinement = () => {
     if (refinementTimerRef.current !== null) window.clearTimeout(refinementTimerRef.current);
     if (refinementIdleRef.current !== null) {
@@ -452,7 +573,11 @@ export function ReadiumReaderViewer({
       || publication?.toc.findWithHref(tocTarget.href)
       || publication?.linkWithHref(tocTarget.href);
     if (link && navigator) {
-      navigator.go(link.locator, false, () => {});
+      const fragment = tocTarget.href.split('#')[1];
+      const locator = fragment
+        ? link.locator.copyWithLocations({ fragments: [decodeURIComponent(fragment)] })
+        : link.locator;
+      navigator.go(locator, false, () => {});
     }
   }, [tocTarget, loading]);
 
@@ -468,8 +593,8 @@ export function ReadiumReaderViewer({
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (previewImage) return;
-      const target = event.target as HTMLElement | null;
-      if (target?.closest('input, select, textarea, button, [contenteditable="true"]')) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest('input, select, textarea, button, [contenteditable="true"]')) return;
       if (event.key === 'ArrowLeft') {
         navigatePage(-1);
       } else if (event.key === 'ArrowRight') {
@@ -490,30 +615,88 @@ export function ReadiumReaderViewer({
 
   const navigateByWheel = (event: WheelEvent) => {
     if (event.ctrlKey || previewImageRef.current || isScrollingTxt(book.type, settingsRef.current)) return;
-    const dominantDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-    if (Math.abs(dominantDelta) < 20) return;
+    const dominantDelta = normalizeWheelDelta(event, containerRef.current);
+    if (Math.abs(dominantDelta) < 1) return;
     event.preventDefault();
     event.stopPropagation();
 
-    navigatePage(dominantDelta > 0 ? 1 : -1, 280);
+    const now = performance.now();
+    if (
+      now - wheelLastEventAtRef.current > WHEEL_GESTURE_RESET_MS
+      || Math.sign(wheelDeltaRef.current) !== Math.sign(dominantDelta)
+    ) {
+      wheelDeltaRef.current = 0;
+    }
+    wheelLastEventAtRef.current = now;
+    wheelDeltaRef.current += dominantDelta;
+    if (Math.abs(wheelDeltaRef.current) < WHEEL_PAGE_THRESHOLD) return;
+    wheelDeltaRef.current = 0;
+    navigatePage(dominantDelta > 0 ? 1 : -1);
   };
 
-  const navigatePage = (direction: -1 | 1, cooldown = 100) => {
-    const navigator = navigatorRef.current;
-    const now = performance.now();
-    if (!navigator || navigationLockedRef.current || now < navigationReadyAtRef.current) return;
+  const navigatePage = (direction: -1 | 1) => {
+    // Keep a small bounded queue so clicks and key presses made while a chapter
+    // or layout is settling are applied instead of being silently discarded.
+    pendingNavigationRef.current = Math.max(-3, Math.min(3, pendingNavigationRef.current + direction));
+    navigationStartedAtRef.current ??= performance.now();
+    drainNavigationQueue();
+  };
 
+  const drainNavigationQueue = () => {
+    const navigator = navigatorRef.current;
+    const pending = pendingNavigationRef.current;
+    if (!navigator || pending === 0 || layoutRestoringRef.current || navigationLockedRef.current || !isReadiumNavigationReady(navigator)) return;
+
+    const direction: -1 | 1 = pending > 0 ? 1 : -1;
+    const warmPath = isWarmNavigationPath(navigator, direction);
+    pendingNavigationRef.current -= direction;
     navigationLockedRef.current = true;
-    navigationReadyAtRef.current = now + cooldown;
+    const dispatchedAt = performance.now();
     if (navigationUnlockTimerRef.current !== null) window.clearTimeout(navigationUnlockTimerRef.current);
-    const unlock = () => {
+    const unlock = (ok?: boolean) => {
       if (navigationUnlockTimerRef.current !== null) window.clearTimeout(navigationUnlockTimerRef.current);
-      navigationUnlockTimerRef.current = window.setTimeout(() => {
-        navigationUnlockTimerRef.current = null;
-        navigationLockedRef.current = false;
-      }, 80);
+      navigationUnlockTimerRef.current = null;
+      navigationLockedRef.current = false;
+      const shouldRetry = ok === false
+        && navigationRetryCountRef.current < 2
+        && canNavigateInDirection(navigator, direction);
+      if (shouldRetry) {
+        navigationRetryCountRef.current += 1;
+        pendingNavigationRef.current = Math.max(-3, Math.min(3, pendingNavigationRef.current + direction));
+      } else {
+        navigationRetryCountRef.current = 0;
+      }
+      recordReaderMetric({
+        kind: 'navigation',
+        name: 'navigator-callback',
+        durationMs: performance.now() - dispatchedAt,
+        hit: warmPath,
+        detail: { direction, warmPath, ok, retried: shouldRetry },
+      });
+      const started = navigationStartedAtRef.current;
+      if (!shouldRetry) navigationStartedAtRef.current = null;
+      if (!shouldRetry && started !== null) {
+        requestAnimationFrame(() => recordReaderMetric({
+          kind: 'navigation',
+          name: 'input-to-next-frame',
+          durationMs: performance.now() - started,
+          hit: warmPath,
+          detail: { direction, warmPath },
+        }));
+      }
+      if (shouldRetry) {
+        if (navigationRetryTimerRef.current !== null) window.clearTimeout(navigationRetryTimerRef.current);
+        navigationRetryTimerRef.current = window.setTimeout(() => {
+          navigationRetryTimerRef.current = null;
+          drainNavigationQueue();
+        }, 50);
+      } else {
+        queueMicrotask(drainNavigationQueue);
+      }
     };
-    navigationUnlockTimerRef.current = window.setTimeout(unlock, 900);
+    // The vendored navigator now releases its own lock on all known failure
+    // paths. This remains a final guard against an unexpected lost IPC reply.
+    navigationUnlockTimerRef.current = window.setTimeout(unlock, 2500);
 
     try {
       if (direction > 0) navigator.goForward(false, unlock);
@@ -522,6 +705,39 @@ export function ReadiumReaderViewer({
       unlock();
       console.warn('Readium page turn failed', error);
     }
+  };
+
+  const isWarmNavigationPath = (navigator: EpubNavigator, direction: -1 | 1) => {
+    const publication = publicationRef.current;
+    const container = containerRef.current;
+    const locator = navigator.currentLocator;
+    if (!publication || !container || !locator?.href) return false;
+    const normalized = publication.readingOrder.findWithHref(locator.href)?.href || locator.href;
+    const visible = navigator.viewport.progressions.get(normalized);
+    const crossesResource = direction > 0 ? (visible?.end ?? 0) >= 0.999 : (visible?.start ?? 1) <= 0.001;
+    if (!crossesResource) return true;
+    const index = publication.readingOrder.findIndexWithHref(normalized);
+    const target = publication.readingOrder.items[index + direction];
+    if (!target) return true;
+    const viewport = {
+      width: container.clientWidth,
+      height: container.clientHeight,
+      devicePixelRatio: window.devicePixelRatio || 1,
+    };
+    const key = `${createReaderLayoutKey(publication.contentKey, settingsRef.current, viewport, book.type)}:${target.href}`;
+    return layoutCacheRef.current.isReady(key);
+  };
+
+  const canNavigateInDirection = (navigator: EpubNavigator, direction: -1 | 1) => {
+    const publication = publicationRef.current;
+    const locator = navigator.currentLocator;
+    if (!publication || !locator?.href) return false;
+    const normalized = publication.readingOrder.findWithHref(locator.href)?.href || locator.href;
+    const visible = navigator.viewport.progressions.get(normalized);
+    if (direction < 0 && (visible?.start ?? locator.locations?.progression ?? 0) > 0.001) return true;
+    if (direction > 0 && (visible?.end ?? locator.locations?.progression ?? 1) < 0.999) return true;
+    const index = publication.readingOrder.findIndexWithHref(normalized);
+    return index >= 0 && index + direction >= 0 && index + direction < publication.readingOrder.items.length;
   };
 
   const closePreview = () => {
@@ -569,7 +785,7 @@ export function ReadiumReaderViewer({
           paddingBottom: `min(${settings.pageMargins.bottom}px, 30vh)`,
         }}
       >
-        <div ref={containerRef} className="readium-container h-full w-full" />
+        <div ref={containerRef} className={`readium-container h-full w-full ${loading ? 'readium-initializing' : ''}`} />
       </div>
 
       <div className="pointer-events-none absolute left-3 top-1/2 z-40 -translate-y-1/2">
@@ -788,6 +1004,55 @@ function waitForLayoutFrames() {
   return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 }
 
+async function waitForFrameReadiness(doc: Document, bookType: 'epub' | 'txt') {
+  if (bookType === 'txt') {
+    await new Promise<void>((resolve) => (doc.defaultView || window).requestAnimationFrame(() => resolve()));
+    return;
+  }
+  const fontSet = (doc as Document & { fonts?: FontFaceSet }).fonts;
+  if (fontSet) await withTimeout(fontSet.ready.then(() => undefined), 500);
+  const images = Array.from(doc.images).slice(0, 8);
+  await Promise.all(images.map((image) => {
+    if (image.complete && image.naturalWidth > 0) return Promise.resolve();
+    return withTimeout(image.decode().catch(() => {}), 350);
+  }));
+  await new Promise<void>((resolve) => {
+    const view = doc.defaultView || window;
+    view.requestAnimationFrame(() => view.requestAnimationFrame(() => resolve()));
+  });
+}
+
+async function waitForCurrentFrameReadiness(navigator: EpubNavigator, bookType: 'epub' | 'txt') {
+  const frames = (navigator as EpubNavigator & { _cframes?: ReadiumFrameHandle[] })._cframes || [];
+  await Promise.all(frames.map((frame) => {
+    const doc = getLiveReadiumIframe(frame)?.contentDocument;
+    return doc ? waitForFrameReadiness(doc, bookType) : Promise.resolve();
+  }));
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+  return new Promise<T | undefined>((resolve) => {
+    const timer = window.setTimeout(() => resolve(undefined), timeoutMs);
+    promise.then((value) => {
+      window.clearTimeout(timer);
+      resolve(value);
+    }, () => {
+      window.clearTimeout(timer);
+      resolve(undefined);
+    });
+  });
+}
+
+function yieldForReaderPreparation() {
+  const taskScheduler = (globalThis as typeof globalThis & {
+    scheduler?: { postTask?: (task: () => void, options: { priority: 'background'; delay?: number }) => Promise<void> };
+  }).scheduler;
+  if (taskScheduler?.postTask) {
+    return taskScheduler.postTask(() => {}, { priority: 'background' });
+  }
+  return new Promise<void>((resolve) => window.requestIdleCallback(() => resolve(), { timeout: 120 }));
+}
+
 function themeColors(theme: 'light' | 'dark' | 'sepia') {
   if (theme === 'dark') return { background: '#121212', text: '#e5e7eb' };
   if (theme === 'sepia') return { background: '#FDFCF8', text: '#5b4636' };
@@ -813,6 +1078,7 @@ function applyReadiumFrameSettingsToNavigator(navigator: EpubNavigator, settings
 }
 
 function applyReadiumFrameSettings(doc: Document, settings: AppSettings, bookType: 'epub' | 'txt') {
+  readiumPageGeometryCache.delete(doc);
   const root = doc.documentElement;
   const colors = themeColors(settings.theme);
   root.style.setProperty('--USER__backgroundColor', colors.background);
@@ -844,6 +1110,15 @@ function isScrollingTxt(bookType: 'epub' | 'txt', settings: AppSettings) {
   return bookType === 'txt' && settings.txtReadingFlow === 'scroll';
 }
 
+function normalizeWheelDelta(event: WheelEvent, container: HTMLElement | null) {
+  const dominantDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return dominantDelta * 16;
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+    return dominantDelta * Math.max(1, container?.clientHeight || window.innerHeight);
+  }
+  return dominantDelta;
+}
+
 function readiumFontScale(fontSize: number, bookType: 'epub' | 'txt') {
   return fontSize / (bookType === 'txt' ? TXT_FONT_SCALE_BASE : 18);
 }
@@ -863,10 +1138,8 @@ function installReadiumWheel(wnd: Window, onWheel: (event: WheelEvent) => void) 
 function installImagePreview(
   wnd: Window,
   onOpen: (image: { src: string; name: string }) => void,
-  onReady: () => void,
 ) {
   const doc = wnd.document;
-  onReady();
   installReadiumFrameStyles(doc);
   if (!doc || doc.body.dataset.zenithReadiumImageBound === 'true') return;
   doc.body.dataset.zenithReadiumImageBound = 'true';
@@ -956,12 +1229,16 @@ function formatEpubPageCounter(navigator: EpubNavigator, locator: ReadiumLocator
   const iframe = internal._cframes?.map(getLiveReadiumIframe).find(Boolean);
   const wnd = iframe?.contentWindow;
   const doc = iframe?.contentDocument;
-  const viewportWidth = Math.max(1, wnd?.innerWidth || doc?.documentElement.clientWidth || 1);
-  const scrollWidth = Math.max(
-    viewportWidth,
-    doc?.documentElement.scrollWidth || 0,
-    doc?.body?.scrollWidth || 0,
-  );
+  let geometry = doc ? readiumPageGeometryCache.get(doc) : undefined;
+  if (!geometry) {
+    const viewportWidth = Math.max(1, wnd?.innerWidth || doc?.documentElement.clientWidth || 1);
+    geometry = {
+      viewportWidth,
+      scrollWidth: Math.max(viewportWidth, doc?.documentElement.scrollWidth || 0, doc?.body?.scrollWidth || 0),
+    };
+    if (doc) readiumPageGeometryCache.set(doc, geometry);
+  }
+  const { viewportWidth, scrollWidth } = geometry;
   const chapterTotal = Math.max(1, Math.ceil((scrollWidth - 1) / viewportWidth));
   const localProgression = clampNumber(locator.locations?.progression ?? 0, 0, 0.999999999);
   const chapterCurrent = Math.max(1, Math.min(chapterTotal, Math.floor(localProgression * chapterTotal) + 1));
@@ -972,12 +1249,16 @@ function formatEpubPageCounter(navigator: EpubNavigator, locator: ReadiumLocator
 
 function watchReadiumFrameLayout(wnd: Window, onLayout: () => void) {
   const doc = wnd.document;
-  wnd.addEventListener('load', onLayout, { once: true });
-  doc.fonts?.ready.then(onLayout).catch(() => {});
+  const invalidateAndNotify = () => {
+    readiumPageGeometryCache.delete(doc);
+    onLayout();
+  };
+  wnd.addEventListener('load', invalidateAndNotify, { once: true });
+  doc.fonts?.ready.then(invalidateAndNotify).catch(() => {});
   doc.querySelectorAll('img').forEach((image) => {
     if (!(image as HTMLImageElement).complete) {
-      image.addEventListener('load', onLayout, { once: true });
-      image.addEventListener('error', onLayout, { once: true });
+      image.addEventListener('load', invalidateAndNotify, { once: true });
+      image.addEventListener('error', invalidateAndNotify, { once: true });
     }
   });
 }
@@ -1069,10 +1350,16 @@ function revealReadiumFrames(container: HTMLElement | null, navigator: EpubNavig
 type ReadiumFrameHandle = {
   destroyed?: boolean;
   frame?: HTMLIFrameElement;
+  msg?: { ready?: boolean };
 };
 
 function getLiveReadiumIframe(handle?: ReadiumFrameHandle) {
   if (!handle || handle.destroyed) return undefined;
   const iframe = handle.frame;
   return iframe?.contentWindow ? iframe : undefined;
+}
+
+function isReadiumNavigationReady(navigator: EpubNavigator) {
+  const handle = (navigator as EpubNavigator & { _cframes?: ReadiumFrameHandle[] })._cframes?.[0];
+  return Boolean(getLiveReadiumIframe(handle) && handle?.msg?.ready);
 }

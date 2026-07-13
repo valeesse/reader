@@ -47,22 +47,29 @@ fn read_epub_resource_bytes(
     path: &str,
     href: &str,
 ) -> Result<(String, Vec<u8>), String> {
-    let mut books = state
-        .epub_books
-        .lock()
-        .map_err(|_| "EPUB 缓存被占用".to_string())?;
-    let book = books
-        .get_mut(path)
-        .ok_or_else(|| "EPUB 尚未打开".to_string())?;
-    let manifest_item = book
-        .manifest_items
-        .iter()
-        .find(|item| strip_fragment(&item.absolute_href) == href)
-        .cloned();
+    let (manifest_item, archive) = {
+        let books = state
+            .epub_books
+            .lock()
+            .map_err(|_| "EPUB 缓存被占用".to_string())?;
+        let book = books
+            .get(path)
+            .ok_or_else(|| "EPUB 尚未打开".to_string())?;
+        (
+            book.manifest_items
+                .iter()
+                .find(|item| strip_fragment(&item.absolute_href) == href)
+                .cloned(),
+            Arc::clone(&book.archive),
+        )
+    };
     let (archive_path, media_type) = manifest_item
         .map(|item| (item.absolute_href, item.media_type))
         .unwrap_or_else(|| (href.to_string(), mime_from_path(href)));
-    let (_, bytes) = read_zip_bytes_flexible(&mut book.archive, &archive_path)
+    let mut archive = archive
+        .lock()
+        .map_err(|_| "EPUB 归档正在被读取".to_string())?;
+    let (_, bytes) = read_zip_bytes_flexible(&mut archive, &archive_path)
         .map_err(|err| format!("读取 EPUB 资源失败: {err}"))?;
     Ok((media_type, bytes))
 }

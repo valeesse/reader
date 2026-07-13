@@ -50,6 +50,7 @@ export class EpubNavigator {
   destroy(): Promise<void>;
   submitPreferences(preferences: any): Promise<void>;
   resizeHandler(): Promise<void>;
+  prepare(locator: ReadiumLocator): Promise<Window[]>;
   goBackward(animated: boolean, callback: (ok: boolean) => void): void;
   goForward(animated: boolean, callback: (ok: boolean) => void): void;
   go(locator: ReadiumLocator, animated: boolean, callback: (ok: boolean) => void): void;
