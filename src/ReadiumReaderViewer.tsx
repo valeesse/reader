@@ -494,7 +494,7 @@ export function ReadiumReaderViewer({
   const navigatePage = (direction: -1 | 1, cooldown = 100) => {
     const navigator = navigatorRef.current;
     const now = performance.now();
-    if (!navigator || layoutRestoringRef.current || navigationLockedRef.current || now < navigationReadyAtRef.current) return;
+    if (!navigator || navigationLockedRef.current || now < navigationReadyAtRef.current) return;
 
     navigationLockedRef.current = true;
     navigationReadyAtRef.current = now + cooldown;
