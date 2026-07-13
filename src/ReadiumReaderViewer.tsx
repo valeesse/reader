@@ -63,8 +63,9 @@ export function ReadiumReaderViewer({
   const progressSaveTimerRef = useRef<number | null>(null);
   const previewImageRef = useRef(previewImage);
   const suppressChromeToggleUntilRef = useRef(0);
-  const wheelReadyAtRef = useRef(0);
-  const wheelNavigatingRef = useRef(false);
+  const navigationReadyAtRef = useRef(0);
+  const navigationLockedRef = useRef(false);
+  const navigationUnlockTimerRef = useRef<number | null>(null);
   const stablePrefetchTimerRef = useRef<number | null>(null);
   const refinementTimerRef = useRef<number | null>(null);
   const refinementIdleRef = useRef<number | null>(null);
@@ -272,6 +273,11 @@ export function ReadiumReaderViewer({
         window.clearTimeout(progressSaveTimerRef.current);
         progressSaveTimerRef.current = null;
       }
+      if (navigationUnlockTimerRef.current !== null) {
+        window.clearTimeout(navigationUnlockTimerRef.current);
+        navigationUnlockTimerRef.current = null;
+      }
+      navigationLockedRef.current = false;
       if (settingsApplyTimerRef.current !== null) window.clearTimeout(settingsApplyTimerRef.current);
       if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current);
       cancelDeferredWork(true);
@@ -458,9 +464,9 @@ export function ReadiumReaderViewer({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (previewImage) return;
       if (event.key === 'ArrowLeft') {
-        navigatorRef.current?.goBackward(false, () => {});
+        navigatePage(-1);
       } else if (event.key === 'ArrowRight') {
-        navigatorRef.current?.goForward(false, () => {});
+        navigatePage(1);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -482,20 +488,32 @@ export function ReadiumReaderViewer({
     event.preventDefault();
     event.stopPropagation();
 
+    navigatePage(dominantDelta > 0 ? 1 : -1, 280);
+  };
+
+  const navigatePage = (direction: -1 | 1, cooldown = 100) => {
+    const navigator = navigatorRef.current;
     const now = performance.now();
-    if (now < wheelReadyAtRef.current || wheelNavigatingRef.current) return;
-    wheelReadyAtRef.current = now + 280;
-    wheelNavigatingRef.current = true;
-    const done = () => {
-      window.setTimeout(() => {
-        wheelNavigatingRef.current = false;
+    if (!navigator || layoutRestoringRef.current || navigationLockedRef.current || now < navigationReadyAtRef.current) return;
+
+    navigationLockedRef.current = true;
+    navigationReadyAtRef.current = now + cooldown;
+    if (navigationUnlockTimerRef.current !== null) window.clearTimeout(navigationUnlockTimerRef.current);
+    const unlock = () => {
+      if (navigationUnlockTimerRef.current !== null) window.clearTimeout(navigationUnlockTimerRef.current);
+      navigationUnlockTimerRef.current = window.setTimeout(() => {
+        navigationUnlockTimerRef.current = null;
+        navigationLockedRef.current = false;
       }, 80);
     };
+    navigationUnlockTimerRef.current = window.setTimeout(unlock, 900);
 
-    if (dominantDelta > 0) {
-      navigatorRef.current?.goForward(false, done);
-    } else {
-      navigatorRef.current?.goBackward(false, done);
+    try {
+      if (direction > 0) navigator.goForward(false, unlock);
+      else navigator.goBackward(false, unlock);
+    } catch (error) {
+      unlock();
+      console.warn('Readium page turn failed', error);
     }
   };
 
@@ -521,12 +539,12 @@ export function ReadiumReaderViewer({
 
   const goBackward = (event: React.MouseEvent | React.PointerEvent) => {
     event.stopPropagation();
-    navigatorRef.current?.goBackward(false, () => {});
+    navigatePage(-1);
   };
 
   const goForward = (event: React.MouseEvent | React.PointerEvent) => {
     event.stopPropagation();
-    navigatorRef.current?.goForward(false, () => {});
+    navigatePage(1);
   };
 
   if (loadError) {

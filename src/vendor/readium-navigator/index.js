@@ -1463,7 +1463,11 @@ class qn {
     this.destination = null, this.channelId = "", this.preLog = [], this.registrar.clear(), this.wnd.removeEventListener("message", this.receiver);
   }
   send(t, e, i = void 0, n = []) {
-    if (!this.destination) throw Error("Attempted to send comms message before destination has been initialized");
+    // Pointer events can arrive between the iframe loader mounting and the
+    // parent completing its _ping/_pong handshake. They are transient, so
+    // dropping them is safer than crashing the navigator or replaying a stale
+    // click after a different page has become active.
+    if (!this.destination) return !1;
     const s = {
       _readium: yt,
       _channel: this.channelId,
@@ -1481,6 +1485,7 @@ class qn {
       if (n.length > 0) throw o;
       this.destination.postMessage(s, this.origin, n);
     }
+    return !0;
   }
 }
 class kt {
@@ -3976,6 +3981,7 @@ const ht = class ht extends kt {
     !this.isSelectionMonitoringEnabled || !this.wnd || (this.wnd.document.removeEventListener("selectionchange", this.handleSelection), this.selectionAnalyzer?.clear(), this.selectionAnalyzer = null, this.isSelectionMonitoringEnabled = !1);
   }
   onPointUp(t) {
+    if (!this.comms.ready) return;
     const e = this.wnd.getSelection();
     if (e && e.toString()?.length > 0) {
       const n = e.getRangeAt(0)?.getClientRects();
@@ -4756,6 +4762,9 @@ class Dt {
   clearListener() {
     typeof this._listener == "function" && (this._listener = void 0);
   }
+  forget(t) {
+    this.registry.delete(t);
+  }
   halt() {
     this._ready = !1, window.removeEventListener("message", this.handler), clearInterval(this.gc), this._listener = void 0, this.registry.clear();
   }
@@ -4893,10 +4902,13 @@ class Ks {
   async hide() {
     if (!this.destroyed) {
       if (this.frame.style.visibility = "hidden", this.frame.style.setProperty("aria-hidden", "true"), this.frame.style.opacity = "0", this.frame.style.pointerEvents = "none", this.hidden = !0, this.frame.parentElement)
-        return this.comms === void 0 || !this.comms.ready ? void 0 : new Promise((t, e) => {
-          this.comms?.send("unfocus", void 0, (i) => {
-            this.comms?.halt(), t();
-          });
+        return this.comms === void 0 || !this.comms.ready ? void 0 : new Promise((t) => {
+          const e = this.comms;
+          let i = !1, n;
+          const s = () => {
+            i || (i = !0, window.clearTimeout(o), this.comms === e && this.hidden ? e?.halt() : n && e?.forget(n), t());
+          }, o = window.setTimeout(s, 250);
+          n = e?.send("unfocus", void 0, s);
         });
       this.comms?.halt();
     }
@@ -7255,10 +7267,13 @@ class Mn {
   async hide() {
     if (!this.destroyed) {
       if (this.frame.style.visibility = "hidden", this.frame.style.setProperty("aria-hidden", "true"), this.frame.style.opacity = "0", this.frame.style.pointerEvents = "none", this.hidden = !0, this.frame.blur(), this.frame.parentElement)
-        return this.comms === void 0 || !this.comms.ready ? void 0 : new Promise((t, e) => {
-          this.comms?.send("unfocus", void 0, (i) => {
-            this.comms?.halt(), t();
-          });
+        return this.comms === void 0 || !this.comms.ready ? void 0 : new Promise((t) => {
+          const e = this.comms;
+          let i = !1, n;
+          const s = () => {
+            i || (i = !0, window.clearTimeout(o), this.comms === e && this.hidden ? e?.halt() : n && e?.forget(n), t());
+          }, o = window.setTimeout(s, 250);
+          n = e?.send("unfocus", void 0, s);
         });
       this.comms?.halt();
     }
