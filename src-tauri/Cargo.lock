@@ -4841,6 +4841,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "walkdir",
+ "windows-sys 0.61.2",
  "zip",
 ]
 

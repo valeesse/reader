@@ -2,17 +2,32 @@ const TXT_CHAR_CHECKPOINT_INTERVAL: usize = 4096;
 const TXT_BOOK_CACHE_LIMIT: usize = 5;
 const EPUB_BOOK_CACHE_LIMIT: usize = 5;
 const EPUB_RESOURCE_CACHE_LIMIT: usize = 96;
-const EPUB_RESOURCE_CACHE_MAX_BYTES: usize = 48 * 1024 * 1024;
 const EPUB_PREFETCH_MAX_RESOURCES: usize = 16;
 const PERSISTENT_CACHE_VERSION: u8 = 3;
 const STREAM_BUFFER_BYTES: usize = 64 * 1024;
-const READER_DISK_CACHE_MAX_BYTES: u64 = 1024 * 1024 * 1024;
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+fn epub_resource_cache_max_bytes() -> usize {
+    if cfg!(any(target_os = "android", target_os = "ios")) {
+        20 * 1024 * 1024
+    } else {
+        48 * 1024 * 1024
+    }
+}
+
+fn reader_disk_cache_max_bytes() -> u64 {
+    if cfg!(any(target_os = "android", target_os = "ios")) {
+        256 * 1024 * 1024
+    } else {
+        1024 * 1024 * 1024
+    }
+}
 
 #[derive(Default)]
 struct ReaderState {
     txt_books: Mutex<HashMap<String, TxtBookCache>>,
     epub_books: Mutex<HashMap<String, EpubBookCache>>,
+    export_paths: Mutex<HashMap<String, String>>,
     next_session_id: AtomicU64,
 }
 
@@ -149,10 +164,21 @@ struct NativeBook {
     #[serde(rename = "type")]
     book_type: String,
     path: String,
+    fingerprint: String,
+    local_resource_id: String,
     file_name: String,
     series_name: Option<String>,
     series_index: Option<f64>,
     added_at: u64,
+    source: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BookIdentity {
+    path: String,
+    fingerprint: String,
+    local_resource_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -172,12 +198,21 @@ struct WebDavBook {
     #[serde(rename = "type")]
     book_type: String,
     path: String,
+    fingerprint: String,
     file_name: String,
     added_at: u64,
     source: String,
     remote_path: String,
     size: Option<u64>,
     modified_at: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CachedWebDavBook {
+    path: String,
+    fingerprint: String,
+    local_resource_id: String,
 }
 
 #[derive(Debug)]

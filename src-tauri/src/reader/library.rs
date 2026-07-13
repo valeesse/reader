@@ -43,33 +43,7 @@ fn scan_library_blocking(app: AppHandle, root: PathBuf) -> Result<Vec<NativeBook
         matched += 1;
         emit_scan_progress(&app, visited, matched, path);
 
-        let id = stable_book_id(path);
-        let (title, author, cover, series_name, series_index) = if ext == "epub" {
-            parse_epub_metadata(&app, path, &id).unwrap_or_else(|_| {
-                let (title, author) = parse_filename_metadata(path);
-                (title, author, None, None, None)
-            })
-        } else {
-            let (title, author) = parse_filename_metadata(path);
-            (title, author, None, None, None)
-        };
-
-        books.push(NativeBook {
-            id,
-            title,
-            author,
-            cover,
-            book_type: ext,
-            path: path.to_string_lossy().to_string(),
-            file_name: path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default()
-                .to_string(),
-            series_name,
-            series_index,
-            added_at: now_millis(),
-        });
+        books.push(native_book_from_path(&app, path, &ext, "external")?);
     }
 
     books.sort_by(|a, b| a.title.cmp(&b.title));
@@ -82,6 +56,139 @@ fn scan_library_blocking(app: AppHandle, root: PathBuf) -> Result<Vec<NativeBook
         },
     );
     Ok(books)
+}
+
+#[tauri::command]
+async fn import_managed_books(app: AppHandle, paths: Vec<String>) -> Result<Vec<NativeBook>, String> {
+    tauri::async_runtime::spawn_blocking(move || import_managed_books_blocking(&app, paths))
+        .await
+        .map_err(|error| format!("导入任务中断: {error}"))?
+}
+
+#[tauri::command]
+async fn identify_local_books(paths: Vec<String>) -> Result<Vec<BookIdentity>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        paths
+            .into_iter()
+            .filter_map(|path| {
+                let source = PathBuf::from(&path);
+                if supported_book_extension(&source).is_err() || !source.is_file() {
+                    return None;
+                }
+                let fingerprint = book_fingerprint(&source).ok()?;
+                Some(BookIdentity {
+                    path: path.clone(),
+                    local_resource_id: fingerprint.clone(),
+                    fingerprint,
+                })
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|error| format!("书籍身份迁移中断: {error}"))
+}
+
+fn import_managed_books_blocking(app: &AppHandle, paths: Vec<String>) -> Result<Vec<NativeBook>, String> {
+    let library_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("books");
+    fs::create_dir_all(&library_dir).map_err(|error| format!("创建托管书库失败: {error}"))?;
+    let mut books = Vec::new();
+    for source_value in paths {
+        let source = PathBuf::from(source_value);
+        if !source.is_file() {
+            return Err("导入源不是有效文件".to_string());
+        }
+        let extension = supported_book_extension(&source)?;
+        let fingerprint = book_fingerprint(&source)?;
+        let fingerprint_key = fingerprint.trim_start_matches("sha256:");
+        let target = library_dir.join(format!("{fingerprint_key}.{extension}"));
+        if !target.is_file() {
+            let temp = temporary_sibling_path(&target);
+            fs::copy(&source, &temp).map_err(|error| format!("复制书籍失败: {error}"))?;
+            replace_file_atomically(&temp, &target)?;
+        }
+        books.push(native_book_from_path_with_fingerprint(
+            app,
+            &target,
+            &source,
+            &extension,
+            "managed",
+            fingerprint,
+        )?);
+    }
+    Ok(books)
+}
+
+fn supported_book_extension(path: &Path) -> Result<String, String> {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if matches!(extension.as_str(), "epub" | "txt") {
+        Ok(extension)
+    } else {
+        Err("仅支持 EPUB 和 TXT 文件".to_string())
+    }
+}
+
+fn native_book_from_path(
+    app: &AppHandle,
+    path: &Path,
+    extension: &str,
+    source: &str,
+) -> Result<NativeBook, String> {
+    native_book_from_path_with_fingerprint(
+        app,
+        path,
+        path,
+        extension,
+        source,
+        book_fingerprint(path)?,
+    )
+}
+
+fn native_book_from_path_with_fingerprint(
+    app: &AppHandle,
+    path: &Path,
+    metadata_path: &Path,
+    extension: &str,
+    source: &str,
+    fingerprint: String,
+) -> Result<NativeBook, String> {
+    let id = stable_book_id(path);
+    let (title, author, cover, series_name, series_index) = if extension == "epub" {
+        parse_epub_metadata(app, path, &id).unwrap_or_else(|_| {
+            let (title, author) = parse_filename_metadata(metadata_path);
+            (title, author, None, None, None)
+        })
+    } else {
+        let (title, author) = parse_filename_metadata(metadata_path);
+        (title, author, None, None, None)
+    };
+    let path_value = path.to_string_lossy().to_string();
+    Ok(NativeBook {
+        id,
+        title,
+        author,
+        cover,
+        book_type: extension.to_string(),
+        path: path_value.clone(),
+        local_resource_id: fingerprint.clone(),
+        fingerprint,
+        file_name: metadata_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string(),
+        series_name,
+        series_index,
+        added_at: now_millis(),
+        source: source.to_string(),
+    })
 }
 
 fn emit_scan_progress(app: &AppHandle, visited: usize, matched: usize, path: &Path) {
@@ -101,4 +208,3 @@ impl ReaderState {
         format!("{prefix}-{}-{id}", now_millis_u128())
     }
 }
-

@@ -6,7 +6,7 @@ import { SettingsView } from './components/SettingsView';
 import { WebDavLibrary } from './components/WebDavLibrary';
 import { SeriesView } from './SeriesViewNext';
 import { Book } from './types';
-import { isTauriApp, onLibraryScanProgress, scanLibraryPath, selectLibraryDirectory, showMainWindow } from './lib/native';
+import { importManagedBooks, isTauriApp, onLibraryScanProgress, prewarmLibraryDialogDirectory, scanLibraryPath, selectBookFiles, selectLibraryDirectory, showMainWindow } from './lib/native';
 import { AnimatePresence, motion } from 'motion/react';
 import './reader-overrides.css';
 
@@ -31,6 +31,7 @@ function MainLayout() {
   const [scanMessage, setScanMessage] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const startupResumeCheckedRef = useRef(false);
+  const startupResumeCancelledRef = useRef(false);
   const didShowWindowRef = useRef(false);
   const mountedRef = useRef(true);
 
@@ -57,7 +58,7 @@ function MainLayout() {
           const publicationModule = await publicationModulePromise;
           void publicationModule.prewarmReaderPublication(book).catch(() => {});
           await layoutModulePromise;
-          if (mountedRef.current) {
+          if (mountedRef.current && !startupResumeCancelledRef.current) {
             setReadingBook(book);
           }
         }
@@ -86,7 +87,10 @@ function MainLayout() {
 
   useEffect(() => {
     if (!startupResolved || readingBook) return;
-    const idleId = window.requestIdleCallback(() => void loadReaderLayout(), { timeout: 1800 });
+    const idleId = window.requestIdleCallback(() => {
+      prewarmLibraryDialogDirectory();
+      void loadReaderLayout();
+    }, { timeout: 1800 });
     return () => window.cancelIdleCallback(idleId);
   }, [readingBook, startupResolved]);
 
@@ -128,10 +132,12 @@ function MainLayout() {
         return;
       }
 
+      setIsScanning(true);
+      setScanMessage('正在打开文件夹选择器...');
+      await nextPaint();
       const path = await selectLibraryDirectory();
       if (!path) return;
 
-      setIsScanning(true);
       setScanMessage('正在准备扫描 EPUB / TXT...');
       unlistenProgress = await onLibraryScanProgress((progress) => {
         const fileName = progress.currentPath.split(/[\\/]/).pop();
@@ -150,6 +156,29 @@ function MainLayout() {
       unlistenProgress?.();
       setIsScanning(false);
     }
+  };
+
+  const handleImportFiles = async () => {
+    try {
+      setIsScanning(true);
+      setScanMessage('正在打开文件选择器...');
+      await nextPaint();
+      const paths = await selectBookFiles();
+      if (paths.length === 0) return;
+      setScanMessage(`正在导入 ${paths.length} 个文件到托管书库...`);
+      const importedBooks = await importManagedBooks(paths);
+      await addBooks(importedBooks);
+      setScanMessage(`导入完成，共处理 ${importedBooks.length} 本书。`);
+    } catch (error) {
+      setScanMessage(error instanceof Error ? error.message : '导入失败。');
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const closeReader = () => {
+    startupResumeCancelledRef.current = true;
+    setReadingBook(null);
   };
 
   if (isLoading || !startupResolved) {
@@ -180,7 +209,7 @@ function MainLayout() {
               {currentView === 'library' && <Library onReadBook={setReadingBook} />}
               {currentView === 'webdav' && <WebDavLibrary onReadBook={setReadingBook} />}
               {currentView === 'series' && <SeriesView onReadBook={setReadingBook} />}
-              {currentView === 'settings' && <SettingsView onAddFiles={handleAddFiles} scanMessage={scanMessage} isScanning={isScanning} />}
+              {currentView === 'settings' && <SettingsView onAddFiles={handleAddFiles} onImportFiles={handleImportFiles} scanMessage={scanMessage} isScanning={isScanning} />}
             </motion.div>
           </AnimatePresence>
         </main>
@@ -190,7 +219,7 @@ function MainLayout() {
         <Suspense fallback={null}>
           <ReaderLayout
             book={readingBook}
-            onClose={() => setReadingBook(null)}
+            onClose={closeReader}
             onOpenBook={setReadingBook}
             onPresentable={() => setReaderPresentable(true)}
           />
@@ -198,6 +227,10 @@ function MainLayout() {
       )}
     </div>
   );
+}
+
+function nextPaint() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => window.setTimeout(resolve, 0)));
 }
 
 function StartupSplash({ theme }: { theme: 'light' | 'dark' | 'sepia' }) {

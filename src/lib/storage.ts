@@ -31,6 +31,7 @@ let progressWriteQueue = Promise.resolve();
 
 export async function saveBooks(books: Book[]) {
   updateStartupSnapshot({ books: books.map(stripBookCover) });
+  await migrateProgressToLocalBooks(books);
   await Promise.all([
     set(KEYS.BOOKS, books.map(stripBookCover)),
     ...books
@@ -169,8 +170,8 @@ export async function createSyncSnapshot(): Promise<SyncSnapshot> {
   ]);
 
   return {
-    version: 1,
-    books,
+    version: 2,
+    books: books.map(toSyncedBook),
     series,
     settings: {
       ...settings,
@@ -179,7 +180,10 @@ export async function createSyncSnapshot(): Promise<SyncSnapshot> {
         password: undefined,
       },
     },
-    progress,
+    progress: progress.map((item) => ({
+      ...item,
+      bookFingerprint: item.bookFingerprint || books.find((book) => book.id === item.bookId)?.fingerprint,
+    })),
     lastReadBookId,
     updatedAt: Date.now(),
   };
@@ -187,11 +191,37 @@ export async function createSyncSnapshot(): Promise<SyncSnapshot> {
 
 export async function applySyncSnapshot(snapshot: SyncSnapshot) {
   await progressWriteQueue.catch(() => {});
-  const localSettings = await getSettings();
+  const [localSettings, localBooks, localSeries] = await Promise.all([
+    getSettings(),
+    getBooks(),
+    getSeries(),
+  ]);
   const [localLastReadBookId, localLastReadUpdatedAt] = await Promise.all([
     getLastReadBookId(),
     get<number>(KEYS.LAST_READ_UPDATED_AT),
   ]);
+  const localByFingerprint = new Map(localBooks
+    .filter((book) => book.fingerprint)
+    .map((book) => [book.fingerprint!, book]));
+  const localById = new Map(localBooks.map((book) => [book.id, book]));
+  const remoteToLocalId = new Map<string, string>();
+  const mergedBooks = [...localBooks];
+  for (const remoteBook of snapshot.books || []) {
+    const local = (remoteBook.fingerprint && localByFingerprint.get(remoteBook.fingerprint))
+      || (snapshot.version === 1 ? localById.get(remoteBook.id) : undefined);
+    if (!local) continue;
+    remoteToLocalId.set(remoteBook.id, local.id);
+    const index = mergedBooks.findIndex((book) => book.id === local.id);
+    mergedBooks[index] = {
+      ...remoteBook,
+      ...local,
+      title: remoteBook.title || local.title,
+      author: remoteBook.author || local.author,
+      seriesName: remoteBook.seriesName ?? local.seriesName,
+      seriesIndex: remoteBook.seriesIndex ?? local.seriesIndex,
+    };
+  }
+  const mergedSeries = mergeSyncedSeries(localSeries, snapshot.series || [], remoteToLocalId);
   const nextSettings = {
     ...defaultSettings,
     ...snapshot.settings,
@@ -207,30 +237,38 @@ export async function applySyncSnapshot(snapshot: SyncSnapshot) {
     ?.updatedAt || snapshot.updatedAt;
   const acceptRemoteLastRead = Boolean(snapshot.lastReadBookId)
     && remoteLastReadUpdatedAt >= (localLastReadUpdatedAt || 0);
-  const nextLastReadBookId = acceptRemoteLastRead
-    ? snapshot.lastReadBookId
+  const mappedRemoteLastReadId = snapshot.lastReadBookId
+    ? remoteToLocalId.get(snapshot.lastReadBookId)
+    : undefined;
+  const nextLastReadBookId = acceptRemoteLastRead && mappedRemoteLastReadId
+    ? mappedRemoteLastReadId
     : localLastReadBookId;
 
   saveStartupSnapshot({
-    books: snapshot.books || [],
-    series: snapshot.series || [],
+    books: mergedBooks,
+    series: mergedSeries,
     settings: nextSettings,
     lastReadBookId: nextLastReadBookId,
   });
 
-  await saveBooks(snapshot.books || []);
-  await saveSeries(snapshot.series || []);
+  await saveBooks(mergedBooks);
+  await saveSeries(mergedSeries);
   await saveSettings(nextSettings);
 
   await Promise.all((snapshot.progress || []).map(async (progress) => {
-    const local = await get<ReadingProgress>(`${KEYS.PROGRESS}${progress.bookId}`);
+    const mappedBook = (progress.bookFingerprint && localByFingerprint.get(progress.bookFingerprint))
+      || (remoteToLocalId.has(progress.bookId) ? localById.get(remoteToLocalId.get(progress.bookId)!) : undefined);
+    const mappedProgress = mappedBook
+      ? { ...progress, bookId: mappedBook.id, bookFingerprint: mappedBook.fingerprint }
+      : progress;
+    const local = await get<ReadingProgress>(`${KEYS.PROGRESS}${mappedProgress.bookId}`);
     if (!local || progress.updatedAt >= local.updatedAt) {
-      await set(`${KEYS.PROGRESS}${progress.bookId}`, progress);
+      await set(`${KEYS.PROGRESS}${mappedProgress.bookId}`, mappedProgress);
     }
   }));
-  if (acceptRemoteLastRead && snapshot.lastReadBookId) {
+  if (acceptRemoteLastRead && mappedRemoteLastReadId) {
     await Promise.all([
-      set(KEYS.LAST_READ, snapshot.lastReadBookId),
+      set(KEYS.LAST_READ, mappedRemoteLastReadId),
       set(KEYS.LAST_READ_UPDATED_AT, remoteLastReadUpdatedAt),
     ]);
   }
@@ -241,6 +279,51 @@ export async function applySyncSnapshot(snapshot: SyncSnapshot) {
   }
 }
 
+function toSyncedBook(book: Book): Book {
+  return {
+    ...book,
+    path: '',
+    localResourceId: undefined,
+    cover: undefined,
+  };
+}
+
+function mergeSyncedSeries(localSeries: Series[], remoteSeries: Series[], idMap: Map<string, string>) {
+  const merged = new Map(localSeries.map((item) => [item.name.trim().toLocaleLowerCase(), item]));
+  for (const remote of remoteSeries) {
+    const mappedIds = remote.bookIds.map((id) => idMap.get(id)).filter((id): id is string => Boolean(id));
+    if (mappedIds.length === 0) continue;
+    const key = remote.name.trim().toLocaleLowerCase();
+    const local = merged.get(key);
+    merged.set(key, local
+      ? { ...local, bookIds: Array.from(new Set([...local.bookIds, ...mappedIds])) }
+      : { ...remote, bookIds: mappedIds });
+  }
+  return Array.from(merged.values());
+}
+
+async function migrateProgressToLocalBooks(books: Book[]) {
+  const localByFingerprint = new Map(books
+    .filter((book) => book.fingerprint)
+    .map((book) => [book.fingerprint!, book]));
+  if (localByFingerprint.size === 0) return;
+  const allKeys = await keys();
+  const progressKeys = allKeys.filter(
+    (key): key is string => typeof key === 'string' && key.startsWith(KEYS.PROGRESS),
+  );
+  await Promise.all(progressKeys.map(async (key) => {
+    const progress = await get<ReadingProgress>(key);
+    if (!progress?.bookFingerprint) return;
+    const localBook = localByFingerprint.get(progress.bookFingerprint);
+    if (!localBook || progress.bookId === localBook.id) return;
+    const targetKey = `${KEYS.PROGRESS}${localBook.id}`;
+    const current = await get<ReadingProgress>(targetKey);
+    if (!current || progress.updatedAt >= current.updatedAt) {
+      await set(targetKey, { ...progress, bookId: localBook.id });
+    }
+  }));
+}
+
 function stripBookCover(book: Book): Book {
   if (!book.cover) return book;
   const { cover: _cover, ...lightBook } = book;
@@ -248,9 +331,14 @@ function stripBookCover(book: Book): Book {
 }
 
 function normalizeStoredBook(book: Book): Book {
-  if (book.fileName?.trim()) return book;
+  const normalized = {
+    ...book,
+    source: (book.source as string | undefined) === 'local' ? 'external' : book.source,
+    localResourceId: book.localResourceId || book.path || undefined,
+  };
+  if (normalized.fileName?.trim()) return normalized;
   const fileName = fileNameFromPath(book.path);
-  return fileName ? { ...book, fileName } : book;
+  return fileName ? { ...normalized, fileName } : normalized;
 }
 
 function normalizeSettings(settings?: Partial<AppSettings>): AppSettings {

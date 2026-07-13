@@ -9,10 +9,12 @@ import { READER_FONT_OPTIONS, READING_SETTING_LIMITS } from '../lib/readingSetti
 
 export function SettingsView({
   onAddFiles,
+  onImportFiles,
   scanMessage,
   isScanning,
 }: {
   onAddFiles: () => Promise<void>,
+  onImportFiles: () => Promise<void>,
   scanMessage?: string,
   isScanning?: boolean,
 }) {
@@ -23,7 +25,16 @@ export function SettingsView({
   const [clearingCache, setClearingCache] = useState(false);
 
   useEffect(() => {
-    getReaderCacheStats().then(setCacheStats).catch(() => {});
+    let idleId: number | undefined;
+    const timerId = window.setTimeout(() => {
+      idleId = window.requestIdleCallback(() => {
+        getReaderCacheStats().then(setCacheStats).catch(() => {});
+      }, { timeout: 1500 });
+    }, 4000);
+    return () => {
+      window.clearTimeout(timerId);
+      if (idleId !== undefined) window.cancelIdleCallback(idleId);
+    };
   }, []);
 
   const canSync = settings.webDavConfig.enabled && settings.webDavConfig.url.trim() && settings.webDavConfig.username.trim();
@@ -81,24 +92,34 @@ export function SettingsView({
         <section className="space-y-3">
           <h3 className="text-[11px] font-semibold text-black/40 dark:text-white/40 uppercase tracking-wider pl-1">内容库</h3>
           <div className="bg-[#F2F2F7] dark:bg-[#1C1C1E] border border-black/5 dark:border-white/5 rounded-2xl p-5 shadow-sm relative overflow-hidden">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-[#007AFF]/10 rounded-lg text-[#007AFF]">
                   <Folder className="w-5 h-5" />
                 </div>
                 <div>
                   <h4 className="font-medium text-sm text-[#1C1C1E] dark:text-white">本地书库</h4>
-                  <p className="text-xs text-black/50 dark:text-white/50">添加本地文件夹以扫描书籍</p>
+                  <p className="text-xs text-black/50 dark:text-white/50">扫描外部目录，或复制文件到应用托管书库</p>
                 </div>
               </div>
-              <button 
-                onClick={onAddFiles}
-                disabled={isScanning}
-                className="flex items-center justify-center gap-2 bg-[#007AFF] hover:bg-blue-600 disabled:hover:bg-[#007AFF] disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
-              >
-                {isScanning ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                {isScanning ? '扫描中' : '添加路径'}
-              </button>
+              <div className="flex shrink-0 gap-2">
+                <button
+                  onClick={onImportFiles}
+                  disabled={isScanning}
+                  className="flex items-center justify-center gap-2 bg-[#007AFF] hover:bg-blue-600 disabled:hover:bg-[#007AFF] disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
+                >
+                  {isScanning ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                  导入文件
+                </button>
+                <button
+                  onClick={onAddFiles}
+                  disabled={isScanning}
+                  className="flex items-center justify-center gap-2 bg-black/5 dark:bg-white/10 disabled:opacity-60 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                >
+                  <Folder className="w-4 h-4" />
+                  扫描目录
+                </button>
+              </div>
             </div>
             {scanMessage && (
               <p className="mt-4 text-xs text-black/50 dark:text-white/50">{scanMessage}</p>

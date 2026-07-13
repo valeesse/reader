@@ -15,6 +15,7 @@ import {
   ProgressSavedDetail,
 } from '../lib/storage';
 import { normalizeSettings } from '../lib/readingSettings';
+import { identifyLocalBooks } from '../lib/native';
 
 interface AppContextType {
   books: Book[];
@@ -59,12 +60,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!startupSnapshot) {
       setIsLoading(true);
     }
-    const [loadedBooks, loadedSeries, loadedSettings, loadedLastReadBookId] = await Promise.all([
+    const [storedBooks, loadedSeries, loadedSettings, loadedLastReadBookId] = await Promise.all([
       getBooks(),
       getSeries(),
       getSettings(),
       getLastReadBookId(),
     ]);
+    const loadedBooks = await hydrateBookIdentities(storedBooks);
     setBooks(loadedBooks);
     setSeries(loadedSeries);
     const normalizedSettings = normalizeSettings(loadedSettings);
@@ -145,11 +147,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const addBooks = async (incomingBooks: Book[]) => {
-    const merged = new Map(books.map((book) => [book.path, book]));
+    const merged = new Map(books.map((book) => [bookIdentity(book), book]));
     for (const book of incomingBooks) {
-      const existingBook = merged.get(book.path);
-      merged.set(book.path, {
-        ...book,
+      const key = bookIdentity(book);
+      const existingBook = merged.get(key);
+      const keepExistingLocation = existingBook?.source === 'managed' && book.source !== 'managed';
+      merged.set(key, {
+        ...(keepExistingLocation ? book : existingBook),
+        ...(keepExistingLocation ? existingBook : book),
+        id: existingBook?.id || book.id,
         seriesId: existingBook?.seriesId,
         addedAt: existingBook?.addedAt ?? book.addedAt,
         cover: book.cover ?? existingBook?.cover,
@@ -258,6 +264,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
       {children}
     </AppContext.Provider>
   );
+}
+
+async function hydrateBookIdentities(books: Book[]) {
+  const missing = books.filter((book) => !book.fingerprint && book.path);
+  if (missing.length === 0) return books;
+  try {
+    const identities = await identifyLocalBooks(missing.map((book) => book.path));
+    const byPath = new Map(identities.map((identity) => [identity.path, identity]));
+    const hydrated = books.map((book) => {
+      const identity = byPath.get(book.path);
+      return identity ? { ...book, ...identity, source: book.source || 'external' as const } : book;
+    });
+    if (identities.length > 0) await saveBooks(hydrated);
+    return hydrated;
+  } catch (error) {
+    console.warn('Failed to migrate local book identities', error);
+    return books;
+  }
+}
+
+function bookIdentity(book: Book) {
+  return book.fingerprint || `path:${book.path}`;
 }
 
 function createMetadataSeries(books: Book[], existingSeries: Series[]) {

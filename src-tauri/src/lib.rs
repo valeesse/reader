@@ -24,6 +24,7 @@ use zip::ZipArchive;
 include!("reader/model.rs");
 include!("reader/lifecycle.rs");
 include!("reader/library.rs");
+include!("reader/windows_dialog.rs");
 include!("reader/txt_commands.rs");
 include!("reader/epub_commands.rs");
 include!("reader/webdav_commands.rs");

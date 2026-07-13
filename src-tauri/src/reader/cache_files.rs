@@ -106,7 +106,7 @@ fn reader_cache_stats_blocking(app: &AppHandle) -> Result<ReaderCacheStats, Stri
     Ok(ReaderCacheStats {
         bytes,
         files,
-        max_bytes: READER_DISK_CACHE_MAX_BYTES,
+        max_bytes: reader_disk_cache_max_bytes(),
     })
 }
 

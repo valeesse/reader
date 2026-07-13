@@ -2,9 +2,11 @@ import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { homeDir } from '@tauri-apps/api/path';
 import { AppSettings, Book, WebDavBook } from '../types';
 
 type NativeBook = Book;
+let fallbackDialogDirectoryPromise: Promise<string> | undefined;
 
 export interface ScanProgress {
   visited: number;
@@ -91,13 +93,59 @@ export async function showMainWindow() {
 }
 
 export async function selectLibraryDirectory(): Promise<string | undefined> {
+  const defaultPath = await libraryDialogDirectory();
+  try {
+    const selected = await invoke<string | null>('pick_library_directory_fast');
+    return selected || undefined;
+  } catch (error) {
+    console.info('Fast directory picker unavailable; using Tauri dialog', error);
+  }
   const selected = await open({
     directory: true,
     multiple: false,
     title: '选择本地书库文件夹',
+    defaultPath,
   });
 
-  return typeof selected === 'string' ? selected : undefined;
+  if (typeof selected !== 'string') return undefined;
+  return selected;
+}
+
+export async function selectBookFiles(): Promise<string[]> {
+  const defaultPath = await libraryDialogDirectory();
+  try {
+    return await invoke<string[]>('pick_book_files_fast', { initialDirectory: defaultPath });
+  } catch (error) {
+    console.info('Fast file picker unavailable; using Tauri dialog', error);
+  }
+  const selected = await open({
+    directory: false,
+    multiple: true,
+    title: '导入 EPUB / TXT',
+    filters: [{ name: 'Books', extensions: ['epub', 'txt'] }],
+    defaultPath,
+  });
+  const paths = Array.isArray(selected) ? selected : typeof selected === 'string' ? [selected] : [];
+  return paths;
+}
+
+export function prewarmLibraryDialogDirectory() {
+  void libraryDialogDirectory();
+}
+
+async function libraryDialogDirectory() {
+  fallbackDialogDirectoryPromise ||= homeDir().catch(() => '');
+  return fallbackDialogDirectoryPromise;
+}
+
+export async function importManagedBooks(paths: string[]): Promise<Book[]> {
+  if (paths.length === 0) return [];
+  return invoke<NativeBook[]>('import_managed_books', { paths });
+}
+
+export async function identifyLocalBooks(paths: string[]) {
+  if (paths.length === 0) return [];
+  return invoke<Array<{ path: string; fingerprint: string; localResourceId: string }>>('identify_local_books', { paths });
 }
 
 export async function scanLibraryPath(path: string): Promise<Book[]> {
@@ -185,6 +233,7 @@ export async function saveImageFromSource(src: string, suggestedName = 'image') 
   if (!targetPath) return;
 
   const base64 = await blobToBase64(blob);
+  await invoke('authorize_export_path', { path: targetPath, kind: 'image' });
   await invoke('write_binary_file', { path: targetPath, base64Data: base64 });
 }
 
@@ -238,7 +287,7 @@ export async function cacheWebDavBook(
   config: AppSettings['webDavConfig'],
   remotePath: string,
 ) {
-  return invoke<string>('webdav_cache_book', { config, remotePath });
+  return invoke<{ path: string; fingerprint: string; localResourceId: string }>('webdav_cache_book', { config, remotePath });
 }
 
 export async function downloadWebDavBook(
@@ -251,5 +300,6 @@ export async function downloadWebDavBook(
     defaultPath: suggestedName,
   });
   if (!targetPath) return;
+  await invoke('authorize_export_path', { path: targetPath, kind: 'book' });
   await invoke('webdav_download_book_to_path', { config, remotePath, targetPath });
 }

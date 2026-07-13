@@ -51,6 +51,42 @@ fn stable_book_id(path: &Path) -> String {
     )
 }
 
+fn book_fingerprint(path: &Path) -> Result<String, String> {
+    const SAMPLE_BYTES: u64 = 64 * 1024;
+    let mut file = File::open(path).map_err(|error| format!("读取书籍指纹失败: {error}"))?;
+    let length = file
+        .metadata()
+        .map_err(|error| format!("读取书籍信息失败: {error}"))?
+        .len();
+    let mut hasher = Sha256::new();
+    hasher.update(b"zenith-book-v1\0");
+    hasher.update(length.to_le_bytes());
+    hasher.update(
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_bytes(),
+    );
+    let mut buffer = vec![0u8; SAMPLE_BYTES.min(length) as usize];
+    file.read_exact(&mut buffer)
+        .map_err(|error| format!("读取书籍指纹失败: {error}"))?;
+    hasher.update(&buffer);
+    if length > SAMPLE_BYTES {
+        file.seek(SeekFrom::Start(length.saturating_sub(SAMPLE_BYTES)))
+            .map_err(|error| format!("定位书籍指纹失败: {error}"))?;
+        buffer.resize(SAMPLE_BYTES.min(length) as usize, 0);
+        file.read_exact(&mut buffer)
+            .map_err(|error| format!("读取书籍指纹失败: {error}"))?;
+        hasher.update(&buffer);
+    }
+    Ok(format!("sha256:{}", hex_digest(&hasher.finalize())))
+}
+
+fn hex_digest(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 fn stable_remote_book_id(remote_path: &str) -> String {
     format!("webdav-{}", hash_string(remote_path))
 }
@@ -65,4 +101,3 @@ fn now_millis_u128() -> u128 {
         .map(|duration| duration.as_millis())
         .unwrap_or_default()
 }
-

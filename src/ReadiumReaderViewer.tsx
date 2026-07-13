@@ -139,7 +139,7 @@ export function ReadiumReaderViewer({
     const queueProgressSave = (locator: ReadiumLocator) => {
       const location = serializeReadiumLocator(locator);
       if (!location || location === lastSavedLocationRef.current) return;
-      pendingProgressRef.current = createProgressPayload(book.id, location);
+      pendingProgressRef.current = createProgressPayload(book.id, book.fingerprint, location);
       if (progressSaveTimerRef.current !== null) return;
       progressSaveTimerRef.current = window.setTimeout(() => {
         progressSaveTimerRef.current = null;
@@ -1059,9 +1059,10 @@ function themeColors(theme: 'light' | 'dark' | 'sepia') {
   return { background: '#ffffff', text: '#111827' };
 }
 
-function createProgressPayload(bookId: string, location: string) {
+function createProgressPayload(bookId: string, bookFingerprint: string | undefined, location: string) {
   return {
     bookId,
+    bookFingerprint,
     location,
     updatedAt: Date.now(),
   };

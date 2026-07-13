@@ -63,10 +63,10 @@ export function WebDavLibrary({ onReadBook }: { onReadBook: (book: Book) => void
     try {
       setOpeningBookId(book.id);
       setStatus(`正在打开 ${book.title}...`);
-      const localPath = await cacheWebDavBook(settings.webDavConfig, book.remotePath);
+      const local = await cacheWebDavBook(settings.webDavConfig, book.remotePath);
       onReadBook({
         ...book,
-        path: localPath,
+        ...local,
       });
       setStatus(`已打开 ${book.title}。`);
     } catch (error) {

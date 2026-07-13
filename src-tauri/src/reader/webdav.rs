@@ -118,11 +118,12 @@ fn parse_webdav_multistatus(
     Ok(entries)
 }
 
-async fn webdav_download_file_bytes(
+async fn webdav_download_to_path(
     client: &reqwest::Client,
     config: &WebDavConfig,
     remote_path: &str,
-) -> Result<Vec<u8>, String> {
+    target_path: &Path,
+) -> Result<(), String> {
     let target = webdav_url_for_remote_path(config, remote_path)?;
     let response = client
         .get(target)
@@ -138,11 +139,27 @@ async fn webdav_download_file_bytes(
         ));
     }
 
-    response
-        .bytes()
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| format!("创建下载目录失败: {error}"))?;
+    }
+    let temp = temporary_sibling_path(target_path);
+    let mut file = File::create(&temp).map_err(|error| format!("创建下载文件失败: {error}"))?;
+    let mut response = response;
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map(|bytes| bytes.to_vec())
-        .map_err(|err| format!("WebDAV 文件读取失败: {err}"))
+        .map_err(|error| format!("WebDAV 文件读取失败: {error}"))?
+    {
+        file.write_all(&chunk)
+            .map_err(|error| format!("写入下载文件失败: {error}"))?;
+    }
+    file.flush()
+        .map_err(|error| format!("提交下载文件失败: {error}"))?;
+    drop(file);
+    if target_path.exists() {
+        fs::remove_file(target_path).map_err(|error| format!("替换下载文件失败: {error}"))?;
+    }
+    replace_file_atomically(&temp, target_path)
 }
 
 fn webdav_base_url(config: &WebDavConfig) -> Result<Url, String> {
@@ -201,6 +218,49 @@ fn webdav_cached_book_path(app: &AppHandle, remote_path: &str) -> Result<PathBuf
         .filter(|ext| !ext.is_empty())
         .unwrap_or("book");
     Ok(dir.join(format!("{}.{}", hash_string(remote_path), extension)))
+}
+
+fn authorize_export_path_blocking(
+    state: &ReaderState,
+    path: &str,
+    kind: &str,
+) -> Result<(), String> {
+    let path = Path::new(path);
+    if !path.is_absolute() || path.file_name().is_none() {
+        return Err("导出路径无效".to_string());
+    }
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let allowed = match kind {
+        "book" => matches!(extension.as_str(), "epub" | "txt"),
+        "image" => matches!(extension.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "svg"),
+        _ => false,
+    };
+    if !allowed {
+        return Err("导出文件类型不受支持".to_string());
+    }
+    state
+        .export_paths
+        .lock()
+        .map_err(|_| "导出授权被占用".to_string())?
+        .insert(path.to_string_lossy().to_string(), kind.to_string());
+    Ok(())
+}
+
+fn consume_export_path(state: &ReaderState, path: &str, kind: &str) -> Result<(), String> {
+    let authorized = state
+        .export_paths
+        .lock()
+        .map_err(|_| "导出授权被占用".to_string())?
+        .remove(path);
+    if authorized.as_deref() == Some(kind) {
+        Ok(())
+    } else {
+        Err("导出路径未经当前文件对话框授权".to_string())
+    }
 }
 
 fn webdav_state_url(config: &WebDavConfig) -> Result<String, String> {

@@ -1,5 +1,19 @@
 #[tauri::command]
-fn write_binary_file(path: String, base64_data: String) -> Result<(), String> {
+fn authorize_export_path(
+    state: tauri::State<'_, ReaderState>,
+    path: String,
+    kind: String,
+) -> Result<(), String> {
+    authorize_export_path_blocking(&state, &path, &kind)
+}
+
+#[tauri::command]
+fn write_binary_file(
+    state: tauri::State<'_, ReaderState>,
+    path: String,
+    base64_data: String,
+) -> Result<(), String> {
+    consume_export_path(&state, &path, "image")?;
     let bytes = general_purpose::STANDARD
         .decode(base64_data)
         .map_err(|err| format!("图片数据解析失败: {err}"))?;
@@ -91,6 +105,7 @@ async fn webdav_list_books(config: WebDavConfig) -> Result<Vec<WebDavBook>, Stri
                 author,
                 book_type: extension,
                 path: entry.remote_path.clone(),
+                fingerprint: format!("webdav:{}", hash_string(&entry.remote_path)),
                 file_name: entry.file_name,
                 added_at: entry.modified_at.unwrap_or_else(now_millis),
                 source: "webdav".to_string(),
@@ -110,26 +125,26 @@ async fn webdav_cache_book(
     app: AppHandle,
     config: WebDavConfig,
     remote_path: String,
-) -> Result<String, String> {
+) -> Result<CachedWebDavBook, String> {
     let client = reqwest::Client::new();
-    let bytes = webdav_download_file_bytes(&client, &config, &remote_path).await?;
     let target_path = webdav_cached_book_path(&app, &remote_path)?;
-    if let Some(parent) = target_path.parent() {
-        fs::create_dir_all(parent).map_err(|err| format!("创建缓存目录失败: {err}"))?;
-    }
-    fs::write(&target_path, bytes).map_err(|err| format!("写入缓存文件失败: {err}"))?;
-    Ok(target_path.to_string_lossy().to_string())
+    webdav_download_to_path(&client, &config, &remote_path, &target_path).await?;
+    let fingerprint = book_fingerprint(&target_path)?;
+    Ok(CachedWebDavBook {
+        path: target_path.to_string_lossy().to_string(),
+        local_resource_id: fingerprint.clone(),
+        fingerprint,
+    })
 }
 
 #[tauri::command]
 async fn webdav_download_book_to_path(
+    state: tauri::State<'_, ReaderState>,
     config: WebDavConfig,
     remote_path: String,
     target_path: String,
 ) -> Result<(), String> {
+    consume_export_path(&state, &target_path, "book")?;
     let client = reqwest::Client::new();
-    let bytes = webdav_download_file_bytes(&client, &config, &remote_path).await?;
-    fs::write(&target_path, bytes).map_err(|err| format!("保存下载文件失败: {err}"))?;
-    Ok(())
+    webdav_download_to_path(&client, &config, &remote_path, Path::new(&target_path)).await
 }
-

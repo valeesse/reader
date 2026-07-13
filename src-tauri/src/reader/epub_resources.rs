@@ -216,7 +216,8 @@ fn touch_epub_resource(book: &mut EpubBookCache, href: &str) {
 
 fn cache_epub_resource(book: &mut EpubBookCache, href: String, resource: EpubCachedResource) {
     let resource_size = resource.bytes.len();
-    if resource_size > EPUB_RESOURCE_CACHE_MAX_BYTES {
+    let max_bytes = epub_resource_cache_max_bytes();
+    if resource_size > max_bytes {
         return;
     }
     if let Some(previous) = book.resource_cache.remove(&href) {
@@ -231,7 +232,7 @@ fn cache_epub_resource(book: &mut EpubBookCache, href: String, resource: EpubCac
     trim_epub_resource_cache(
         book,
         EPUB_RESOURCE_CACHE_LIMIT,
-        EPUB_RESOURCE_CACHE_MAX_BYTES,
+        max_bytes,
     );
 }
 

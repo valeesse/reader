@@ -279,6 +279,60 @@ mod tests {
     }
 
     #[test]
+    fn book_fingerprint_is_path_independent_and_content_sensitive() {
+        let root = test_path("fingerprint");
+        fs::create_dir_all(&root).unwrap();
+        let first = root.join("first.txt");
+        let second = root.join("second.txt");
+        let content = format!("head\n{}tail", "正文".repeat(70_000));
+        fs::write(&first, &content).unwrap();
+        fs::write(&second, &content).unwrap();
+        assert_eq!(book_fingerprint(&first).unwrap(), book_fingerprint(&second).unwrap());
+
+        let mut changed = content.into_bytes();
+        let last = changed.len() - 1;
+        changed[last] = b'!';
+        fs::write(&second, changed).unwrap();
+        assert_ne!(book_fingerprint(&first).unwrap(), book_fingerprint(&second).unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn export_path_authorization_is_typed_and_single_use() {
+        let state = ReaderState::default();
+        let export_dir = test_path("export-path");
+        fs::create_dir_all(&export_dir).unwrap();
+        let image = export_dir.join("export.png");
+        let image_value = image.to_string_lossy().to_string();
+        authorize_export_path_blocking(&state, &image_value, "image").unwrap();
+        assert!(consume_export_path(&state, &image_value, "book").is_err());
+        assert!(consume_export_path(&state, &image_value, "image").is_err());
+
+        authorize_export_path_blocking(&state, &image_value, "image").unwrap();
+        assert!(consume_export_path(&state, &image_value, "image").is_ok());
+        assert!(consume_export_path(&state, &image_value, "image").is_err());
+        fs::remove_dir_all(export_dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn legacy_file_selection_parses_single_and_multiple_paths() {
+        let single = "C:\\Books\\one.epub\0\0".encode_utf16().collect::<Vec<_>>();
+        assert_eq!(
+            parse_legacy_file_selection(&single),
+            vec!["C:\\Books\\one.epub"]
+        );
+
+        let multiple = "C:\\Books\0one.epub\0two.txt\0\0"
+            .encode_utf16()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            parse_legacy_file_selection(&multiple),
+            vec!["C:\\Books\\one.epub", "C:\\Books\\two.txt"]
+        );
+    }
+
+    #[test]
     #[ignore = "set ZENITH_EPUB_PROBE to exercise a real EPUB"]
     fn probe_real_epub_from_environment() {
         let path = std::env::var("ZENITH_EPUB_PROBE").expect("ZENITH_EPUB_PROBE is required");
