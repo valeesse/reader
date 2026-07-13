@@ -297,7 +297,6 @@ export function ReaderLayout({ book, onClose, onOpenBook }: ReaderLayoutProps) {
             <TxtViewerNext
               key={book.id}
               book={book}
-              chromeVisible={chromeVisible}
               nextBook={nextBook}
               onOpenBook={onOpenBook}
               onProgressChange={setReadingProgress}

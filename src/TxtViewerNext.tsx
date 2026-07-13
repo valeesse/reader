@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { LoaderCircle } from 'lucide-react';
-import { Book, ReaderSeekRequest, ReaderTocItem } from './types';
+import { Book } from './types';
 import { useAppContext } from './store/AppStore';
 import { getProgress, saveProgress } from './lib/storage';
 import { closeTxtBook, NativeTxtBookInfo, openTxtBook, readTxtWindow } from './lib/native';
+import { ReaderLoadError, ReaderLoading, ReaderPageCounter, ReaderViewerProps } from './components/reader/ReaderShared';
 
 const TXT_OVERSCAN_PAGES = 5;
 const TXT_MIN_WINDOW_CHARS = 24000;
@@ -23,16 +23,9 @@ export function TxtViewerNext({
   onTocChange,
   tocTarget,
   seekRequest,
-}: {
-  book: Book;
-  chromeVisible: boolean;
+}: ReaderViewerProps & {
   nextBook?: Book;
   onOpenBook?: (book: Book) => void;
-  onProgressChange: (progress: number) => void;
-  onToggleChrome: () => void;
-  onTocChange: (items: ReaderTocItem[]) => void;
-  tocTarget: ReaderTocItem | null;
-  seekRequest: ReaderSeekRequest | null;
 }) {
   const { settings } = useAppContext();
   const [bookInfo, setBookInfo] = useState<NativeTxtBookInfo | null>(null);
@@ -644,26 +637,11 @@ export function TxtViewerNext({
   };
 
   if (loading) {
-    return (
-      <div className="absolute inset-0 flex items-center justify-center">
-        <LoaderCircle className="h-7 w-7 animate-spin text-[#007AFF]" />
-      </div>
-    );
+    return <ReaderLoading />;
   }
 
   if (loadError) {
-    return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
-        <div className="max-w-lg text-sm text-red-600 dark:text-red-400">{loadError}</div>
-        <button
-          type="button"
-          className="rounded-[5px] bg-[#007AFF] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
-          onClick={() => setReloadToken((value) => value + 1)}
-        >
-          重新加载
-        </button>
-      </div>
-    );
+    return <ReaderLoadError message={loadError} onRetry={() => setReloadToken((value) => value + 1)} />;
   }
 
   return (
@@ -706,15 +684,9 @@ export function TxtViewerNext({
         </div>
       </div>
       {!layoutReady && !textWindow.text && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-inherit">
-          <LoaderCircle className="h-7 w-7 animate-spin text-[#007AFF]" />
-        </div>
+        <div className="pointer-events-none"><ReaderLoading overlay /></div>
       )}
-      {pageCounter && (
-        <div className="absolute bottom-5 right-5 z-30 text-[11px] font-medium text-black/50 dark:text-white/50">
-          {pageCounter}
-        </div>
-      )}
+      <ReaderPageCounter value={pageCounter} />
     </div>
   );
 }

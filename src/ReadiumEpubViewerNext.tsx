@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Check, ChevronLeft, ChevronRight, Download, LoaderCircle, X } from 'lucide-react';
 import { EpubNavigator, EpubPreferences, ReadiumFrameClickEvent, ReadiumLocator } from './vendor/readium-navigator';
-import { AppSettings, Book, ReaderSeekRequest, ReaderTocItem } from './types';
+import { AppSettings, ReaderTocItem } from './types';
 import { useAppContext } from './store/AppStore';
 import { getProgress, saveProgress } from './lib/storage';
 import {
@@ -14,6 +14,7 @@ import {
   serializeReadiumLocator,
 } from './lib/readiumPublication';
 import { saveImageFromSource } from './lib/native';
+import { ReaderLoadError, ReaderLoading, ReaderPageCounter, ReaderViewerProps } from './components/reader/ReaderShared';
 
 const DOUBLE_PAGE_CENTER_GAP = 56;
 const EPUB_PREFETCH_RADIUS = 5;
@@ -26,14 +27,8 @@ export function ReadiumEpubViewerNext({
   onTocChange,
   tocTarget,
   seekRequest,
-}: {
-  book: Book;
+}: ReaderViewerProps & {
   chromeVisible: boolean;
-  onProgressChange: (progress: number) => void;
-  onToggleChrome: () => void;
-  onTocChange: (items: ReaderTocItem[]) => void;
-  tocTarget: ReaderTocItem | null;
-  seekRequest: ReaderSeekRequest | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const navigatorRef = useRef<EpubNavigator | null>(null);
@@ -392,18 +387,7 @@ export function ReadiumEpubViewerNext({
   };
 
   if (loadError) {
-    return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
-        <div className="max-w-lg text-sm text-red-600 dark:text-red-400">{loadError}</div>
-        <button
-          type="button"
-          className="rounded-[5px] bg-[#007AFF] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
-          onClick={() => setReloadToken((value) => value + 1)}
-        >
-          重新加载
-        </button>
-      </div>
-    );
+    return <ReaderLoadError message={loadError} onRetry={() => setReloadToken((value) => value + 1)} />;
   }
 
   return (
@@ -448,16 +432,10 @@ export function ReadiumEpubViewerNext({
         </div>
       )}
 
-      {pageCounter && (
-        <div className="absolute bottom-5 right-5 z-30 text-[11px] font-medium text-black/50 dark:text-white/50">
-          {pageCounter}
-        </div>
-      )}
+      <ReaderPageCounter value={pageCounter} />
 
       {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-inherit">
-          <LoaderCircle className="h-7 w-7 animate-spin text-[#007AFF]" />
-        </div>
+        <ReaderLoading overlay />
       )}
 
       <AnimatePresence>
