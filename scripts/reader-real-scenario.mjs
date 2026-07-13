@@ -34,7 +34,9 @@ const pageStateExpression = `(() => {
 const readerReadyExpression = `Boolean(
   document.querySelector("button[title=下一页]")
   && Array.from(document.querySelectorAll('.readium-container iframe')).some((frame) =>
-    getComputedStyle(frame).visibility === 'visible' && frame.contentDocument?.body?.innerText.trim())
+    getComputedStyle(frame).visibility === 'visible'
+    && (frame.contentDocument?.body?.innerText.trim()
+      || Array.from(frame.contentDocument?.images || []).some((image) => image.complete && image.naturalWidth > 0)))
 )`;
 
 async function verifyInitialLayout() {
@@ -120,7 +122,7 @@ async function openTxt() {
   const loadMs = Date.now() - started;
   await waitFor(`window.__ZENITH_READER_PERF__.snapshot().metrics.some((metric) => metric.kind === 'load' && metric.name === 'txt-navigator-load')`, 10000);
   const loadMetrics = await evaluate(`window.__ZENITH_READER_PERF__.snapshot().metrics.filter((metric) => metric.kind === 'load')`);
-  await ensurePagedTxt();
+  await ensureMinimalPaging();
   await openTocItem('第一章 若是有来生，伴君天下舞！');
   await waitFor(`Array.from(document.querySelectorAll('iframe')).some((frame) =>
     getComputedStyle(frame).visibility === 'visible'
@@ -130,16 +132,83 @@ async function openTxt() {
   return { loadMs, loadMetrics, initialLayout: await verifyInitialLayout() };
 }
 
-async function ensurePagedTxt() {
+async function ensureMinimalPaging() {
   if (!await evaluate('Boolean(document.querySelector("button[title=阅读设置]"))')) {
     await evaluate('window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); true');
     await waitFor('Boolean(document.querySelector("button[title=阅读设置]"))');
   }
   await evaluate('document.querySelector("button[title=阅读设置]")?.click(); true');
   await sleep(250);
-  await evaluate('document.querySelector("button[title=左右翻页]")?.click(); true');
+  await evaluate(`document.querySelector('button[title="直接重新加载文字"]')?.click(); true`);
   await sleep(900);
   await evaluate('document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); true');
+}
+
+async function verifyLayoutRelocation() {
+  const result = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const centerSentence = () => {
+      const frame = Array.from(document.querySelectorAll('.readium-container iframe'))
+        .find((item) => getComputedStyle(item).visibility === 'visible');
+      const doc = frame?.contentDocument;
+      if (!doc?.body) return '';
+      const rootStyle = frame.contentWindow.getComputedStyle(doc.documentElement);
+      const columns = Number.parseInt(rootStyle.columnCount, 10) || 1;
+      const x = frame.contentWindow.innerWidth / (columns === 2 ? 4 : 2);
+      const y = frame.contentWindow.innerHeight / 2;
+      const candidates = Array.from(doc.body.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre'))
+        .flatMap((element) => Array.from(element.getClientRects()).map((rect) => ({ element, rect })))
+        .filter(({ element, rect }) => element.textContent?.trim() && rect.right > 0 && rect.left < frame.contentWindow.innerWidth && rect.bottom > 0 && rect.top < frame.contentWindow.innerHeight)
+        .sort((a, b) => {
+          const distance = (rect) => {
+            const dx = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
+            const dy = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+            return dx * dx + dy * dy;
+          };
+          return distance(a.rect) - distance(b.rect);
+        });
+      const text = candidates[0]?.element.textContent?.replace(/\\s+/g, ' ').trim() || '';
+      return text.match(/^.*?[。！？!?]/)?.[0] || text.slice(0, 160);
+    };
+    const openSettings = async () => {
+      if (!document.querySelector('button[title=阅读设置]')) {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await sleep(250);
+      }
+      document.querySelector('button[title=阅读设置]')?.click();
+      await sleep(200);
+    };
+    const before = centerSentence();
+    await openSettings();
+    document.querySelector('button[title=上下连续滚动加载]')?.click();
+    await sleep(1200);
+    const scrolling = centerSentence();
+    const scrollingAnchorVisible = Array.from(document.querySelectorAll('.readium-container iframe'))
+      .filter((frame) => getComputedStyle(frame).visibility === 'visible')
+      .some((frame) => Array.from(frame.contentDocument?.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre') || [])
+        .some((element) => element.textContent?.replace(/\\s+/g, ' ').includes(before)
+          && Array.from(element.getClientRects()).some((rect) => rect.bottom > 0 && rect.top < frame.contentWindow.innerHeight)));
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await sleep(200);
+    await openSettings();
+    document.querySelector('button[title=直接重新加载文字]')?.click();
+    await sleep(1200);
+    const restored = centerSentence();
+    const pageMode = Array.from(document.querySelectorAll('button[title=单页], button[title=双页]'))
+      .find((button) => button.querySelector('span.absolute'))?.title || '';
+    const readerBox = document.querySelector('.readium-container')?.getBoundingClientRect();
+    const contentAspect = readerBox ? readerBox.width / readerBox.height : 0;
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return { before, scrolling, scrollingAnchorVisible, restored, pageMode, contentAspect };
+  })()`);
+  if (!result.before || !result.scrollingAnchorVisible || result.before !== result.restored) {
+    throw new Error(`Layout relocation failed: ${JSON.stringify(result)}`);
+  }
+  const expectedPageMode = result.contentAspect >= 1.25 ? '双页' : '单页';
+  if (result.pageMode !== expectedPageMode) {
+    throw new Error(`Automatic page mode failed: expected ${expectedPageMode}, got ${result.pageMode}`);
+  }
+  return result;
 }
 
 async function openTocItem(title) {
@@ -277,6 +346,7 @@ function summarizeTurns(result) {
   return {
     requested: result.requested,
     completed: result.completed,
+    completionRate: result.requested ? result.completed / result.requested : 0,
     moved: result.moved,
     callback: distribution(callback),
     warmCallback: distribution(warm),
@@ -294,6 +364,17 @@ function requireTurns(label, result, minimumCompleted) {
   return summarizeTurns(result);
 }
 
+function requireAllTurns(label, result) {
+  if (result.completed !== result.requested || result.moved !== result.requested) {
+    throw new Error(`${label} failed: completed ${result.completed}/${result.requested}, moved ${result.moved}/${result.requested}`);
+  }
+  const summary = summarizeTurns(result);
+  if (summary.callback.count !== result.requested || summary.inputToFrame.count !== result.requested) {
+    throw new Error(`${label} metrics incomplete: callback ${summary.callback.count}, input-to-frame ${summary.inputToFrame.count}, expected ${result.requested}`);
+  }
+  return summary;
+}
+
 function distribution(values) {
   const sorted = values.slice().sort((a, b) => a - b);
   const percentile = (ratio) => sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)] || 0;
@@ -307,6 +388,7 @@ try {
   if (!process.argv.includes('--txt-only')) {
     const { loadMs: epubLoadMs, initialLayout } = await openEpub();
     const images = await verifyEpubImages();
+    await ensureMinimalPaging();
     await evaluate('window.__ZENITH_READER_PERF__.clear(); true');
     await openTocItem('chapter1.xhtml');
     // TOC navigation can reuse an already prepared frame, so absence of a new
@@ -317,8 +399,9 @@ try {
       loadMs: epubLoadMs,
       initialLayout,
       images,
-      forwardTurns: summarizeTurns(await runTurns(36, 20, 1)),
-      backwardTurns: summarizeTurns(await runTurns(24, 20, -1)),
+      relocation: await verifyLayoutRelocation(),
+      forwardTurns: requireAllTurns('EPUB forward', await runTurns(36, 20, 1)),
+      backwardTurns: requireAllTurns('EPUB backward', await runTurns(24, 20, -1)),
       continuousWheel: requireTurns('EPUB continuous wheel', await runWheelTurns(24, 45, 1), 4),
     };
   }
@@ -329,8 +412,9 @@ try {
       loadMs: txtLoadMs,
       loadMetrics: txtLoadMetrics,
       initialLayout,
-      forwardTurns: summarizeTurns(await runTurns(TXT_TURNS, 20, 1)),
-      backwardTurns: summarizeTurns(await runTurns(24, 20, -1)),
+      relocation: await verifyLayoutRelocation(),
+      forwardTurns: requireAllTurns('TXT forward', await runTurns(TXT_TURNS, 20, 1)),
+      backwardTurns: requireAllTurns('TXT backward', await runTurns(24, 20, -1)),
       continuousWheel: requireTurns('TXT continuous wheel', await runWheelTurns(24, 45, 1), 4),
     };
   }

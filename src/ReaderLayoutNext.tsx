@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Book, ReaderSeekRequest, ReaderTocItem } from './types';
 import { useAppContext } from './store/AppStore';
-import { ArrowLeftRight, ArrowUpDown, BookOpen, ChevronLeft, Columns2, List, Monitor, Moon, Settings2, StepForward, Sun } from 'lucide-react';
+import { AlignJustify, ArrowLeftRight, ArrowUpDown, BookOpen, ChevronLeft, Columns2, List, Monitor, Moon, Settings2, StepForward, Sun, Zap } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ReadiumReaderViewer } from './ReadiumReaderViewer';
 import { READER_FONT_OPTIONS, READING_SETTING_LIMITS } from './lib/readingSettings';
@@ -211,6 +211,7 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
                   <SegmentButton
                     active={settings.pageMode === 'double'}
                     onClick={() => updateSettings({ pageMode: 'double' })}
+                    disabled={settings.pageTurnAnimation === 'scroll'}
                     title="双页"
                     layoutId="reader-page-segment"
                   >
@@ -220,31 +221,23 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
                 </Segmented>
               </div>
 
-              {book.type === 'txt' && (
-                <div className="space-y-2">
-                  <PanelLabel>TXT 阅读流</PanelLabel>
-                  <Segmented>
+              <div className="space-y-2">
+                <PanelLabel>翻页动画</PanelLabel>
+                <div className="grid grid-cols-2 gap-1 rounded-[5px] bg-black/4 p-1 dark:bg-white/8">
+                  {PAGE_TURN_OPTIONS.map((item) => (
                     <SegmentButton
-                      active={settings.txtReadingFlow === 'paged'}
-                      onClick={() => updateSettings({ txtReadingFlow: 'paged' })}
-                      title="左右翻页"
-                      layoutId="reader-txt-flow-segment"
+                      key={item.value}
+                      active={settings.pageTurnAnimation === item.value}
+                      onClick={() => updateSettings({ pageTurnAnimation: item.value })}
+                      title={item.description}
+                      layoutId="reader-page-turn-segment"
                     >
-                      <ArrowLeftRight className="w-4 h-4" />
-                      <span className="text-xs">翻页</span>
+                      <item.icon className="w-4 h-4" />
+                      <span className="text-xs">{item.label}</span>
                     </SegmentButton>
-                    <SegmentButton
-                      active={settings.txtReadingFlow === 'scroll'}
-                      onClick={() => updateSettings({ txtReadingFlow: 'scroll' })}
-                      title="上下滚动"
-                      layoutId="reader-txt-flow-segment"
-                    >
-                      <ArrowUpDown className="w-4 h-4" />
-                      <span className="text-xs">滚动</span>
-                    </SegmentButton>
-                  </Segmented>
+                  ))}
                 </div>
-              )}
+              </div>
 
               <div className="space-y-2">
                 <PanelLabel>字体</PanelLabel>
@@ -328,6 +321,13 @@ function PanelLabel({ children }: { children: React.ReactNode }) {
   return <div className="text-[11px] font-semibold text-black/45 dark:text-white/45 uppercase tracking-widest pl-0.5">{children}</div>;
 }
 
+const PAGE_TURN_OPTIONS = [
+  { value: 'scroll', label: '连续滚动', description: '上下连续滚动加载', icon: AlignJustify },
+  { value: 'minimal', label: '极简切换', description: '直接重新加载文字', icon: Zap },
+  { value: 'slide-horizontal', label: '左右滑动', description: '页面整体左右平滑切换', icon: ArrowLeftRight },
+  { value: 'slide-vertical', label: '上下滑动', description: '页面整体上下平滑切换', icon: ArrowUpDown },
+] as const;
+
 function Segmented({ children }: { children: React.ReactNode }) {
   return <div className="flex gap-1 rounded-[5px] bg-black/5 dark:bg-white/10 p-1">{children}</div>;
 }
@@ -338,18 +338,21 @@ function SegmentButton({
   onClick,
   title,
   layoutId,
+  disabled = false,
 }: {
   active: boolean,
   children: React.ReactNode,
   onClick: () => void,
   title: string,
   layoutId: string,
+  disabled?: boolean,
 }) {
   return (
     <button
       onClick={onClick}
       title={title}
-      className={`relative flex-1 h-9 rounded-[5px] flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${active ? 'text-[#1C1C1E] dark:text-white' : 'text-black/45 dark:text-white/45 hover:text-black dark:hover:text-white'}`}
+      disabled={disabled}
+      className={`relative flex-1 h-9 rounded-[5px] flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:pointer-events-none disabled:opacity-35 ${active ? 'text-[#1C1C1E] dark:text-white' : 'text-black/45 dark:text-white/45 hover:text-black dark:hover:text-white'}`}
     >
       {active && (
         <motion.span

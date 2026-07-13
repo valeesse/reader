@@ -1,5 +1,7 @@
 import { AppSettings, defaultSettings } from '../types';
 
+const DOUBLE_PAGE_MIN_ASPECT_RATIO = 1.25;
+
 export const READING_SETTING_LIMITS = {
   fontSize: { min: 12, max: 36, step: 1 },
   lineHeight: { min: 1, max: 2.8, step: 0.1 },
@@ -16,8 +18,13 @@ export const READER_FONT_OPTIONS = [
 ] as const;
 
 export function normalizeSettings(settings: AppSettings): AppSettings {
+  const legacy = settings as AppSettings & { txtReadingFlow?: 'paged' | 'scroll' };
+  const pageTurnAnimation = settings.pageTurnAnimation
+    || (legacy.txtReadingFlow === 'scroll' ? 'scroll' : defaultSettings.pageTurnAnimation);
   return {
     ...settings,
+    pageMode: pageTurnAnimation === 'scroll' ? 'single' : settings.pageMode || defaultSettings.pageMode,
+    pageTurnAnimation,
     fontFamily: settings.fontFamily?.trim() || defaultSettings.fontFamily,
     fontSize: clampFinite(settings.fontSize, READING_SETTING_LIMITS.fontSize.min, READING_SETTING_LIMITS.fontSize.max, defaultSettings.fontSize),
     lineHeight: clampFinite(settings.lineHeight, READING_SETTING_LIMITS.lineHeight.min, READING_SETTING_LIMITS.lineHeight.max, defaultSettings.lineHeight),
@@ -30,6 +37,16 @@ export function normalizeSettings(settings: AppSettings): AppSettings {
       bottom: normalizeMargin(settings.pageMargins?.bottom, defaultSettings.pageMargins.bottom),
     },
   };
+}
+
+export function pageModeForViewport(
+  width: number,
+  height: number,
+  margins: AppSettings['pageMargins'],
+): AppSettings['pageMode'] {
+  const contentWidth = Math.max(1, width - margins.left - margins.right);
+  const contentHeight = Math.max(1, height - margins.top - margins.bottom);
+  return contentWidth / contentHeight >= DOUBLE_PAGE_MIN_ASPECT_RATIO ? 'double' : 'single';
 }
 
 function normalizeMargin(value: number, fallback: number) {

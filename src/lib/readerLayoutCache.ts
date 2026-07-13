@@ -14,14 +14,14 @@ export function createReaderLayoutKey(
   bookType: 'epub' | 'txt',
 ) {
   const layoutValues = {
-    version: 2,
+    version: 3,
     contentKey,
     bookType,
     width: Math.round(viewport.width),
     height: Math.round(viewport.height),
     devicePixelRatio: Math.round(viewport.devicePixelRatio * 100) / 100,
     pageMode: settings.pageMode,
-    txtReadingFlow: bookType === 'txt' ? settings.txtReadingFlow : undefined,
+    pageTurnAnimation: settings.pageTurnAnimation,
     fontFamily: settings.fontFamily,
     fontSize: settings.fontSize,
     lineHeight: settings.lineHeight,
@@ -35,7 +35,7 @@ export function createReaderLayoutKey(
 export function createReaderSettingsLayoutFingerprint(settings: AppSettings, bookType: 'epub' | 'txt') {
   return JSON.stringify({
     pageMode: settings.pageMode,
-    txtReadingFlow: bookType === 'txt' ? settings.txtReadingFlow : undefined,
+    pageTurnAnimation: settings.pageTurnAnimation,
     fontFamily: settings.fontFamily,
     fontSize: settings.fontSize,
     lineHeight: settings.lineHeight,

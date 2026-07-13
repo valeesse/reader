@@ -194,7 +194,8 @@ export function SettingsView({
                     <button
                       key={mode}
                       onClick={() => updateSettings({ pageMode: mode })}
-                      className={`flex-1 rounded-md py-1.5 text-xs ${settings.pageMode === mode ? 'bg-white dark:bg-[#3A3A3C]' : 'text-black/50 dark:text-white/50'}`}
+                      disabled={settings.pageTurnAnimation === 'scroll' && mode === 'double'}
+                      className={`flex-1 rounded-md py-1.5 text-xs disabled:opacity-35 ${settings.pageMode === mode ? 'bg-white dark:bg-[#3A3A3C]' : 'text-black/50 dark:text-white/50'}`}
                     >
                       {mode === 'single' ? '单页' : '双页'}
                     </button>
@@ -202,15 +203,20 @@ export function SettingsView({
                 </div>
               </div>
               <div className="space-y-2">
-                <div className="text-sm font-medium text-[#1C1C1E] dark:text-white">TXT 阅读流</div>
-                <div className="flex rounded-lg bg-black/5 p-1 dark:bg-white/5">
-                  {(['paged', 'scroll'] as const).map((flow) => (
+                <div className="text-sm font-medium text-[#1C1C1E] dark:text-white">翻页动画</div>
+                <div className="grid grid-cols-2 rounded-lg bg-black/5 p-1 dark:bg-white/5">
+                  {([
+                    ['scroll', '连续滚动'],
+                    ['minimal', '极简切换'],
+                    ['slide-horizontal', '左右滑动'],
+                    ['slide-vertical', '上下滑动'],
+                  ] as const).map(([animation, label]) => (
                     <button
-                      key={flow}
-                      onClick={() => updateSettings({ txtReadingFlow: flow })}
-                      className={`flex-1 rounded-md py-1.5 text-xs ${settings.txtReadingFlow === flow ? 'bg-white dark:bg-[#3A3A3C]' : 'text-black/50 dark:text-white/50'}`}
+                      key={animation}
+                      onClick={() => updateSettings({ pageTurnAnimation: animation })}
+                      className={`rounded-md py-1.5 text-xs ${settings.pageTurnAnimation === animation ? 'bg-white dark:bg-[#3A3A3C]' : 'text-black/50 dark:text-white/50'}`}
                     >
-                      {flow === 'paged' ? '翻页' : '滚动'}
+                      {label}
                     </button>
                   ))}
                 </div>

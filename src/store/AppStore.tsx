@@ -14,7 +14,7 @@ import {
   saveStartupSnapshot,
   ProgressSavedDetail,
 } from '../lib/storage';
-import { normalizeSettings } from '../lib/readingSettings';
+import { normalizeSettings, pageModeForViewport } from '../lib/readingSettings';
 import { identifyLocalBooks } from '../lib/native';
 
 interface AppContextType {
@@ -252,7 +252,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const updateSettings = async (newSettings: Partial<AppSettings>) => {
-    const updated = normalizeSettings({ ...settingsRef.current, ...newSettings });
+    const leavesContinuousScroll = settingsRef.current.pageTurnAnimation === 'scroll'
+      && newSettings.pageTurnAnimation !== undefined
+      && newSettings.pageTurnAnimation !== 'scroll';
+    const nextSettings = newSettings.pageTurnAnimation === 'scroll'
+      ? { ...newSettings, pageMode: 'single' as const }
+      : leavesContinuousScroll
+        ? {
+            ...newSettings,
+            pageMode: pageModeForViewport(
+              window.innerWidth,
+              window.innerHeight,
+              settingsRef.current.pageMargins,
+            ),
+          }
+        : newSettings;
+    const updated = normalizeSettings({ ...settingsRef.current, ...nextSettings });
     if (JSON.stringify(updated) === JSON.stringify(settingsRef.current)) return;
     settingsRef.current = updated;
     setSettingsState(updated);

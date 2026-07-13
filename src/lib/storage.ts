@@ -342,9 +342,14 @@ function normalizeStoredBook(book: Book): Book {
 }
 
 function normalizeSettings(settings?: Partial<AppSettings>): AppSettings {
+  const legacy = settings as (Partial<AppSettings> & { txtReadingFlow?: 'paged' | 'scroll' }) | undefined;
+  const pageTurnAnimation = settings?.pageTurnAnimation
+    || (legacy?.txtReadingFlow === 'scroll' ? 'scroll' : defaultSettings.pageTurnAnimation);
   return {
     ...defaultSettings,
     ...settings,
+    pageMode: pageTurnAnimation === 'scroll' ? 'single' : settings?.pageMode || defaultSettings.pageMode,
+    pageTurnAnimation,
     pageMargins: {
       ...defaultSettings.pageMargins,
       ...settings?.pageMargins,

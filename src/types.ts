@@ -47,7 +47,7 @@ export interface ReaderSeekRequest {
 
 export interface AppSettings {
   pageMode: 'single' | 'double';
-  txtReadingFlow: 'paged' | 'scroll';
+  pageTurnAnimation: 'scroll' | 'minimal' | 'slide-horizontal' | 'slide-vertical';
   fontFamily: string;
   fontSize: number;
   lineHeight: number;
@@ -95,7 +95,7 @@ export interface WebDavBook {
 
 export const defaultSettings: AppSettings = {
   pageMode: 'single',
-  txtReadingFlow: 'paged',
+  pageTurnAnimation: 'minimal',
   fontFamily: 'Inter, system-ui, sans-serif',
   fontSize: 18,
   lineHeight: 1.6,
