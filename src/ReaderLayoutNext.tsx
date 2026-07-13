@@ -10,9 +10,10 @@ interface ReaderLayoutProps {
   book: Book;
   onClose: () => void;
   onOpenBook: (book: Book) => void;
+  onPresentable?: () => void;
 }
 
-export function ReaderLayout({ book, onClose, onOpenBook }: ReaderLayoutProps) {
+export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: ReaderLayoutProps) {
   const { books, series, settings, updateSettings } = useAppContext();
   const [chromeVisible, setChromeVisible] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -290,6 +291,7 @@ export function ReaderLayout({ book, onClose, onOpenBook }: ReaderLayoutProps) {
             onTocChange={setTocItems}
             tocTarget={tocTarget}
             seekRequest={seekRequest}
+            onPresentable={onPresentable}
           />
         </div>
       </div>
@@ -378,28 +380,33 @@ function SliderRow({
   onChange: (value: number) => void,
 }) {
   const [draft, setDraft] = useState(value);
-  const commitTimerRef = useRef<number | null>(null);
+  const commitFrameRef = useRef<number | null>(null);
+  const pendingValueRef = useRef(value);
 
-  useEffect(() => setDraft(value), [value]);
+  useEffect(() => {
+    setDraft(value);
+    pendingValueRef.current = value;
+  }, [value]);
   useEffect(() => () => {
-    if (commitTimerRef.current !== null) window.clearTimeout(commitTimerRef.current);
+    if (commitFrameRef.current !== null) cancelAnimationFrame(commitFrameRef.current);
   }, []);
 
   const scheduleCommit = (next: number) => {
     setDraft(next);
-    if (commitTimerRef.current !== null) window.clearTimeout(commitTimerRef.current);
-    commitTimerRef.current = window.setTimeout(() => {
-      commitTimerRef.current = null;
-      onChange(next);
-    }, 90);
+    pendingValueRef.current = next;
+    if (commitFrameRef.current !== null) return;
+    commitFrameRef.current = requestAnimationFrame(() => {
+      commitFrameRef.current = null;
+      onChange(pendingValueRef.current);
+    });
   };
 
   const commitNow = () => {
-    if (commitTimerRef.current !== null) {
-      window.clearTimeout(commitTimerRef.current);
-      commitTimerRef.current = null;
+    if (commitFrameRef.current !== null) {
+      cancelAnimationFrame(commitFrameRef.current);
+      commitFrameRef.current = null;
     }
-    if (draft !== value) onChange(draft);
+    onChange(pendingValueRef.current);
   };
 
   return (

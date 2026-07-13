@@ -8,7 +8,6 @@ import { SeriesView } from './SeriesViewNext';
 import { Book } from './types';
 import { isTauriApp, onLibraryScanProgress, scanLibraryPath, selectLibraryDirectory, showMainWindow } from './lib/native';
 import { AnimatePresence, motion } from 'motion/react';
-import { LoaderCircle } from 'lucide-react';
 import './reader-overrides.css';
 
 let readerLayoutModulePromise: Promise<typeof import('./ReaderLayoutNext')> | undefined;
@@ -27,10 +26,11 @@ function MainLayout() {
     : null;
   const [currentView, setCurrentView] = useState<'library' | 'webdav' | 'series' | 'settings'>('library');
   const [readingBook, setReadingBook] = useState<Book | null>(() => initialReadingBook);
-  const [startupResolved, setStartupResolved] = useState(() => !isLoading);
+  const [startupResolved, setStartupResolved] = useState(() => !isLoading && !initialReadingBook);
+  const [readerPresentable, setReaderPresentable] = useState(() => !initialReadingBook);
   const [scanMessage, setScanMessage] = useState('');
   const [isScanning, setIsScanning] = useState(false);
-  const startupResumeCheckedRef = useRef(Boolean(initialReadingBook));
+  const startupResumeCheckedRef = useRef(false);
   const didShowWindowRef = useRef(false);
 
   const showWindowOnce = () => {
@@ -48,6 +48,9 @@ function MainLayout() {
       try {
         const book = lastReadBookId ? books.find((item) => item.id === lastReadBookId) : undefined;
         if (book) {
+          void import('./lib/readerPublication')
+            .then((module) => module.prewarmReaderPublication(book))
+            .catch(() => {});
           await loadReaderLayout();
           if (!cancelled) {
             setReadingBook(book);
@@ -66,6 +69,7 @@ function MainLayout() {
 
   useEffect(() => {
     if (isLoading || !startupResolved || didShowWindowRef.current) return;
+    if (readingBook && !readerPresentable) return;
 
     const readyTimerId = window.setTimeout(() => {
       console.info('[startup] first presentable screen ready', {
@@ -76,7 +80,13 @@ function MainLayout() {
     }, 0);
 
     return () => window.clearTimeout(readyTimerId);
-  }, [isLoading, readingBook, startupResolved]);
+  }, [isLoading, readerPresentable, readingBook, startupResolved]);
+
+  useEffect(() => {
+    if (!startupResolved || readingBook) return;
+    const idleId = window.requestIdleCallback(() => void loadReaderLayout(), { timeout: 1800 });
+    return () => window.cancelIdleCallback(idleId);
+  }, [readingBook, startupResolved]);
 
   useEffect(() => {
     const fallbackId = window.setTimeout(() => {
@@ -172,8 +182,13 @@ function MainLayout() {
       )}
 
       {readingBook && (
-        <Suspense fallback={<div className="fixed inset-0 z-50 flex items-center justify-center bg-white dark:bg-[#121212]"><LoaderCircle className="h-7 w-7 animate-spin text-[#007AFF]" /></div>}>
-          <ReaderLayout book={readingBook} onClose={() => setReadingBook(null)} onOpenBook={setReadingBook} />
+        <Suspense fallback={null}>
+          <ReaderLayout
+            book={readingBook}
+            onClose={() => setReadingBook(null)}
+            onOpenBook={setReadingBook}
+            onPresentable={() => setReaderPresentable(true)}
+          />
         </Suspense>
       )}
     </div>
@@ -183,9 +198,7 @@ function MainLayout() {
 function StartupSplash({ theme }: { theme: 'light' | 'dark' | 'sepia' }) {
   const background = theme === 'dark' ? 'bg-[#121212]' : theme === 'sepia' ? 'bg-[#FDFCF8]' : 'bg-[#F2F2F7]';
   return (
-    <div className={`fixed inset-0 flex items-center justify-center ${background}`}>
-      <LoaderCircle className="h-7 w-7 animate-spin text-[#007AFF]" />
-    </div>
+    <div className={`fixed inset-0 ${background}`} />
   );
 }
 

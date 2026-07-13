@@ -28,6 +28,7 @@ export function ReadiumReaderViewer({
   onTocChange,
   tocTarget,
   seekRequest,
+  onPresentable,
 }: ReaderViewerProps & {
   chromeVisible: boolean;
 }) {
@@ -47,6 +48,7 @@ export function ReadiumReaderViewer({
   const settingsRef = useRef(settings);
   const onProgressChangeRef = useRef(onProgressChange);
   const onToggleChromeRef = useRef(onToggleChrome);
+  const onPresentableRef = useRef(onPresentable);
   const loadingResolvedRef = useRef(false);
   const lastPreferencesKeyRef = useRef('');
   const settingsApplyTimerRef = useRef<number | null>(null);
@@ -54,6 +56,7 @@ export function ReadiumReaderViewer({
   const settingsRevisionRef = useRef(0);
   const layoutQueueRef = useRef<Promise<void>>(Promise.resolve());
   const suppressResizeUntilRef = useRef(0);
+  const layoutRestoringRef = useRef(false);
   const lastEmittedProgressRef = useRef(-1);
   const lastSavedLocationRef = useRef('');
   const pendingProgressRef = useRef<ReturnType<typeof createProgressPayload> | null>(null);
@@ -80,6 +83,10 @@ export function ReadiumReaderViewer({
   useEffect(() => {
     onToggleChromeRef.current = onToggleChrome;
   }, [onToggleChrome]);
+
+  useEffect(() => {
+    onPresentableRef.current = onPresentable;
+  }, [onPresentable]);
 
   useEffect(() => {
     previewImageRef.current = previewImage;
@@ -140,6 +147,7 @@ export function ReadiumReaderViewer({
       if (forceReveal) revealReadiumFrames(containerRef.current);
       setLoading(false);
       setTxtPreview('');
+      onPresentableRef.current?.();
     };
 
     const init = async () => {
@@ -156,7 +164,10 @@ export function ReadiumReaderViewer({
         const storedProgress = await progressPromise;
         if (book.type === 'txt' && !storedProgress?.location && storedProgress?.scrollPercentage === undefined) {
           readTxtPreview(book.path, 12_000).then((preview) => {
-            if (!cancelled && !loadingResolvedRef.current) setTxtPreview(preview.text);
+            if (!cancelled && !loadingResolvedRef.current) {
+              setTxtPreview(preview.text);
+              onPresentableRef.current?.();
+            }
           }).catch(() => {});
         }
         const publication = await publicationPromise;
@@ -194,6 +205,7 @@ export function ReadiumReaderViewer({
               watchReadiumFrameLayout(wnd, () => schedulePageCounter(navigatorRef.current?.currentLocator));
             },
             positionChanged: (locator) => {
+              if (layoutRestoringRef.current) return;
               const progress = progressionFromLocator(locator, publication);
               const previousProgress = lastEmittedProgressRef.current;
               const direction: -1 | 0 | 1 = previousProgress < 0 ? 0 : progress > previousProgress ? 1 : progress < previousProgress ? -1 : 0;
@@ -286,20 +298,23 @@ export function ReadiumReaderViewer({
       settingsApplyTimerRef.current = null;
       enqueueLayout(async () => {
         if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
-        const before = navigator.currentLocator;
-        suppressResizeUntilRef.current = performance.now() + 500;
-        await navigator.submitPreferences(new EpubPreferences(preferences));
-        if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
-        await navigator.resizeHandler?.();
-        if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
-        lastPreferencesKeyRef.current = key;
-        applyReadiumFrameSettingsToNavigator(navigator, settings, book.type);
-        const finish = () => {
+        const before = snapshotLocator(navigator.currentLocator);
+        layoutRestoringRef.current = true;
+        try {
+          suppressResizeUntilRef.current = performance.now() + 500;
+          await navigator.submitPreferences(new EpubPreferences(preferences));
+          if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
+          await navigator.resizeHandler?.();
+          await waitForLayoutFrames();
+          if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
+          lastPreferencesKeyRef.current = key;
+          applyReadiumFrameSettingsToNavigator(navigator, settings, book.type);
+          if (before) await navigateToLocator(navigator, before);
           revealReadiumFrames(containerRef.current);
           scheduleDeferredWork(navigator.currentLocator?.href || before?.href || '', 0, true);
-        };
-        if (before) navigator.go(before, false, finish);
-        else finish();
+        } finally {
+          layoutRestoringRef.current = false;
+        }
       });
     }, 120);
     return () => {
@@ -321,11 +336,18 @@ export function ReadiumReaderViewer({
         resizeTimerRef.current = null;
         enqueueLayout(async () => {
           if (navigatorRef.current !== navigator) return;
-          const before = navigator.currentLocator;
-          suppressResizeUntilRef.current = performance.now() + 350;
-          await navigator.resizeHandler?.();
-          if (navigatorRef.current !== navigator) return;
-          if (before) navigator.go(before, false, () => revealReadiumFrames(containerRef.current));
+          const before = snapshotLocator(navigator.currentLocator);
+          layoutRestoringRef.current = true;
+          try {
+            suppressResizeUntilRef.current = performance.now() + 350;
+            await navigator.resizeHandler?.();
+            await waitForLayoutFrames();
+            if (navigatorRef.current !== navigator) return;
+            if (before) await navigateToLocator(navigator, before);
+            revealReadiumFrames(containerRef.current);
+          } finally {
+            layoutRestoringRef.current = false;
+          }
         });
       }, 140);
     });
@@ -693,6 +715,18 @@ function legacyProgressPosition(progress: number | undefined, publication: Readi
   if (progress === undefined || publication.positions.length === 0) return undefined;
   const index = Math.min(publication.positions.length - 1, Math.max(0, Math.round(progress * (publication.positions.length - 1))));
   return publication.positions[index];
+}
+
+function snapshotLocator(locator?: ReadiumLocator) {
+  return locator ? deserializeReadiumLocator(serializeReadiumLocator(locator)) : undefined;
+}
+
+function navigateToLocator(navigator: EpubNavigator, locator: ReadiumLocator) {
+  return new Promise<void>((resolve) => navigator.go(locator, false, () => resolve()));
+}
+
+function waitForLayoutFrames() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 }
 
 function themeColors(theme: 'light' | 'dark' | 'sepia') {

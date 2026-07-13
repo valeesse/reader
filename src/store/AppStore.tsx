@@ -82,7 +82,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    reloadState();
+    if (!startupSnapshot) {
+      void reloadState();
+      return;
+    }
+    const idleId = window.requestIdleCallback(() => void reloadState(), { timeout: 1500 });
+    return () => window.cancelIdleCallback(idleId);
   }, []);
 
   useEffect(() => {

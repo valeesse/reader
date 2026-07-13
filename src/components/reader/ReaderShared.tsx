@@ -9,6 +9,7 @@ export interface ReaderViewerProps {
   onTocChange: (items: ReaderTocItem[]) => void;
   tocTarget: ReaderTocItem | null;
   seekRequest: ReaderSeekRequest | null;
+  onPresentable?: () => void;
 }
 
 export function ReaderLoading({ overlay = false }: { overlay?: boolean }) {
