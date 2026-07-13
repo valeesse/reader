@@ -36,6 +36,6 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
-    "icon": ["icons/icon.ico"]
+    "icon": ["icons/icon.ico", "icons/icon.icns"]
   }
 }

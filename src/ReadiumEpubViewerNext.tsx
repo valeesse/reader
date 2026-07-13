@@ -8,6 +8,7 @@ import { getProgress, saveProgress } from './lib/storage';
 import {
   createReadiumPublicationFromPath,
   deserializeReadiumLocator,
+  pageFromLocator,
   progressionFromLocator,
   ReadiumPublicationLike,
   serializeReadiumLocator,
@@ -78,6 +79,19 @@ export function ReadiumEpubViewerNext({
 
   useEffect(() => {
     let cancelled = false;
+    let pageCounterFrame: number | null = null;
+
+    const schedulePageCounter = (locator?: ReadiumLocator) => {
+      if (!locator) return;
+      if (pageCounterFrame !== null) cancelAnimationFrame(pageCounterFrame);
+      pageCounterFrame = requestAnimationFrame(() => {
+        pageCounterFrame = null;
+        const navigator = navigatorRef.current;
+        const publication = publicationRef.current;
+        if (cancelled || !navigator || !publication) return;
+        setPageCounter(formatEpubPageCounter(navigator, locator, publication));
+      });
+    };
 
     const flushProgressSave = () => {
       const payload = pendingProgressRef.current;
@@ -158,14 +172,15 @@ export function ReadiumEpubViewerNext({
               installImagePreview(wnd, openPreview, () => resolveLoading(false));
               installReadiumWheel(wnd, navigateByWheel);
               applyReadiumFrameSettings(wnd.document, settingsRef.current);
+              watchReadiumFrameLayout(wnd, () => schedulePageCounter(navigatorRef.current?.currentLocator));
             },
             positionChanged: (locator) => {
               const progress = progressionFromLocator(locator, publication);
               publication.prefetchAroundHref(locator.href, EPUB_PREFETCH_RADIUS).catch(() => {});
+              schedulePageCounter(locator);
               if (Math.abs(progress - lastEmittedProgressRef.current) >= 0.001) {
                 lastEmittedProgressRef.current = progress;
                 setPageLabel(formatProgressLabel(progress));
-                setPageCounter(formatPageCounter(progress, publication.positions.length));
                 onProgressChangeRef.current(progress);
               }
               queueProgressSave(locator);
@@ -217,6 +232,7 @@ export function ReadiumEpubViewerNext({
 
     return () => {
       cancelled = true;
+      if (pageCounterFrame !== null) cancelAnimationFrame(pageCounterFrame);
       window.removeEventListener('pagehide', flushProgressSave);
       onTocChange([]);
       if (progressSaveTimerRef.current !== null) {
@@ -296,7 +312,7 @@ export function ReadiumEpubViewerNext({
     const publication = publicationRef.current;
     const navigator = navigatorRef.current;
     if (!publication || !navigator || publication.positions.length === 0) return;
-    const index = Math.max(0, Math.min(publication.positions.length - 1, Math.round(seekRequest.progress * (publication.positions.length - 1))));
+    const index = Math.max(0, Math.min(publication.positions.length - 1, Math.ceil(seekRequest.progress * publication.positions.length) - 1));
     navigator.go(publication.positions[index], false, () => {});
   }, [seekRequest, loading]);
 
@@ -718,10 +734,41 @@ function formatProgressLabel(progress: number) {
   return `${Math.max(0, Math.min(100, Math.round(progress * 100)))}%`;
 }
 
-function formatPageCounter(progress: number, totalPages: number) {
-  const safeTotal = Math.max(1, totalPages);
-  const current = Math.max(1, Math.min(safeTotal, Math.round(progress * (safeTotal - 1)) + 1));
-  return `章节 ${current} / ${safeTotal}`;
+function formatEpubPageCounter(navigator: EpubNavigator, locator: ReadiumLocator, publication: ReadiumPublicationLike) {
+  const internal = navigator as EpubNavigator & {
+    _cframes?: Array<{ iframe?: HTMLIFrameElement; window?: Window } | undefined>;
+  };
+  const frame = internal._cframes?.find(Boolean);
+  const wnd = frame?.iframe?.contentWindow || frame?.window;
+  const doc = frame?.iframe?.contentDocument || wnd?.document;
+  const viewportWidth = Math.max(1, wnd?.innerWidth || doc?.documentElement.clientWidth || 1);
+  const scrollWidth = Math.max(
+    viewportWidth,
+    doc?.documentElement.scrollWidth || 0,
+    doc?.body?.scrollWidth || 0,
+  );
+  const chapterTotal = Math.max(1, Math.ceil((scrollWidth - 1) / viewportWidth));
+  const localProgression = clampNumber(locator.locations?.progression ?? 0, 0, 0.999999999);
+  const chapterCurrent = Math.max(1, Math.min(chapterTotal, Math.floor(localProgression * chapterTotal) + 1));
+  const page = pageFromLocator(locator, publication);
+  const percent = Math.round((page.current / page.total) * 100);
+  return `本章 ${chapterCurrent} / ${chapterTotal} · 全书 ${page.current} / ${page.total} · ${percent}%`;
+}
+
+function watchReadiumFrameLayout(wnd: Window, onLayout: () => void) {
+  const doc = wnd.document;
+  wnd.addEventListener('load', onLayout, { once: true });
+  doc.fonts?.ready.then(onLayout).catch(() => {});
+  doc.querySelectorAll('img').forEach((image) => {
+    if (!(image as HTMLImageElement).complete) {
+      image.addEventListener('load', onLayout, { once: true });
+      image.addEventListener('error', onLayout, { once: true });
+    }
+  });
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function installReadiumFrameStyles(doc: Document) {

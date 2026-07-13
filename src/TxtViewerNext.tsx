@@ -175,7 +175,9 @@ export function TxtViewerNext({
 
   useEffect(() => {
     if (!seekRequest || !totalCharsRef.current) return;
-    goToAnchor(Math.round(seekRequest.progress * totalCharsRef.current), true, true);
+    const pagination = getBookPagination(activeAnchorCharRef.current);
+    const targetPage = Math.max(1, Math.ceil(clamp(seekRequest.progress, 0, 1) * pagination.total));
+    goToAnchor(Math.min(totalCharsRef.current, (targetPage - 1) * pagination.charsPerPage), true, true);
   }, [seekRequest, bookInfo]);
 
   const recalculatePages = useCallback(() => {
@@ -251,13 +253,14 @@ export function TxtViewerNext({
     scheduleWindowPrefetch(activeAnchorCharRef.current);
   }, [textWindow, pageMetrics, isPagedFlow]);
 
+  const updatePageCounter = (anchor: number) => {
+    const page = getBookPagination(anchor);
+    setPageCounter(`全书 ${page.current} / ${page.total} · ${Math.round(page.progress * 100)}%`);
+  };
+
   const updateProgressFromAnchor = (anchor: number) => {
-    const totalChars = totalCharsRef.current;
-    const progress = totalChars > 0 ? clamp(anchor / totalChars, 0, 1) : 0;
-    onProgressChange(progress);
-    const estimatedPages = estimateTotalPages();
-    const currentPage = Math.max(1, Math.min(estimatedPages, Math.round(progress * (estimatedPages - 1)) + 1));
-    setPageCounter(`${currentPage} / ${estimatedPages}`);
+    onProgressChange(getBookPagination(anchor).progress);
+    updatePageCounter(anchor);
   };
 
   const persistProgress = (scrollPercentage: number) => {
@@ -308,10 +311,13 @@ export function TxtViewerNext({
     return Math.max(500, Math.min(9000, Math.round((rangeLength / pages) * pagesPerSpread)));
   };
 
-  const estimateTotalPages = () => {
+  const getBookPagination = (anchor: number) => {
     const totalChars = totalCharsRef.current;
-    const charsPerSpread = Math.max(1, estimateCharsPerSpread());
-    return Math.max(1, Math.ceil(totalChars / charsPerSpread));
+    const charsPerPage = Math.max(1, estimateCharsPerSpread());
+    const total = Math.max(1, Math.ceil(totalChars / charsPerPage));
+    const current = Math.max(1, Math.min(total, Math.floor(clamp(anchor, 0, totalChars) / charsPerPage) + 1));
+    const progress = current / total;
+    return { current, total, progress, charsPerPage };
   };
 
   const rangeForAnchor = (anchor: number, totalChars = totalCharsRef.current) => {
@@ -473,6 +479,7 @@ export function TxtViewerNext({
       const localProgress = clamp((anchor - windowValue.start) / Math.max(1, windowValue.end - windowValue.start), 0, 1);
       element.scrollTop = maxScroll * localProgress;
     }
+    updatePageCounter(anchor);
 
     window.requestAnimationFrame(() => {
       programmaticScrollRef.current = false;

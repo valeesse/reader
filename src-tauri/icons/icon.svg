@@ -1,16 +1,17 @@
-<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="256" height="256" rx="56" fill="#F5F7FB"/>
-  <rect x="28" y="28" width="200" height="200" rx="44" fill="url(#paint0_linear)"/>
-  <path d="M73 77C93 72 111 76 128 89V180C111 167 93 163 73 168V77Z" stroke="white" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M183 77C163 72 145 76 128 89V180C145 167 163 163 183 168V77Z" stroke="white" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M93 104H108" stroke="white" stroke-width="9" stroke-linecap="round"/>
-  <path d="M148 104H163" stroke="white" stroke-width="9" stroke-linecap="round"/>
-  <path d="M93 130H108" stroke="white" stroke-width="9" stroke-linecap="round"/>
-  <path d="M148 130H163" stroke="white" stroke-width="9" stroke-linecap="round"/>
-  <defs>
-    <linearGradient id="paint0_linear" x1="48" y1="48" x2="214" y2="220" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#007AFF"/>
-      <stop offset="1" stop-color="#AF52DE"/>
-    </linearGradient>
-  </defs>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Zenith Reader: quiet, tactile, and legible at every macOS icon size. -->
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="#1D1D1F"/>
+  <rect x="44" y="44" width="936" height="936" rx="212" stroke="#FFFFFF" stroke-opacity="0.16" stroke-width="24"/>
+
+  <!-- A single warm point: zenith as a reading guide, not decoration. -->
+  <circle cx="512" cy="254" r="44" fill="#FF9F0A"/>
+
+  <!-- The open-book silhouette is deliberately broad and text-free for small sizes. -->
+  <path d="M174 402C286 364 410 390 512 472V794C408 716 285 690 174 730V402Z" fill="#F5F5F7"/>
+  <path d="M850 402C738 364 614 390 512 472V794C616 716 739 690 850 730V402Z" fill="#F5F5F7"/>
+  <path d="M512 472V794" stroke="#A1A1A6" stroke-width="12" stroke-linecap="round"/>
+
+  <!-- Page contours retain the reading cue without becoming visual noise. -->
+  <path d="M258 514C326 495 392 513 450 552" stroke="#1D1D1F" stroke-opacity="0.28" stroke-width="20" stroke-linecap="round"/>
+  <path d="M766 514C698 495 632 513 574 552" stroke="#1D1D1F" stroke-opacity="0.28" stroke-width="20" stroke-linecap="round"/>
 </svg>

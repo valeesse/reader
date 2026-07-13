@@ -21,6 +21,7 @@ const LAYOUT = {
 } as const;
 const EPUB_PAYLOAD_CACHE_LIMIT = 72;
 const EPUB_BLOB_CACHE_LIMIT = 96;
+const EPUB_POSITION_CHARS = 1024;
 
 export type ReadiumLocatorLike = {
   href: string;
@@ -61,8 +62,8 @@ export async function createReadiumPublicationFromPath(path: string, fallbackTit
   const readingOrder = new LinkCollection(book.readingOrder.map(nativeLinkToReadiumLink));
   const resources = new LinkCollection(book.resources.map(nativeLinkToReadiumLink));
   const toc = new LinkCollection(book.toc.map(nativeLinkToReadiumLink));
-  const positions = createPositions(readingOrder.items);
   const resourceManager = new EpubResourceManager(path, sessionId);
+  const positions = await createPositions(readingOrder.items, resourceManager);
   let lastPrefetchKey = '';
   let lastPrefetch: Promise<void> = Promise.resolve();
 
@@ -132,13 +133,21 @@ export function serializeReadiumLocator(locator: any) {
 }
 
 export function progressionFromLocator(locator: any, publication: ReadiumPublicationLike) {
-  const total = locator?.locations?.totalProgression;
-  if (typeof total === 'number') return clamp(total, 0, 1);
+  const page = pageFromLocator(locator, publication);
+  return page.current / page.total;
+}
 
-  const index = publication.readingOrder.findIndexWithHref(locator?.href || '');
-  const localProgression = typeof locator?.locations?.progression === 'number' ? locator.locations.progression : 0;
-  if (index < 0) return 0;
-  return clamp((index + localProgression) / Math.max(1, publication.readingOrder.items.length), 0, 1);
+export function pageFromLocator(locator: any, publication: ReadiumPublicationLike) {
+  const positions = publication.positions;
+  const total = Math.max(1, positions.length);
+  const hrefPositions = positions
+    .map((position, index) => ({ position, index }))
+    .filter(({ position }) => publication.readingOrder.findWithHref(position.href)?.href === publication.readingOrder.findWithHref(locator?.href || '')?.href);
+  if (hrefPositions.length === 0) return { current: 1, total };
+
+  const local = clamp(typeof locator?.locations?.progression === 'number' ? locator.locations.progression : 0, 0, 1);
+  const localIndex = Math.min(hrefPositions.length - 1, Math.floor(local * hrefPositions.length));
+  return { current: hrefPositions[localIndex].index + 1, total };
 }
 
 export class ReadiumLink {
@@ -303,6 +312,11 @@ class EpubResourceManager {
     return new ReadiumResource(link, this);
   }
 
+  async sourceText(link: ReadiumLink) {
+    const payload = await this.payloadFor(link.href);
+    return payload.text ?? (payload.base64 ? new TextDecoder().decode(base64ToBytes(payload.base64)) : '');
+  }
+
   async read(link: ReadiumLink) {
     if (link.mediaType.isHTML || link.type === 'text/css') {
       const text = await this.readAsString(link);
@@ -375,7 +389,11 @@ class EpubResourceManager {
     const payload = await this.payloadFor(normalized);
     const type = payload.mediaType || link.type;
     if (payload.filePath && type !== 'text/css' && !link.mediaType.isHTML) {
-      return toLocalAssetUrl(payload.filePath);
+      const response = await fetch(toLocalAssetUrl(payload.filePath));
+      if (!response.ok) throw new Error(`Failed reading cached EPUB resource ${normalized}`);
+      const url = URL.createObjectURL(await response.blob());
+      this.rememberBlobUrl(normalized, url);
+      return url;
     }
     const content = type === 'text/css'
       ? await this.rewriteCss(payload.text ?? new TextDecoder().decode(base64ToBytes(payload.base64 || '')), normalized)
@@ -383,8 +401,13 @@ class EpubResourceManager {
         ? payload.text
         : bytesToBlobPart(base64ToBytes(payload.base64 || ''));
     const url = URL.createObjectURL(new Blob([content], { type }));
-    this.blobUrls.set(normalized, url);
-    touchKey(this.blobOrder, normalized);
+    this.rememberBlobUrl(normalized, url);
+    return url;
+  }
+
+  private rememberBlobUrl(href: string, url: string) {
+    this.blobUrls.set(href, url);
+    touchKey(this.blobOrder, href);
     while (this.blobOrder.length > EPUB_BLOB_CACHE_LIMIT) {
       const oldest = this.blobOrder.shift();
       if (!oldest) break;
@@ -392,7 +415,6 @@ class EpubResourceManager {
       if (oldUrl) URL.revokeObjectURL(oldUrl);
       this.blobUrls.delete(oldest);
     }
-    return url;
   }
 
   private async rewriteHtml(html: string, href: string) {
@@ -482,16 +504,30 @@ function nativeLinkToReadiumLink(link: NativeEpubLink) {
   });
 }
 
-function createPositions(readingOrder: ReadiumLink[]) {
-  return readingOrder.map((link, index) => createLocator({
-    href: link.href,
-    type: link.type,
-    title: link.title,
-    locations: {
-      progression: 0,
-      totalProgression: index / Math.max(1, readingOrder.length),
-      position: index + 1,
-    },
+async function createPositions(readingOrder: ReadiumLink[], resourceManager: EpubResourceManager) {
+  const counts = await Promise.all(readingOrder.map(async (link) => {
+    try {
+      const source = await resourceManager.sourceText(link);
+      const text = source ? new DOMParser().parseFromString(source, 'text/html').body?.textContent || '' : '';
+      return Math.max(1, Math.ceil(text.trim().length / EPUB_POSITION_CHARS));
+    } catch {
+      return 1;
+    }
+  }));
+  const total = Math.max(1, counts.reduce((sum, count) => sum + count, 0));
+  let position = 0;
+  return readingOrder.flatMap((link, linkIndex) => Array.from({ length: counts[linkIndex] }, (_, localIndex) => {
+    const current = position++;
+    return createLocator({
+      href: link.href,
+      type: link.type,
+      title: link.title,
+      locations: {
+        progression: localIndex / counts[linkIndex],
+        totalProgression: total > 1 ? current / (total - 1) : 0,
+        position: current + 1,
+      },
+    });
   }));
 }
 
