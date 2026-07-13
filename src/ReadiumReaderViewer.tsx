@@ -67,6 +67,7 @@ export function ReadiumReaderViewer({
   const refinementIdleRef = useRef<number | null>(null);
   const refinementAbortRef = useRef<AbortController | null>(null);
   const positionsRefinedRef = useRef(false);
+  const deferredHrefRef = useRef('');
 
   useEffect(() => {
     settingsRef.current = settings;
@@ -363,13 +364,15 @@ export function ReadiumReaderViewer({
   const scheduleDeferredWork = (href: string, direction: -1 | 0 | 1, restartRefinement: boolean) => {
     const publication = publicationRef.current;
     if (!publication || !href) return;
+    const resourceChanged = Boolean(deferredHrefRef.current && deferredHrefRef.current !== href);
+    deferredHrefRef.current = href;
     if (stablePrefetchTimerRef.current !== null) window.clearTimeout(stablePrefetchTimerRef.current);
     stablePrefetchTimerRef.current = window.setTimeout(() => {
       stablePrefetchTimerRef.current = null;
       publication.prefetchAroundHref(href, STABLE_PREFETCH_RADIUS, direction).catch(() => {});
     }, 320);
 
-    if (restartRefinement) cancelPositionRefinement();
+    if (restartRefinement || resourceChanged) cancelPositionRefinement();
     if (positionsRefinedRef.current || !publication.refinePositions || refinementAbortRef.current) return;
     if (refinementTimerRef.current !== null) window.clearTimeout(refinementTimerRef.current);
     refinementTimerRef.current = window.setTimeout(() => {
