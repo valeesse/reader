@@ -32,6 +32,11 @@ function MainLayout() {
   const [isScanning, setIsScanning] = useState(false);
   const startupResumeCheckedRef = useRef(false);
   const didShowWindowRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+  }, []);
 
   const showWindowOnce = () => {
     if (didShowWindowRef.current) return;
@@ -43,7 +48,6 @@ function MainLayout() {
     if (isLoading || startupResumeCheckedRef.current) return;
     startupResumeCheckedRef.current = true;
 
-    let cancelled = false;
     const resolveStartup = async () => {
       try {
         const book = lastReadBookId ? books.find((item) => item.id === lastReadBookId) : undefined;
@@ -53,19 +57,16 @@ function MainLayout() {
           const publicationModule = await publicationModulePromise;
           void publicationModule.prewarmReaderPublication(book).catch(() => {});
           await layoutModulePromise;
-          if (!cancelled) {
+          if (mountedRef.current) {
             setReadingBook(book);
           }
         }
       } finally {
-        if (!cancelled) setStartupResolved(true);
+        if (mountedRef.current) setStartupResolved(true);
       }
     };
 
-    resolveStartup();
-    return () => {
-      cancelled = true;
-    };
+    void resolveStartup();
   }, [books, isLoading, lastReadBookId]);
 
   useEffect(() => {
@@ -92,13 +93,16 @@ function MainLayout() {
   useEffect(() => {
     const fallbackId = window.setTimeout(() => {
       if (didShowWindowRef.current) return;
-      console.warn('[startup] showing fallback screen after startup guard timeout', {
+      console.warn('[startup] reader recovery timed out; showing library fallback', {
         elapsedMs: Math.round(performance.now()),
         isLoading,
         startupResolved,
       });
+      setReadingBook(null);
+      setReaderPresentable(true);
+      setStartupResolved(true);
       showWindowOnce();
-    }, 800);
+    }, 2500);
 
     return () => window.clearTimeout(fallbackId);
   }, []);
