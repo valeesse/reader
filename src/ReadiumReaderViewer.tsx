@@ -750,9 +750,9 @@ function snapshotVisibleTextLocator(navigator: EpubNavigator) {
   const fallback = snapshotLocator(navigator.currentLocator);
   if (!fallback) return undefined;
   const frame = (navigator as EpubNavigator & {
-    _cframes?: Array<{ iframe?: HTMLIFrameElement; window?: Window } | undefined>;
+    _cframes?: ReadiumFrameHandle[];
   })._cframes?.[0];
-  const wnd = frame?.iframe?.contentWindow || frame?.window;
+  const wnd = getLiveReadiumIframe(frame)?.contentWindow;
   const doc = wnd?.document;
   if (!wnd || !doc?.body) return fallback;
 
@@ -804,11 +804,10 @@ function createProgressPayload(bookId: string, location: string) {
 
 function applyReadiumFrameSettingsToNavigator(navigator: EpubNavigator, settings: AppSettings, bookType: 'epub' | 'txt') {
   const internal = navigator as EpubNavigator & {
-    _cframes?: Array<{ iframe?: HTMLIFrameElement; window?: Window } | undefined>;
+    _cframes?: ReadiumFrameHandle[];
   };
   for (const frame of internal._cframes || []) {
-    if (!frame) continue;
-    const doc = frame.iframe?.contentDocument || frame.window?.document;
+    const doc = getLiveReadiumIframe(frame)?.contentDocument;
     if (doc) applyReadiumFrameSettings(doc, settings, bookType);
   }
 }
@@ -952,11 +951,11 @@ function formatProgressLabel(progress: number) {
 
 function formatEpubPageCounter(navigator: EpubNavigator, locator: ReadiumLocator, publication: ReadiumPublicationLike) {
   const internal = navigator as EpubNavigator & {
-    _cframes?: Array<{ iframe?: HTMLIFrameElement; window?: Window } | undefined>;
+    _cframes?: ReadiumFrameHandle[];
   };
-  const frame = internal._cframes?.find(Boolean);
-  const wnd = frame?.iframe?.contentWindow || frame?.window;
-  const doc = frame?.iframe?.contentDocument || wnd?.document;
+  const iframe = internal._cframes?.map(getLiveReadiumIframe).find(Boolean);
+  const wnd = iframe?.contentWindow;
+  const doc = iframe?.contentDocument;
   const viewportWidth = Math.max(1, wnd?.innerWidth || doc?.documentElement.clientWidth || 1);
   const scrollWidth = Math.max(
     viewportWidth,
@@ -1055,14 +1054,25 @@ function installReadiumFrameStyles(doc: Document) {
 function revealReadiumFrames(container: HTMLElement | null, navigator: EpubNavigator | null) {
   if (!container || !navigator) return;
   const activeFrames = (navigator as EpubNavigator & {
-    _cframes?: Array<{ iframe?: HTMLIFrameElement }>;
+    _cframes?: ReadiumFrameHandle[];
   })._cframes || [];
   activeFrames.forEach((frame) => {
-    const iframe = frame.iframe;
+    const iframe = getLiveReadiumIframe(frame);
     if (!iframe || !container.contains(iframe)) return;
     iframe.style.removeProperty('visibility');
     iframe.style.removeProperty('opacity');
     iframe.style.removeProperty('pointer-events');
     iframe.removeAttribute('aria-hidden');
   });
+}
+
+type ReadiumFrameHandle = {
+  destroyed?: boolean;
+  frame?: HTMLIFrameElement;
+};
+
+function getLiveReadiumIframe(handle?: ReadiumFrameHandle) {
+  if (!handle || handle.destroyed) return undefined;
+  const iframe = handle.frame;
+  return iframe?.contentWindow ? iframe : undefined;
 }

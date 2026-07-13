@@ -35,9 +35,16 @@ export type ReadiumLocatorLike = {
     position?: number;
     [key: string]: unknown;
   };
-  text?: unknown;
+  text?: ReadiumTextLike;
   serialize: () => unknown;
   copyWithLocations: (locations: Record<string, unknown>) => ReadiumLocatorLike;
+};
+
+type ReadiumTextLike = {
+  after?: string;
+  before?: string;
+  highlight?: string;
+  serialize: () => Record<string, string>;
 };
 
 export type ReadiumPublicationLike = {
@@ -601,19 +608,20 @@ export function createLocator(values: {
   locations?: Record<string, unknown>;
   text?: unknown;
 }): ReadiumLocatorLike {
+  const text = createLocatorText(values.text);
   const locator = {
     href: values.href,
     type: values.type,
     title: values.title,
     locations: values.locations || {},
-    text: values.text,
+    text,
     serialize() {
       return {
         href: locator.href,
         type: locator.type,
         title: locator.title,
         locations: locator.locations,
-        text: locator.text,
+        text: locator.text?.serialize(),
       };
     },
     copyWithLocations(locations: Record<string, unknown>) {
@@ -630,6 +638,24 @@ export function createLocator(values: {
     },
   };
   return locator;
+}
+
+function createLocatorText(value: unknown): ReadiumTextLike | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const source = value as Partial<ReadiumTextLike>;
+  if (typeof source.serialize === 'function') return source as ReadiumTextLike;
+  const text: ReadiumTextLike = {
+    after: typeof source.after === 'string' ? source.after : undefined,
+    before: typeof source.before === 'string' ? source.before : undefined,
+    highlight: typeof source.highlight === 'string' ? source.highlight : undefined,
+    serialize() {
+      return Object.fromEntries(
+        Object.entries({ after: text.after, before: text.before, highlight: text.highlight })
+          .filter((entry): entry is [string, string] => entry[1] !== undefined),
+      );
+    },
+  };
+  return text.after === undefined && text.before === undefined && text.highlight === undefined ? undefined : text;
 }
 
 async function rewriteUrlAttributes(doc: XMLDocument, baseDir: string, resolveUrl: (href: string) => Promise<string>) {
