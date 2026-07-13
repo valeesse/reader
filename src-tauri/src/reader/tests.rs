@@ -105,6 +105,54 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "set ZENITH_TXT_PROBE to exercise a real TXT"]
+    fn probe_real_txt_from_environment() {
+        let path = PathBuf::from(
+            std::env::var("ZENITH_TXT_PROBE").expect("ZENITH_TXT_PROBE must point to a TXT"),
+        );
+        let mut converted_path = None;
+        let data_path = match build_txt_index(&path) {
+            Ok(_) => path.clone(),
+            Err(TxtIndexError::InvalidUtf8) => {
+                let target = test_path("real-txt-probe-utf8.txt");
+                write_utf8_txt_cache(File::open(&path).unwrap(), &target, Some(GBK)).unwrap();
+                converted_path = Some(target.clone());
+                target
+            }
+            Err(error) => panic!("real TXT index failed: {error}"),
+        };
+        let (total_chars, checkpoints, chapters) = build_txt_index(&data_path).unwrap();
+        assert!(total_chars > TXT_CHAR_CHECKPOINT_INTERVAL);
+        assert!(checkpoints.len() > 1);
+        assert!(!chapters.is_empty());
+        eprintln!(
+            "real TXT: {total_chars} chars, {} checkpoints, {} chapters, converted={}",
+            checkpoints.len(),
+            chapters.len(),
+            converted_path.is_some()
+        );
+
+        let cache = TxtBookCache {
+            signature: file_signature(path.to_str().unwrap()).unwrap(),
+            last_used_at: 0,
+            active_sessions: HashSet::new(),
+            data_path,
+            total_chars,
+            total_bytes: 0,
+            checkpoints,
+            chapters,
+        };
+        for anchor in [0, total_chars / 2, total_chars.saturating_sub(4096)] {
+            let end = (anchor + 4096).min(total_chars);
+            let text = read_txt_char_range(&cache, anchor, end).unwrap();
+            assert_eq!(text.chars().count(), end - anchor);
+        }
+        if let Some(converted_path) = converted_path {
+            fs::remove_file(converted_path).unwrap();
+        }
+    }
+
+    #[test]
     fn stale_txt_session_cannot_read_a_newer_session() {
         let path = test_path("session.txt");
         let text = "第一章\n会话隔离\n";

@@ -73,10 +73,6 @@ button {
   clip-path: inset(0 round var(--app-radius)) !important;
 }
 
-.txt-reader-paragraph {
-  margin-bottom: var(--txt-paragraph-spacing, 1.5em);
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

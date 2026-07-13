@@ -8,7 +8,7 @@ Zenith Reader 是一个基于 Tauri 2、Rust、React 19 和 Readium 的本地桌
 
 - 扫描本地文件夹，递归发现 `.epub` 和 `.txt`
 - 构建本地书库，支持搜索、筛选、排序和最近阅读入口
-- EPUB 阅读基于 Readium navigator，支持目录、资源读取和章节切换
+- EPUB 与 TXT 阅读统一基于 Readium navigator，支持目录、资源读取和章节切换
 - TXT 阅读支持中文常见章节名识别，也兼容 `Chapter 1` 这类英文格式
 - TXT 支持分页和滚动两种阅读流
 - 支持单页 / 双页、主题、字体、字号、行距、段距、字距、页边距等阅读设置
@@ -32,7 +32,7 @@ Zenith Reader 是一个基于 Tauri 2、Rust、React 19 和 Readium 的本地桌
 - 原生层：Rust
 - 前端：React 19 + TypeScript + Vite
 - 样式：Tailwind CSS 4
-- EPUB 渲染：Readium navigator
+- EPUB / TXT 渲染：Readium navigator
 - 前端存储：IndexedDB + localStorage 启动快照
 
 ## 架构概览
@@ -46,8 +46,8 @@ Zenith Reader 是一个基于 Tauri 2、Rust、React 19 和 Readium 的本地桌
 - `src/App.tsx`：应用入口与主视图切换
 - `src/components/Library.tsx`：书库列表、搜索、筛选、排序
 - `src/ReaderLayoutNext.tsx`：阅读器外层布局与阅读设置面板
-- `src/TxtViewerNext.tsx`：TXT 阅读流程
-- `src/ReadiumEpubViewerNext.tsx`：EPUB 阅读流程
+- `src/ReadiumReaderViewer.tsx`：EPUB / TXT 统一阅读流程
+- `src/lib/txtReadiumPublication.ts`：TXT 虚拟 Publication 与按需 HTML 分片
 - `src/store/AppStore.tsx`：全局状态、进度和设置管理
 
 ### 原生层
@@ -69,6 +69,8 @@ Rust 侧负责更适合放在原生环境里的工作：
 ### TXT：按窗口读取与渲染
 
 TXT 阅读不会默认把整本书一次性挂进 DOM，而是围绕当前阅读位置加载一个有限文本窗口，并在接近边界时预取下一段内容。这种做法更适合长篇网文或大体积纯文本文件。
+
+前端会把这些窗口包装成稳定的虚拟 XHTML reading order，交给与 EPUB 相同的 Readium navigator 渲染。每个资源约 48K Unicode 字符，目录和阅读进度仍映射到原始 TXT 字符位置。
 
 当前实现关注点包括：
 
@@ -151,8 +153,7 @@ pnpm clean
 src/
   App.tsx
   ReaderLayoutNext.tsx
-  TxtViewerNext.tsx
-  ReadiumEpubViewerNext.tsx
+  ReadiumReaderViewer.tsx
   components/
   store/
   lib/

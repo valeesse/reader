@@ -3,8 +3,7 @@ import { Book, ReaderSeekRequest, ReaderTocItem } from './types';
 import { useAppContext } from './store/AppStore';
 import { ArrowLeftRight, ArrowUpDown, BookOpen, ChevronLeft, Columns2, List, Monitor, Moon, Settings2, StepForward, Sun } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ReadiumEpubViewerNext } from './ReadiumEpubViewerNext';
-import { TxtViewerNext } from './TxtViewerNext';
+import { ReadiumReaderViewer } from './ReadiumReaderViewer';
 
 interface ReaderLayoutProps {
   book: Book;
@@ -282,30 +281,16 @@ export function ReaderLayout({ book, onClose, onOpenBook }: ReaderLayoutProps) {
 
       <div className="absolute inset-0 overflow-hidden flex items-center justify-center">
         <div className="w-full h-full min-w-0 cursor-auto" onClick={(event) => event.stopPropagation()}>
-          {book.type === 'epub' ? (
-            <ReadiumEpubViewerNext
-              key={book.id}
-              book={book}
-              chromeVisible={chromeVisible}
-              onProgressChange={setReadingProgress}
-              onToggleChrome={toggleChrome}
-              onTocChange={setTocItems}
-              tocTarget={tocTarget}
-              seekRequest={seekRequest}
-            />
-          ) : (
-            <TxtViewerNext
-              key={book.id}
-              book={book}
-              nextBook={nextBook}
-              onOpenBook={onOpenBook}
-              onProgressChange={setReadingProgress}
-              onToggleChrome={toggleChrome}
-              onTocChange={setTocItems}
-              tocTarget={tocTarget}
-              seekRequest={seekRequest}
-            />
-          )}
+          <ReadiumReaderViewer
+            key={book.id}
+            book={book}
+            chromeVisible={chromeVisible}
+            onProgressChange={setReadingProgress}
+            onToggleChrome={toggleChrome}
+            onTocChange={setTocItems}
+            tocTarget={tocTarget}
+            seekRequest={seekRequest}
+          />
         </div>
       </div>
 

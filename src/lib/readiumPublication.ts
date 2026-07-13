@@ -46,13 +46,23 @@ export type ReadiumPublicationLike = {
   toc: LinkCollection;
   baseURL?: string;
   positions: ReadiumLocatorLike[];
-  get: (link: ReadiumLink) => ReadiumResource;
+  get: (link: ReadiumLink) => ReadiumResourceLike;
   positionsFromManifest: () => Promise<ReadiumLocatorLike[]>;
   linkWithHref: (href: string) => ReadiumLink | undefined;
   linkWithRel: (rel: string) => ReadiumLink | undefined;
   linksWithRel: (rel: string) => ReadiumLink[];
   getCover: () => ReadiumLink | undefined;
   prefetchAroundHref: (href: string, radius?: number) => Promise<void>;
+  close: () => void;
+};
+
+export type ReadiumResourceLike = {
+  link: () => Promise<ReadiumLink>;
+  length: () => Promise<number | undefined>;
+  read: () => Promise<Uint8Array | undefined>;
+  readAsString: () => Promise<string | undefined>;
+  readAsJSON: () => Promise<unknown>;
+  readAsXML: () => Promise<Document | undefined>;
   close: () => void;
 };
 
@@ -531,7 +541,7 @@ async function createPositions(readingOrder: ReadiumLink[], resourceManager: Epu
   }));
 }
 
-function createLocator(values: {
+export function createLocator(values: {
   href: string;
   type: string;
   title?: string;
