@@ -711,7 +711,7 @@ export function TxtViewerNext({
         </div>
       )}
       {pageCounter && (
-        <div className="absolute bottom-5 right-5 z-30 rounded-[5px] border border-black/10 bg-white/78 px-3 py-1.5 text-[11px] font-medium text-black/60 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-[#1C1C1E]/78 dark:text-white/60">
+        <div className="absolute bottom-5 right-5 z-30 text-[11px] font-medium text-black/50 dark:text-white/50">
           {pageCounter}
         </div>
       )}
