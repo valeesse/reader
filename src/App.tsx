@@ -48,10 +48,11 @@ function MainLayout() {
       try {
         const book = lastReadBookId ? books.find((item) => item.id === lastReadBookId) : undefined;
         if (book) {
-          void import('./lib/readerPublication')
-            .then((module) => module.prewarmReaderPublication(book))
-            .catch(() => {});
-          await loadReaderLayout();
+          const publicationModulePromise = import('./lib/readerPublication');
+          const layoutModulePromise = loadReaderLayout();
+          const publicationModule = await publicationModulePromise;
+          void publicationModule.prewarmReaderPublication(book).catch(() => {});
+          await layoutModulePromise;
           if (!cancelled) {
             setReadingBook(book);
           }
