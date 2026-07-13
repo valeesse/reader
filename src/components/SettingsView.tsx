@@ -5,6 +5,7 @@ import { motion } from 'motion/react';
 import { applySyncSnapshot, createSyncSnapshot } from '../lib/storage';
 import { downloadWebDavSnapshot, uploadWebDavSnapshot } from '../lib/native';
 import { SyncSnapshot } from '../types';
+import { READER_FONT_OPTIONS, READING_SETTING_LIMITS } from '../lib/readingSettings';
 
 export function SettingsView({
   onAddFiles,
@@ -115,6 +116,36 @@ export function SettingsView({
         <section className="space-y-3">
           <h3 className="text-[11px] font-semibold text-black/40 dark:text-white/40 uppercase tracking-wider pl-1">排版与字体</h3>
           <div className="bg-[#F2F2F7] dark:bg-[#1C1C1E] border border-black/5 dark:border-white/5 rounded-2xl p-5 space-y-6 shadow-sm">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <div className="text-sm font-medium text-[#1C1C1E] dark:text-white">分页版式</div>
+                <div className="flex rounded-lg bg-black/5 p-1 dark:bg-white/5">
+                  {(['single', 'double'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => updateSettings({ pageMode: mode })}
+                      className={`flex-1 rounded-md py-1.5 text-xs ${settings.pageMode === mode ? 'bg-white shadow-sm dark:bg-[#3A3A3C]' : 'text-black/50 dark:text-white/50'}`}
+                    >
+                      {mode === 'single' ? '单页' : '双页'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="text-sm font-medium text-[#1C1C1E] dark:text-white">TXT 阅读流</div>
+                <div className="flex rounded-lg bg-black/5 p-1 dark:bg-white/5">
+                  {(['paged', 'scroll'] as const).map((flow) => (
+                    <button
+                      key={flow}
+                      onClick={() => updateSettings({ txtReadingFlow: flow })}
+                      className={`flex-1 rounded-md py-1.5 text-xs ${settings.txtReadingFlow === flow ? 'bg-white shadow-sm dark:bg-[#3A3A3C]' : 'text-black/50 dark:text-white/50'}`}
+                    >
+                      {flow === 'paged' ? '翻页' : '滚动'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
             
             <div className="space-y-3">
               <div className="flex justify-between items-center text-sm">
@@ -126,10 +157,9 @@ export function SettingsView({
                 onChange={(e) => updateSettings({ fontFamily: e.target.value })}
                 className="w-full bg-black/5 dark:bg-white/5 border border-transparent rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#007AFF] outline-none"
               >
-                <option value="Inter, system-ui, sans-serif">默认 (无衬线)</option>
-                <option value="'PingFang SC', 'Microsoft YaHei', sans-serif">黑体 (PingFang/雅黑)</option>
-                <option value="'Songti SC', 'SimSun', serif">宋体 (Songti/SimSun)</option>
-                <option value="'Kaiti SC', 'KaiTi', serif">楷体 (Kaiti)</option>
+                {READER_FONT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
             </div>
 
@@ -139,7 +169,7 @@ export function SettingsView({
                 <span className="text-gray-500 text-xs">{settings.fontSize}px</span>
               </div>
               <input 
-                type="range" min="12" max="32" step="1"
+                type="range" {...READING_SETTING_LIMITS.fontSize}
                 value={settings.fontSize}
                 onChange={(e) => updateSettings({ fontSize: parseInt(e.target.value) })}
                 className="w-full accent-[#007AFF]"
@@ -152,7 +182,7 @@ export function SettingsView({
                 <span className="text-gray-500 text-xs">{settings.lineHeight}</span>
               </div>
               <input 
-                type="range" min="1" max="2.5" step="0.1"
+                type="range" {...READING_SETTING_LIMITS.lineHeight}
                 value={settings.lineHeight}
                 onChange={(e) => updateSettings({ lineHeight: parseFloat(e.target.value) })}
                 className="w-full accent-[#007AFF]"
@@ -165,11 +195,42 @@ export function SettingsView({
                 <span className="text-gray-500 text-xs">{settings.paragraphSpacing}em</span>
               </div>
               <input 
-                type="range" min="0" max="3" step="0.1"
+                type="range" {...READING_SETTING_LIMITS.paragraphSpacing}
                 value={settings.paragraphSpacing}
                 onChange={(e) => updateSettings({ paragraphSpacing: parseFloat(e.target.value) })}
                 className="w-full accent-[#007AFF]"
               />
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex justify-between items-center text-sm">
+                <span className="font-medium text-[#1C1C1E] dark:text-white">字间距</span>
+                <span className="text-gray-500 text-xs">{settings.letterSpacing}em</span>
+              </div>
+              <input
+                type="range" {...READING_SETTING_LIMITS.letterSpacing}
+                value={settings.letterSpacing}
+                onChange={(e) => updateSettings({ letterSpacing: parseFloat(e.target.value) })}
+                className="w-full accent-[#007AFF]"
+              />
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-sm font-medium text-[#1C1C1E] dark:text-white">页面空白</div>
+              <div className="grid grid-cols-2 gap-3">
+                {(['left', 'right', 'top', 'bottom'] as const).map((side) => (
+                  <label key={side} className="flex items-center gap-2 text-xs text-black/55 dark:text-white/55">
+                    <span className="w-8">{{ left: '左侧', right: '右侧', top: '顶部', bottom: '底部' }[side]}</span>
+                    <input
+                      type="number"
+                      {...READING_SETTING_LIMITS.pageMargin}
+                      value={settings.pageMargins[side]}
+                      onChange={(event) => updateSettings({ pageMargins: { ...settings.pageMargins, [side]: Number(event.target.value) } })}
+                      className="min-w-0 flex-1 rounded-lg bg-black/5 px-2 py-1.5 text-right outline-none dark:bg-white/5"
+                    />
+                  </label>
+                ))}
+              </div>
             </div>
 
           </div>

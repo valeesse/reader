@@ -47,6 +47,11 @@ export function ReadiumReaderViewer({
   const onToggleChromeRef = useRef(onToggleChrome);
   const loadingResolvedRef = useRef(false);
   const lastPreferencesKeyRef = useRef('');
+  const settingsApplyTimerRef = useRef<number | null>(null);
+  const resizeTimerRef = useRef<number | null>(null);
+  const settingsRevisionRef = useRef(0);
+  const layoutQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const suppressResizeUntilRef = useRef(0);
   const lastEmittedProgressRef = useRef(-1);
   const lastSavedLocationRef = useRef('');
   const pendingProgressRef = useRef<ReturnType<typeof createProgressPayload> | null>(null);
@@ -159,7 +164,7 @@ export function ReadiumReaderViewer({
           publication.prefetchAroundHref(publication.readingOrder.items[0]?.href || '', RESOURCE_PREFETCH_RADIUS).catch(() => {});
         }
         const initialPreferences = createReadiumPreferences(settingsRef.current, book.type);
-        lastPreferencesKeyRef.current = preferenceKey(initialPreferences);
+        lastPreferencesKeyRef.current = readerSettingsKey(initialPreferences, settingsRef.current);
         const navigator = new EpubNavigator(
           container,
           publication,
@@ -198,12 +203,10 @@ export function ReadiumReaderViewer({
         );
 
         navigatorRef.current = navigator;
-        forceReadiumLayoutSettings(navigator, settingsRef.current, book.type);
         const loadingFallback = window.setTimeout(() => resolveLoading(true), 1800);
         navigator.load()
           .then(() => {
             if (cancelled) return;
-            forceReadiumLayoutSettings(navigator, settingsRef.current, book.type);
             resolveLoading(false);
           })
           .catch((error) => {
@@ -235,6 +238,8 @@ export function ReadiumReaderViewer({
         window.clearTimeout(progressSaveTimerRef.current);
         progressSaveTimerRef.current = null;
       }
+      if (settingsApplyTimerRef.current !== null) window.clearTimeout(settingsApplyTimerRef.current);
+      if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current);
       flushProgressSave();
       const navigator = navigatorRef.current;
       navigatorRef.current = null;
@@ -247,24 +252,33 @@ export function ReadiumReaderViewer({
   useEffect(() => {
     const navigator = navigatorRef.current;
     if (!navigator) return;
-    let cancelled = false;
-    const before = navigator.currentLocator;
+    const revision = ++settingsRevisionRef.current;
     const preferences = createReadiumPreferences(settings, book.type);
-    const key = preferenceKey(preferences);
+    const key = readerSettingsKey(preferences, settings);
     if (key === lastPreferencesKeyRef.current) return;
-    lastPreferencesKeyRef.current = key;
-    navigator.submitPreferences(new EpubPreferences(preferences)).then(() => {
-      if (cancelled) return;
-      forceReadiumLayoutSettings(navigator, settings, book.type);
-      return navigator.resizeHandler?.();
-    }).then(() => {
-      if (cancelled) return;
-      if (before) navigator.go(before, false, () => {});
-    }).catch((error) => {
-      console.warn('Failed to apply Readium preferences', error);
-    });
+    applyReadiumFrameSettingsToNavigator(navigator, settings, book.type);
+    if (settingsApplyTimerRef.current !== null) window.clearTimeout(settingsApplyTimerRef.current);
+    settingsApplyTimerRef.current = window.setTimeout(() => {
+      settingsApplyTimerRef.current = null;
+      enqueueLayout(async () => {
+        if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
+        const before = navigator.currentLocator;
+        suppressResizeUntilRef.current = performance.now() + 500;
+        await navigator.submitPreferences(new EpubPreferences(preferences));
+        if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
+        await navigator.resizeHandler?.();
+        if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
+        lastPreferencesKeyRef.current = key;
+        applyReadiumFrameSettingsToNavigator(navigator, settings, book.type);
+        if (before) navigator.go(before, false, () => revealReadiumFrames(containerRef.current));
+        else revealReadiumFrames(containerRef.current);
+      });
+    }, 120);
     return () => {
-      cancelled = true;
+      if (settingsApplyTimerRef.current !== null) {
+        window.clearTimeout(settingsApplyTimerRef.current);
+        settingsApplyTimerRef.current = null;
+      }
     };
   }, [settings]);
 
@@ -272,24 +286,37 @@ export function ReadiumReaderViewer({
     const element = containerRef.current;
     const navigator = navigatorRef.current;
     if (!element || !navigator) return;
-    let timer: number | null = null;
     const observer = new ResizeObserver(() => {
-      const before = navigator.currentLocator;
-      if (timer !== null) window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        forceReadiumLayoutSettings(navigator, settingsRef.current, book.type);
-        navigator.resizeHandler?.().then(() => {
-          forceReadiumLayoutSettings(navigator, settingsRef.current, book.type);
-          if (before) navigator.go(before, false, () => {});
-        }).catch(() => {});
-      }, 90);
+      if (settingsApplyTimerRef.current !== null || performance.now() < suppressResizeUntilRef.current) return;
+      if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current);
+      resizeTimerRef.current = window.setTimeout(() => {
+        resizeTimerRef.current = null;
+        enqueueLayout(async () => {
+          if (navigatorRef.current !== navigator) return;
+          const before = navigator.currentLocator;
+          suppressResizeUntilRef.current = performance.now() + 350;
+          await navigator.resizeHandler?.();
+          if (navigatorRef.current !== navigator) return;
+          if (before) navigator.go(before, false, () => revealReadiumFrames(containerRef.current));
+        });
+      }, 140);
     });
     observer.observe(element);
     return () => {
       observer.disconnect();
-      if (timer !== null) window.clearTimeout(timer);
+      if (resizeTimerRef.current !== null) {
+        window.clearTimeout(resizeTimerRef.current);
+        resizeTimerRef.current = null;
+      }
     };
   }, [loading]);
+
+  const enqueueLayout = (operation: () => Promise<void>) => {
+    layoutQueueRef.current = layoutQueueRef.current
+      .catch(() => {})
+      .then(operation)
+      .catch((error) => console.warn('Failed to update Readium layout', error));
+  };
 
   useEffect(() => {
     if (!tocTarget?.href) return;
@@ -396,10 +423,10 @@ export function ReadiumReaderViewer({
       <div
         className="absolute inset-0 box-border"
         style={{
-          paddingLeft: `${settings.pageMargins.left}px`,
-          paddingRight: `${settings.pageMargins.right}px`,
-          paddingTop: `${settings.pageMargins.top}px`,
-          paddingBottom: `${settings.pageMargins.bottom}px`,
+          paddingLeft: `min(${settings.pageMargins.left}px, 35vw)`,
+          paddingRight: `min(${settings.pageMargins.right}px, 35vw)`,
+          paddingTop: `min(${settings.pageMargins.top}px, 30vh)`,
+          paddingBottom: `min(${settings.pageMargins.bottom}px, 30vh)`,
         }}
       >
         <div ref={containerRef} className="readium-container h-full w-full" />
@@ -558,8 +585,8 @@ function themeColors(theme: 'light' | 'dark' | 'sepia') {
   return { background: '#ffffff', text: '#111827' };
 }
 
-function preferenceKey(preferences: Record<string, unknown>) {
-  return JSON.stringify(preferences);
+function readerSettingsKey(preferences: Record<string, unknown>, settings: AppSettings) {
+  return JSON.stringify({ preferences, pageMargins: settings.pageMargins });
 }
 
 function createProgressPayload(bookId: string, location: string) {
@@ -570,29 +597,10 @@ function createProgressPayload(bookId: string, location: string) {
   };
 }
 
-function forceReadiumLayoutSettings(navigator: EpubNavigator, settings: AppSettings, bookType: 'epub' | 'txt') {
-  const scrolling = isScrollingTxt(bookType, settings);
-  const columns = scrolling ? null : settings.pageMode === 'double' ? 2 : 1;
-  const centerGap = readiumCenterGap(settings);
+function applyReadiumFrameSettingsToNavigator(navigator: EpubNavigator, settings: AppSettings, bookType: 'epub' | 'txt') {
   const internal = navigator as EpubNavigator & {
-    _css?: {
-      userProperties?: { colCount?: number | null };
-      rsProperties?: { colCount?: number | null; colGap?: number | null; pageGutter?: number | null };
-    };
     _cframes?: Array<{ iframe?: HTMLIFrameElement; window?: Window } | undefined>;
-    pool?: { setPerPage?: (columns: number | null) => void };
   };
-
-  if (internal._css?.userProperties) {
-    internal._css.userProperties.colCount = columns;
-  }
-  if (internal._css?.rsProperties) {
-    internal._css.rsProperties.colCount = columns;
-    internal._css.rsProperties.colGap = centerGap;
-    internal._css.rsProperties.pageGutter = 0;
-  }
-  internal.pool?.setPerPage?.(columns);
-
   for (const frame of internal._cframes || []) {
     if (!frame) continue;
     const doc = frame.iframe?.contentDocument || frame.window?.document;
@@ -602,23 +610,26 @@ function forceReadiumLayoutSettings(navigator: EpubNavigator, settings: AppSetti
 
 function applyReadiumFrameSettings(doc: Document, settings: AppSettings, bookType: 'epub' | 'txt') {
   const root = doc.documentElement;
+  const colors = themeColors(settings.theme);
+  root.style.setProperty('--USER__backgroundColor', colors.background);
+  root.style.setProperty('--USER__textColor', colors.text);
+  root.style.setProperty('--USER__fontFamily', settings.fontFamily);
+  root.style.setProperty('--USER__fontSize', String(settings.fontSize / 18));
+  root.style.setProperty('--USER__lineHeight', String(settings.lineHeight));
+  root.style.setProperty('--USER__paraSpacing', `${settings.paragraphSpacing}em`);
+  root.style.setProperty('--USER__letterSpacing', `${settings.letterSpacing}em`);
   if (isScrollingTxt(bookType, settings)) {
     root.style.removeProperty('--USER__colCount');
     root.style.removeProperty('--RS__colCount');
     root.style.removeProperty('--RS__colGap');
-    return;
+  } else {
+    const columns = settings.pageMode === 'double' ? 2 : 1;
+    root.style.setProperty('--USER__colCount', String(columns));
+    root.style.setProperty('--RS__colCount', String(columns));
+    root.style.setProperty('--RS__colGap', `${readiumCenterGap(settings)}px`);
   }
-  const columns = settings.pageMode === 'double' ? 2 : 1;
-  const centerGap = readiumCenterGap(settings);
-  root.style.setProperty('--USER__colCount', String(columns));
-  root.style.setProperty('--RS__colCount', String(columns));
-  root.style.setProperty('--RS__colGap', `${centerGap}px`);
   root.style.removeProperty('--RS__colWidth');
   root.style.setProperty('--RS__pageGutter', '0px');
-  root.style.setProperty('--ZENITH__pageMarginTop', '0px');
-  root.style.setProperty('--ZENITH__pageMarginRight', '0px');
-  root.style.setProperty('--ZENITH__pageMarginBottom', '0px');
-  root.style.setProperty('--ZENITH__pageMarginLeft', '0px');
   root.style.setProperty('--RS__scrollPaddingTop', '0px');
   root.style.setProperty('--RS__scrollPaddingRight', '0px');
   root.style.setProperty('--RS__scrollPaddingBottom', '0px');

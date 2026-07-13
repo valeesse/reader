@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Book, ReaderSeekRequest, ReaderTocItem } from './types';
 import { useAppContext } from './store/AppStore';
 import { ArrowLeftRight, ArrowUpDown, BookOpen, ChevronLeft, Columns2, List, Monitor, Moon, Settings2, StepForward, Sun } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ReadiumReaderViewer } from './ReadiumReaderViewer';
+import { READER_FONT_OPTIONS, READING_SETTING_LIMITS } from './lib/readingSettings';
 
 interface ReaderLayoutProps {
   book: Book;
@@ -250,19 +251,18 @@ export function ReaderLayout({ book, onClose, onOpenBook }: ReaderLayoutProps) {
                   onChange={(event) => updateSettings({ fontFamily: event.target.value })}
                   className="w-full h-10 rounded-[5px] bg-black/4 dark:bg-white/8 border border-black/[0.03] dark:border-white/[0.04] px-3 text-sm outline-none focus:ring-2 focus:ring-[#007AFF]"
                 >
-                  <option value="Inter, system-ui, sans-serif">默认无衬线</option>
-                  <option value="'PingFang SC', 'Microsoft YaHei', sans-serif">黑体</option>
-                  <option value="'Songti SC', 'SimSun', serif">宋体</option>
-                  <option value="'Kaiti SC', 'KaiTi', serif">楷体</option>
+                  {READER_FONT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
                 </select>
               </div>
 
               <div className="space-y-3">
                 <PanelLabel>排版</PanelLabel>
-                <SliderRow label="文字大小" value={settings.fontSize} min={12} max={36} step={1} unit="px" onChange={(value) => updateSettings({ fontSize: value })} />
-                <SliderRow label="段间距" value={settings.paragraphSpacing} min={0} max={3.5} step={0.1} unit="em" onChange={(value) => updateSettings({ paragraphSpacing: value })} />
-                <SliderRow label="行间距" value={settings.lineHeight} min={1} max={2.8} step={0.1} onChange={(value) => updateSettings({ lineHeight: value })} />
-                <SliderRow label="字间距" value={settings.letterSpacing} min={0} max={0.25} step={0.01} unit="em" onChange={(value) => updateSettings({ letterSpacing: value })} />
+                <SliderRow label="文字大小" value={settings.fontSize} {...READING_SETTING_LIMITS.fontSize} unit="px" onChange={(value) => updateSettings({ fontSize: value })} />
+                <SliderRow label="段间距" value={settings.paragraphSpacing} {...READING_SETTING_LIMITS.paragraphSpacing} unit="em" onChange={(value) => updateSettings({ paragraphSpacing: value })} />
+                <SliderRow label="行间距" value={settings.lineHeight} {...READING_SETTING_LIMITS.lineHeight} onChange={(value) => updateSettings({ lineHeight: value })} />
+                <SliderRow label="字间距" value={settings.letterSpacing} {...READING_SETTING_LIMITS.letterSpacing} unit="em" onChange={(value) => updateSettings({ letterSpacing: value })} />
               </div>
 
               <div className="space-y-3">
@@ -377,6 +377,31 @@ function SliderRow({
   unit?: string,
   onChange: (value: number) => void,
 }) {
+  const [draft, setDraft] = useState(value);
+  const commitTimerRef = useRef<number | null>(null);
+
+  useEffect(() => setDraft(value), [value]);
+  useEffect(() => () => {
+    if (commitTimerRef.current !== null) window.clearTimeout(commitTimerRef.current);
+  }, []);
+
+  const scheduleCommit = (next: number) => {
+    setDraft(next);
+    if (commitTimerRef.current !== null) window.clearTimeout(commitTimerRef.current);
+    commitTimerRef.current = window.setTimeout(() => {
+      commitTimerRef.current = null;
+      onChange(next);
+    }, 90);
+  };
+
+  const commitNow = () => {
+    if (commitTimerRef.current !== null) {
+      window.clearTimeout(commitTimerRef.current);
+      commitTimerRef.current = null;
+    }
+    if (draft !== value) onChange(draft);
+  };
+
   return (
     <label className="flex items-center gap-3 rounded-[5px] bg-black/4 dark:bg-white/8 border border-black/[0.03] dark:border-white/[0.04] px-3 py-2">
       <span className="w-14 text-xs font-medium text-black/55 dark:text-white/55">{label}</span>
@@ -385,12 +410,14 @@ function SliderRow({
         min={min}
         max={max}
         step={step}
-        value={value}
-        onChange={(event) => onChange(parseFloat(event.target.value))}
+        value={draft}
+        onChange={(event) => scheduleCommit(parseFloat(event.target.value))}
+        onPointerUp={commitNow}
+        onKeyUp={commitNow}
         className="min-w-0 flex-1 accent-[#007AFF]"
       />
       <span className="w-12 text-right text-xs tabular-nums text-black/45 dark:text-white/45">
-        {Number.isInteger(value) ? value : value.toFixed(step < 0.1 ? 2 : 1)}{unit}
+        {Number.isInteger(draft) ? draft : draft.toFixed(step < 0.1 ? 2 : 1)}{unit}
       </span>
     </label>
   );
@@ -405,16 +432,29 @@ function MarginInput({
   value: number,
   onChange: (value: number) => void,
 }) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+
+  const commit = () => {
+    const parsed = Number(draft);
+    if (Number.isFinite(parsed)) onChange(parsed);
+    else setDraft(String(value));
+  };
+
   return (
     <label className="flex items-center gap-2 rounded-[5px] bg-black/4 dark:bg-white/8 border border-black/[0.03] dark:border-white/[0.04] px-3 py-2">
       <span className="w-9 text-xs font-medium text-black/55 dark:text-white/55">{label}</span>
       <input
         type="number"
-        min={0}
-        max={160}
-        step={2}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
+        min={READING_SETTING_LIMITS.pageMargin.min}
+        max={READING_SETTING_LIMITS.pageMargin.max}
+        step={READING_SETTING_LIMITS.pageMargin.step}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur();
+        }}
         className="min-w-0 flex-1 bg-transparent text-right text-sm outline-none"
       />
       <span className="text-xs text-black/35 dark:text-white/35">px</span>

@@ -14,6 +14,7 @@ import {
   saveStartupSnapshot,
   ProgressSavedDetail,
 } from '../lib/storage';
+import { normalizeSettings } from '../lib/readingSettings';
 
 interface AppContextType {
   books: Book[];
@@ -47,7 +48,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [books, setBooks] = useState<Book[]>(() => startupSnapshot?.books || []);
   const [series, setSeries] = useState<Series[]>(() => startupSnapshot?.series || []);
   const [progress, setProgress] = useState<ReadingProgress[]>([]);
-  const [settings, setSettingsState] = useState<AppSettings>(() => startupSnapshot?.settings || defaultSettings);
+  const [settings, setSettingsState] = useState<AppSettings>(() => normalizeSettings(startupSnapshot?.settings || defaultSettings));
   const [lastReadBookId, setLastReadBookId] = useState<string | undefined>(() => startupSnapshot?.lastReadBookId);
   const [isLoading, setIsLoading] = useState(!startupSnapshot);
   const settingsRef = useRef(settings);
@@ -66,13 +67,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ]);
     setBooks(loadedBooks);
     setSeries(loadedSeries);
-    settingsRef.current = loadedSettings;
-    setSettingsState(loadedSettings);
+    const normalizedSettings = normalizeSettings(loadedSettings);
+    settingsRef.current = normalizedSettings;
+    setSettingsState(normalizedSettings);
     setLastReadBookId(loadedLastReadBookId);
     saveStartupSnapshot({
       books: loadedBooks,
       series: loadedSeries,
-      settings: loadedSettings,
+      settings: normalizedSettings,
       lastReadBookId: loadedLastReadBookId,
     });
     setIsLoading(false);
@@ -239,7 +241,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const updateSettings = async (newSettings: Partial<AppSettings>) => {
-    const updated = { ...settingsRef.current, ...newSettings };
+    const updated = normalizeSettings({ ...settingsRef.current, ...newSettings });
     settingsRef.current = updated;
     setSettingsState(updated);
     scheduleSettingsSave(updated);
