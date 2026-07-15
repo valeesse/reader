@@ -14,8 +14,7 @@ import {
   saveStartupSnapshot,
   ProgressSavedDetail,
 } from '../lib/storage';
-import { normalizeSettings, pageModeForViewport } from '../lib/readingSettings';
-import { identifyLocalBooks } from '../lib/native';
+import { normalizeSettings } from '../lib/readingSettings';
 
 interface AppContextType {
   books: Book[];
@@ -34,6 +33,7 @@ interface AppContextType {
   updateSettings: (settings: Partial<AppSettings>) => Promise<void>;
   lastReadBookId?: string;
   isLoading: boolean;
+  stateReconciled: boolean;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -52,6 +52,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [settings, setSettingsState] = useState<AppSettings>(() => normalizeSettings(startupSnapshot?.settings || defaultSettings));
   const [lastReadBookId, setLastReadBookId] = useState<string | undefined>(() => startupSnapshot?.lastReadBookId);
   const [isLoading, setIsLoading] = useState(!startupSnapshot);
+  const [stateReconciled, setStateReconciled] = useState(false);
   const settingsRef = useRef(settings);
   const pendingSettingsSaveRef = useRef<AppSettings | null>(null);
   const settingsSaveTimerRef = useRef<number | undefined>(undefined);
@@ -60,31 +61,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!startupSnapshot) {
       setIsLoading(true);
     }
-    const [storedBooks, loadedSeries, loadedSettings, loadedLastReadBookId] = await Promise.all([
-      getBooks(),
-      getSeries(),
-      getSettings(),
-      getLastReadBookId(),
-    ]);
-    const loadedBooks = await hydrateBookIdentities(storedBooks);
-    setBooks(loadedBooks);
-    setSeries(loadedSeries);
-    const normalizedSettings = normalizeSettings(loadedSettings);
-    settingsRef.current = normalizedSettings;
-    setSettingsState(normalizedSettings);
-    setLastReadBookId(loadedLastReadBookId);
-    saveStartupSnapshot({
-      books: loadedBooks,
-      series: loadedSeries,
-      settings: normalizedSettings,
-      lastReadBookId: loadedLastReadBookId,
-    });
-    setIsLoading(false);
-    loadProgressInIdle();
+    try {
+      const [storedBooks, loadedSeries, loadedSettings, loadedLastReadBookId] = await Promise.all([
+        getBooks(),
+        getSeries(),
+        getSettings(),
+        getLastReadBookId(),
+      ]);
+      const loadedBooks = storedBooks;
+      setBooks(loadedBooks);
+      setSeries(loadedSeries);
+      const normalizedSettings = normalizeSettings(loadedSettings);
+      settingsRef.current = normalizedSettings;
+      setSettingsState(normalizedSettings);
+      // A book may have been opened while this refresh was reading IDB. Never
+      // let an older empty result erase the synchronous resume marker.
+      const effectiveLastReadBookId = loadedLastReadBookId || getStartupSnapshotSync()?.lastReadBookId;
+      setLastReadBookId(effectiveLastReadBookId);
+      saveStartupSnapshot({
+        books: loadedBooks,
+        series: loadedSeries,
+        settings: normalizedSettings,
+        lastReadBookId: effectiveLastReadBookId,
+      });
+      loadProgressInIdle();
+    } catch (error) {
+      console.warn('Failed to reconcile persisted application state', error);
+    } finally {
+      setStateReconciled(true);
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
-    if (!startupSnapshot) {
+    if (!startupSnapshot || !startupSnapshot.lastReadBookId) {
       void reloadState();
       return;
     }
@@ -147,23 +157,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const addBooks = async (incomingBooks: Book[]) => {
-    const merged = new Map(books.map((book) => [bookIdentity(book), book]));
-    for (const book of incomingBooks) {
-      const key = bookIdentity(book);
-      const existingBook = merged.get(key);
-      const keepExistingLocation = existingBook?.source === 'managed' && book.source !== 'managed';
-      merged.set(key, {
-        ...(keepExistingLocation ? book : existingBook),
-        ...(keepExistingLocation ? existingBook : book),
-        id: existingBook?.id || book.id,
+    const existingById = new Map(books.map((book) => [book.resourceId, book]));
+    const newBooks = incomingBooks.map((book) => {
+      const existingBook = existingById.get(book.resourceId);
+      return {
+        ...existingBook,
+        ...book,
+        id: book.resourceId,
         seriesId: existingBook?.seriesId,
         addedAt: existingBook?.addedAt ?? book.addedAt,
         cover: book.cover ?? existingBook?.cover,
         seriesName: book.seriesName ?? existingBook?.seriesName,
         seriesIndex: book.seriesIndex ?? existingBook?.seriesIndex,
-      });
-    }
-    const newBooks = Array.from(merged.values()).sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN'));
+      };
+    }).sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN'));
     const { books: booksWithSeries, series: nextSeries } = createMetadataSeries(newBooks, series);
     setBooks(booksWithSeries.map(stripBookCover));
     setSeries(nextSeries);
@@ -252,22 +259,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const updateSettings = async (newSettings: Partial<AppSettings>) => {
-    const leavesContinuousScroll = settingsRef.current.pageTurnAnimation === 'scroll'
-      && newSettings.pageTurnAnimation !== undefined
-      && newSettings.pageTurnAnimation !== 'scroll';
-    const nextSettings = newSettings.pageTurnAnimation === 'scroll'
-      ? { ...newSettings, pageMode: 'single' as const }
-      : leavesContinuousScroll
-        ? {
-            ...newSettings,
-            pageMode: pageModeForViewport(
-              window.innerWidth,
-              window.innerHeight,
-              settingsRef.current.pageMargins,
-            ),
-          }
-        : newSettings;
-    const updated = normalizeSettings({ ...settingsRef.current, ...nextSettings });
+    // Merge both fields from the same synchronous ref so the atomic
+    // { pageTurnAnimation: 'scroll', pageMode: 'single' } update cannot be
+    // overwritten by another setting click from the same render.
+    const updated = normalizeSettings({ ...settingsRef.current, ...newSettings });
     if (JSON.stringify(updated) === JSON.stringify(settingsRef.current)) return;
     settingsRef.current = updated;
     setSettingsState(updated);
@@ -275,32 +270,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AppContext.Provider value={{ books, series, progress, settings, addBook, addBooks, createSeries, updateSeries, deleteSeries, autoCreateMetadataSeries, mergeSeries, reloadState, refreshProgress, updateSettings, lastReadBookId, isLoading }}>
+    <AppContext.Provider value={{ books, series, progress, settings, addBook, addBooks, createSeries, updateSeries, deleteSeries, autoCreateMetadataSeries, mergeSeries, reloadState, refreshProgress, updateSettings, lastReadBookId, isLoading, stateReconciled }}>
       {children}
     </AppContext.Provider>
   );
-}
-
-async function hydrateBookIdentities(books: Book[]) {
-  const missing = books.filter((book) => !book.fingerprint && book.path);
-  if (missing.length === 0) return books;
-  try {
-    const identities = await identifyLocalBooks(missing.map((book) => book.path));
-    const byPath = new Map(identities.map((identity) => [identity.path, identity]));
-    const hydrated = books.map((book) => {
-      const identity = byPath.get(book.path);
-      return identity ? { ...book, ...identity, source: book.source || 'external' as const } : book;
-    });
-    if (identities.length > 0) await saveBooks(hydrated);
-    return hydrated;
-  } catch (error) {
-    console.warn('Failed to migrate local book identities', error);
-    return books;
-  }
-}
-
-function bookIdentity(book: Book) {
-  return book.fingerprint || `path:${book.path}`;
 }
 
 function createMetadataSeries(books: Book[], existingSeries: Series[]) {
@@ -330,10 +303,11 @@ function createMetadataSeries(books: Book[], existingSeries: Series[]) {
   const groupedBookIds = new Set(
     Array.from(grouped.values()).flatMap((items) => items.map(({ book }) => book.id)),
   );
+  const availableBookIds = new Set(books.map((book) => book.id));
   const nextSeries = existingSeries
     .map((item) => ({
       ...item,
-      bookIds: item.bookIds.filter((bookId) => !groupedBookIds.has(bookId)),
+      bookIds: item.bookIds.filter((bookId) => availableBookIds.has(bookId) && !groupedBookIds.has(bookId)),
     }))
     .filter((item) => item.bookIds.length > 0);
   const seriesByName = new Map(nextSeries.map((item) => [item.name.trim().toLocaleLowerCase(), { ...item }]));

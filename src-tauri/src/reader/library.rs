@@ -1,210 +1,139 @@
-#[tauri::command]
-async fn scan_library(app: AppHandle, path: String) -> Result<Vec<NativeBook>, String> {
-    tauri::async_runtime::spawn_blocking(move || scan_library_blocking(app, PathBuf::from(path)))
-        .await
-        .map_err(|err| format!("扫描任务中断: {err}"))?
+const LIBRARY_CONFIG_FILE: &str = "library-config-v1.json";
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryConfig {
+    root: String,
 }
 
-fn scan_library_blocking(app: AppHandle, root: PathBuf) -> Result<Vec<NativeBook>, String> {
-    if !root.exists() || !root.is_dir() {
-        return Err("路径不存在或不是文件夹".into());
+#[tauri::command]
+fn get_library_root(app: AppHandle) -> Result<Option<String>, String> {
+    let path = library_config_path(&app)?;
+    match fs::read(path) {
+        Ok(bytes) => serde_json::from_slice::<LibraryConfig>(&bytes)
+            .map(|config| Some(config.root))
+            .map_err(|error| format!("读取书库配置失败: {error}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("读取书库配置失败: {error}")),
     }
+}
 
-    let mut visited = 0usize;
-    let mut matched = 0usize;
-    let mut books = Vec::new();
-
-    for entry in WalkDir::new(root)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(Result::ok)
-    {
-        visited += 1;
-        if !entry.file_type().is_file() {
-            if visited.is_multiple_of(500) {
-                emit_scan_progress(&app, visited, matched, entry.path());
-            }
-            continue;
-        }
-
-        let path = entry.path();
-        let ext = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        if ext != "epub" && ext != "txt" {
-            if visited.is_multiple_of(500) {
-                emit_scan_progress(&app, visited, matched, path);
-            }
-            continue;
-        }
-
-        matched += 1;
-        emit_scan_progress(&app, visited, matched, path);
-
-        books.push(native_book_from_path(&app, path, &ext, "external")?);
+#[tauri::command]
+fn set_library_root(
+    app: AppHandle,
+    state: tauri::State<'_, ReaderState>,
+    root: String,
+) -> Result<(), String> {
+    let root = fs::canonicalize(root).map_err(|error| format!("书库根目录无效: {error}"))?;
+    if !root.is_dir() {
+        return Err("书库根目录不是文件夹".into());
     }
-
-    books.sort_by(|a, b| a.title.cmp(&b.title));
-    let _ = app.emit(
-        "library-scan://complete",
-        ScanProgress {
-            visited,
-            matched,
-            current_path: String::new(),
-        },
-    );
-    Ok(books)
+    let state_dir = library_state_dir(&app)?;
+    let registry = reader_core::LibraryRegistry::open(&root, &state_dir)
+        .map_err(|error| format!("初始化书库失败: {error}"))?;
+    let reader = Arc::new(reader_core::ReaderService::new(
+        registry,
+        &state_dir,
+        app.path().app_cache_dir().map_err(|error| error.to_string())?.join("reader-core"),
+    ).map_err(|error| format!("初始化阅读服务失败: {error}"))?);
+    let config = LibraryConfig {
+        root: root.to_string_lossy().to_string(),
+    };
+    write_atomic(
+        &library_config_path(&app)?,
+        &serde_json::to_vec(&config).map_err(|error| error.to_string())?,
+    )?;
+    *state.reader.lock().map_err(|_| "阅读服务被占用".to_string())? = Some(reader);
+    Ok(())
 }
 
 #[tauri::command]
-async fn import_managed_books(app: AppHandle, paths: Vec<String>) -> Result<Vec<NativeBook>, String> {
-    tauri::async_runtime::spawn_blocking(move || import_managed_books_blocking(&app, paths))
-        .await
-        .map_err(|error| format!("导入任务中断: {error}"))?
-}
-
-#[tauri::command]
-async fn identify_local_books(paths: Vec<String>) -> Result<Vec<BookIdentity>, String> {
+async fn scan_library(app: AppHandle) -> Result<Vec<NativeBook>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        paths
-            .into_iter()
-            .filter_map(|path| {
-                let source = PathBuf::from(&path);
-                if supported_book_extension(&source).is_err() || !source.is_file() {
-                    return None;
-                }
-                let fingerprint = book_fingerprint(&source).ok()?;
-                Some(BookIdentity {
-                    path: path.clone(),
-                    local_resource_id: fingerprint.clone(),
-                    fingerprint,
-                })
+        let state = app.state::<ReaderState>();
+        let reader = reader_service(&state)?;
+        let books = reader
+            .scan(|progress| {
+                let _ = app.emit(
+                    "library-scan://progress",
+                    ScanProgress {
+                        visited: progress.visited,
+                        matched: progress.matched,
+                        current_path: progress.current_relative_path,
+                    },
+                );
             })
-            .collect::<Vec<_>>()
-    })
-    .await
-    .map_err(|error| format!("书籍身份迁移中断: {error}"))
+            .map_err(|error| format!("扫描书库失败: {error}"))?;
+        Ok(books.into_iter().map(native_book_from_core).collect())
+    }).await.map_err(|error| format!("扫描任务中断: {error}"))?
 }
 
-fn import_managed_books_blocking(app: &AppHandle, paths: Vec<String>) -> Result<Vec<NativeBook>, String> {
-    let library_dir = app
+#[tauri::command]
+fn reader_books(state: tauri::State<'_, ReaderState>) -> Result<Vec<NativeBook>, String> {
+    Ok(reader_service(&state)?
+        .books()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(native_book_from_core)
+        .collect())
+}
+
+#[tauri::command]
+async fn reader_cover(
+    state: tauri::State<'_, ReaderState>,
+    resource_id: String,
+) -> Result<String, String> {
+    let reader = reader_service(&state)?;
+    tauri::async_runtime::spawn_blocking(move || reader.cover(&resource_id))
+        .await
+        .map_err(|error| format!("封面加载任务中断: {error}"))?
+        .map(|cover| cover.path.to_string_lossy().into_owned())
+        .map_err(|error| error.to_string())
+}
+
+fn native_book_from_core(book: reader_core::Book) -> NativeBook {
+    NativeBook {
+        id: book.id,
+        title: book.title,
+        author: book.author,
+        cover: book.cover,
+        book_type: book.book_type,
+        resource_id: book.resource_id,
+        file_name: book.file_name,
+        series_name: book.series_name,
+        series_index: book.series_index,
+        added_at: book.modified_at,
+    }
+}
+
+fn initialize_library(app: &AppHandle, state: &ReaderState) -> Result<(), String> {
+    let Some(root) = get_library_root(app.clone())? else {
+        return Ok(());
+    };
+    let state_dir = library_state_dir(app)?;
+    let registry = reader_core::LibraryRegistry::open(root, &state_dir)
+        .map_err(|error| format!("初始化书库失败: {error}"))?;
+    let reader = Arc::new(reader_core::ReaderService::new(
+        registry,
+        &state_dir,
+        app.path().app_cache_dir().map_err(|error| error.to_string())?.join("reader-core"),
+    ).map_err(|error| format!("初始化阅读服务失败: {error}"))?);
+    *state.reader.lock().map_err(|_| "阅读服务被占用".to_string())? = Some(reader);
+    Ok(())
+}
+
+fn library_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    fs::create_dir_all(&dir).map_err(|error| format!("创建应用数据目录失败: {error}"))?;
+    Ok(dir.join(LIBRARY_CONFIG_FILE))
+}
+
+fn library_state_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?
-        .join("books");
-    fs::create_dir_all(&library_dir).map_err(|error| format!("创建托管书库失败: {error}"))?;
-    let mut books = Vec::new();
-    for source_value in paths {
-        let source = PathBuf::from(source_value);
-        if !source.is_file() {
-            return Err("导入源不是有效文件".to_string());
-        }
-        let extension = supported_book_extension(&source)?;
-        let fingerprint = book_fingerprint(&source)?;
-        let fingerprint_key = fingerprint.trim_start_matches("sha256:");
-        let target = library_dir.join(format!("{fingerprint_key}.{extension}"));
-        if !target.is_file() {
-            let temp = temporary_sibling_path(&target);
-            fs::copy(&source, &temp).map_err(|error| format!("复制书籍失败: {error}"))?;
-            replace_file_atomically(&temp, &target)?;
-        }
-        books.push(native_book_from_path_with_fingerprint(
-            app,
-            &target,
-            &source,
-            &extension,
-            "managed",
-            fingerprint,
-        )?);
-    }
-    Ok(books)
-}
-
-fn supported_book_extension(path: &Path) -> Result<String, String> {
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if matches!(extension.as_str(), "epub" | "txt") {
-        Ok(extension)
-    } else {
-        Err("仅支持 EPUB 和 TXT 文件".to_string())
-    }
-}
-
-fn native_book_from_path(
-    app: &AppHandle,
-    path: &Path,
-    extension: &str,
-    source: &str,
-) -> Result<NativeBook, String> {
-    native_book_from_path_with_fingerprint(
-        app,
-        path,
-        path,
-        extension,
-        source,
-        book_fingerprint(path)?,
-    )
-}
-
-fn native_book_from_path_with_fingerprint(
-    app: &AppHandle,
-    path: &Path,
-    metadata_path: &Path,
-    extension: &str,
-    source: &str,
-    fingerprint: String,
-) -> Result<NativeBook, String> {
-    let id = stable_book_id(path);
-    let (title, author, cover, series_name, series_index) = if extension == "epub" {
-        parse_epub_metadata(app, path, &id).unwrap_or_else(|_| {
-            let (title, author) = parse_filename_metadata(metadata_path);
-            (title, author, None, None, None)
-        })
-    } else {
-        let (title, author) = parse_filename_metadata(metadata_path);
-        (title, author, None, None, None)
-    };
-    let path_value = path.to_string_lossy().to_string();
-    Ok(NativeBook {
-        id,
-        title,
-        author,
-        cover,
-        book_type: extension.to_string(),
-        path: path_value.clone(),
-        local_resource_id: fingerprint.clone(),
-        fingerprint,
-        file_name: metadata_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default()
-            .to_string(),
-        series_name,
-        series_index,
-        added_at: now_millis(),
-        source: source.to_string(),
-    })
-}
-
-fn emit_scan_progress(app: &AppHandle, visited: usize, matched: usize, path: &Path) {
-    let _ = app.emit(
-        "library-scan://progress",
-        ScanProgress {
-            visited,
-            matched,
-            current_path: path.to_string_lossy().to_string(),
-        },
-    );
-}
-
-impl ReaderState {
-    fn new_session_id(&self, prefix: &str) -> String {
-        let id = self.next_session_id.fetch_add(1, Ordering::Relaxed);
-        format!("{prefix}-{}-{id}", now_millis_u128())
-    }
+        .join("library-state");
+    fs::create_dir_all(&dir).map_err(|error| format!("创建书库状态目录失败: {error}"))?;
+    Ok(dir)
 }

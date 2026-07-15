@@ -21,7 +21,7 @@ export function createReaderLayoutKey(
     height: Math.round(viewport.height),
     devicePixelRatio: Math.round(viewport.devicePixelRatio * 100) / 100,
     pageMode: settings.pageMode,
-    pageTurnAnimation: settings.pageTurnAnimation,
+    continuousScroll: settings.pageTurnAnimation === 'scroll',
     fontFamily: settings.fontFamily,
     fontSize: settings.fontSize,
     lineHeight: settings.lineHeight,
@@ -35,7 +35,7 @@ export function createReaderLayoutKey(
 export function createReaderSettingsLayoutFingerprint(settings: AppSettings, bookType: 'epub' | 'txt') {
   return JSON.stringify({
     pageMode: settings.pageMode,
-    pageTurnAnimation: settings.pageTurnAnimation,
+    continuousScroll: settings.pageTurnAnimation === 'scroll',
     fontFamily: settings.fontFamily,
     fontSize: settings.fontSize,
     lineHeight: settings.lineHeight,
@@ -47,7 +47,9 @@ export function createReaderSettingsLayoutFingerprint(settings: AppSettings, boo
 
 export class ReaderLayoutCache {
   private ready = new Map<string, number>();
-  private pending = new Map<string, Promise<void>>();
+  private pending = new Map<string, { generation: number; keyGeneration: number; promise: Promise<void> }>();
+  private generation = 0;
+  private keyGenerations = new Map<string, number>();
 
   constructor(private maxEntries = 3) {}
 
@@ -58,12 +60,16 @@ export class ReaderLayoutCache {
     return hit;
   }
 
-  prepare(key: string, task: () => Promise<void>) {
+  prepare(key: string, task: () => Promise<boolean | void>) {
     if (this.isReady(key)) return Promise.resolve();
     const existing = this.pending.get(key);
-    if (existing) return existing;
+    const generation = this.generation;
+    const keyGeneration = this.keyGenerations.get(key) || 0;
+    if (existing?.generation === generation && existing.keyGeneration === keyGeneration) return existing.promise;
     const started = performance.now();
-    const pending = task().then(() => {
+    const pending = task().then((completed) => {
+      if (completed === false) return;
+      if (generation !== this.generation || keyGeneration !== (this.keyGenerations.get(key) || 0)) return;
       this.ready.set(key, performance.now());
       this.trim();
       recordReaderMetric({
@@ -71,14 +77,24 @@ export class ReaderLayoutCache {
         name: 'readium-frame',
         durationMs: performance.now() - started,
       });
-    }).finally(() => this.pending.delete(key));
-    this.pending.set(key, pending);
+    }).finally(() => {
+      if (this.pending.get(key)?.promise === pending) this.pending.delete(key);
+    });
+    this.pending.set(key, { generation, keyGeneration, promise: pending });
     return pending;
   }
 
+  delete(key: string) {
+    this.ready.delete(key);
+    this.keyGenerations.set(key, (this.keyGenerations.get(key) || 0) + 1);
+    this.pending.delete(key);
+  }
+
   invalidate() {
+    this.generation += 1;
     this.ready.clear();
     this.pending.clear();
+    this.keyGenerations.clear();
   }
 
   private touch(key: string) {

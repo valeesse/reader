@@ -2,6 +2,7 @@ import React from 'react';
 import { Book as BookIcon, Cloud, Settings as SettingsIcon, BookOpen, Layers } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useAppContext } from '../store/AppStore';
+import { runtimeCapabilities } from '../lib/backend';
 
 interface SidebarProps {
   currentView: 'library' | 'webdav' | 'series' | 'settings';
@@ -25,7 +26,7 @@ export function Sidebar({ currentView, onChangeView }: SidebarProps) {
         <div className="text-[11px] font-semibold text-black/40 dark:text-white/40 px-3 pb-1 uppercase tracking-wider">
           书库
         </div>
-        <button
+        {runtimeCapabilities.webDav && <button
           onClick={() => onChangeView('library')}
           className={cn(
             "w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg font-medium transition-colors",
@@ -40,7 +41,7 @@ export function Sidebar({ currentView, onChangeView }: SidebarProps) {
             "ml-auto py-0.5 px-2 rounded-full text-xs font-mono",
             currentView === 'library' ? "bg-black/20" : "bg-black/5 dark:bg-white/10"
           )}>{books.length}</span>
-        </button>
+        </button>}
 
         <button
           onClick={() => onChangeView('webdav')}

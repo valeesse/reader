@@ -1,0 +1,14 @@
+services:
+  zenith-reader:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./books:/data/books:ro
+      - zenith-state:/data/state
+      - zenith-cache:/data/cache
+    restart: unless-stopped
+
+volumes:
+  zenith-state:
+  zenith-cache:

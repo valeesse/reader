@@ -1,20 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { useAppContext } from '../store/AppStore';
-import { Cloud, Check, Database, DownloadCloud, LoaderCircle, Moon, Plus, Sun, Monitor, Folder, Trash2, UploadCloud } from 'lucide-react';
+import { Cloud, Check, Database, DownloadCloud, LoaderCircle, Moon, Sun, Monitor, Folder, Trash2, UploadCloud } from 'lucide-react';
 import { motion } from 'motion/react';
 import { applySyncSnapshot, createSyncSnapshot } from '../lib/storage';
 import { clearReaderCache, downloadWebDavSnapshot, getReaderCacheStats, ReaderCacheStats, uploadWebDavSnapshot } from '../lib/native';
 import { SyncSnapshot } from '../types';
 import { READER_FONT_OPTIONS, READING_SETTING_LIMITS } from '../lib/readingSettings';
+import { runtimeCapabilities } from '../lib/backend';
 
 export function SettingsView({
-  onAddFiles,
-  onImportFiles,
+  onRescan,
+  onChangeLibraryRoot,
   scanMessage,
   isScanning,
 }: {
-  onAddFiles: () => Promise<void>,
-  onImportFiles: () => Promise<void>,
+  onRescan: () => Promise<void>,
+  onChangeLibraryRoot: () => Promise<void>,
   scanMessage?: string,
   isScanning?: boolean,
 }) {
@@ -98,26 +99,28 @@ export function SettingsView({
                   <Folder className="w-5 h-5" />
                 </div>
                 <div>
-                  <h4 className="font-medium text-sm text-[#1C1C1E] dark:text-white">本地书库</h4>
-                  <p className="text-xs text-black/50 dark:text-white/50">扫描外部目录，或复制文件到应用托管书库</p>
+                  <h4 className="font-medium text-sm text-[#1C1C1E] dark:text-white">{runtimeCapabilities.libraryRootMutable ? '本地书库' : '服务器书库'}</h4>
+                  <p className="text-xs text-black/50 dark:text-white/50">{runtimeCapabilities.libraryRootMutable ? '选择书库目录并重新建立索引' : '目录由服务器固定配置，可重新建立索引'}</p>
                 </div>
               </div>
               <div className="flex shrink-0 gap-2">
+                {runtimeCapabilities.libraryRootMutable && (
+                  <button
+                    onClick={onChangeLibraryRoot}
+                    disabled={isScanning}
+                    className="flex items-center justify-center gap-2 bg-black/5 dark:bg-white/10 disabled:opacity-60 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    <Folder className="w-4 h-4" />
+                    更改目录
+                  </button>
+                )}
                 <button
-                  onClick={onImportFiles}
-                  disabled={isScanning}
-                  className="flex items-center justify-center gap-2 bg-[#007AFF] hover:bg-blue-600 disabled:hover:bg-[#007AFF] disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
-                >
-                  {isScanning ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                  导入文件
-                </button>
-                <button
-                  onClick={onAddFiles}
+                  onClick={onRescan}
                   disabled={isScanning}
                   className="flex items-center justify-center gap-2 bg-black/5 dark:bg-white/10 disabled:opacity-60 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                 >
-                  <Folder className="w-4 h-4" />
-                  扫描目录
+                  {isScanning ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Folder className="w-4 h-4" />}
+                  重新扫描
                 </button>
               </div>
             </div>
@@ -213,7 +216,9 @@ export function SettingsView({
                   ] as const).map(([animation, label]) => (
                     <button
                       key={animation}
-                      onClick={() => updateSettings({ pageTurnAnimation: animation })}
+                      onClick={() => updateSettings(animation === 'scroll'
+                        ? { pageTurnAnimation: animation, pageMode: 'single' }
+                        : { pageTurnAnimation: animation })}
                       className={`rounded-md py-1.5 text-xs ${settings.pageTurnAnimation === animation ? 'bg-white dark:bg-[#3A3A3C]' : 'text-black/50 dark:text-white/50'}`}
                     >
                       {label}
@@ -313,7 +318,7 @@ export function SettingsView({
         </section>
 
         {/* Sync Section */}
-        <section className="space-y-3">
+        {runtimeCapabilities.webDav && <section className="space-y-3">
           <h3 className="text-[11px] font-semibold text-black/40 dark:text-white/40 uppercase tracking-wider pl-1">WebDAV 同步</h3>
           <div className="bg-[#F2F2F7] dark:bg-[#1C1C1E] border border-black/5 dark:border-white/5 rounded-2xl p-5 space-y-4 shadow-sm relative overflow-hidden">
             
@@ -403,7 +408,7 @@ export function SettingsView({
             </motion.div>
 
           </div>
-        </section>
+        </section>}
 
       </div>
     </div>

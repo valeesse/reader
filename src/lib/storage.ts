@@ -1,8 +1,9 @@
-import { set, get, keys } from 'idb-keyval';
-import { Book, Series, ReadingProgress, AppSettings, SyncSnapshot, defaultSettings } from '../types';
+import { get, keys, set } from 'idb-keyval';
+import { getWebState, isDesktopRuntime, listBooks, putWebStateSection } from './backend';
+import { AppSettings, Book, defaultSettings, ReadingProgress, Series, SyncSnapshot } from '../types';
 
 export interface StartupSnapshot {
-  version: 1;
+  version: 2;
   books: Book[];
   series: Series[];
   settings: AppSettings;
@@ -15,37 +16,50 @@ export interface ProgressSavedDetail {
   lastReadBookId?: string;
 }
 
-// Store keys
 export const KEYS = {
-  BOOKS: 'zenith_books',
-  SERIES: 'zenith_series',
-  PROGRESS: 'zenith_progress_',
-  BOOK_COVER: 'zenith_book_cover_',
-  SETTINGS: 'zenith_settings',
-  LAST_READ: 'zenith_last_read',
-  LAST_READ_UPDATED_AT: 'zenith_last_read_updated_at',
-  STARTUP_SNAPSHOT: 'zenith_startup_snapshot_v1',
+  BOOKS: 'zenith_v2_books',
+  SERIES: 'zenith_v2_series',
+  PROGRESS: 'zenith_v2_progress_',
+  BOOK_COVER: 'zenith_v2_book_cover_',
+  SETTINGS: 'zenith_v2_settings',
+  LAST_READ: 'zenith_v2_last_read',
+  LAST_READ_UPDATED_AT: 'zenith_v2_last_read_updated_at',
+  STARTUP_SNAPSHOT: 'zenith_startup_snapshot_v2',
+};
+
+type WebState = {
+  progress?: Record<string, ReadingProgress>;
+  settings?: AppSettings;
+  series?: Series[];
+  lastRead?: { bookId?: string; updatedAt?: number } | string;
 };
 
 let progressWriteQueue = Promise.resolve();
+let webStateRequest: Promise<WebState> | undefined;
 
 export async function saveBooks(books: Book[]) {
   updateStartupSnapshot({ books: books.map(stripBookCover) });
-  await migrateProgressToLocalBooks(books);
   await Promise.all([
     set(KEYS.BOOKS, books.map(stripBookCover)),
-    ...books
-      .filter((book) => Boolean(book.cover))
-      .map((book) => saveBookCover(book.id, book.cover!)),
+    ...books.filter((book) => Boolean(book.cover)).map((book) => saveBookCover(book.id, book.cover!)),
   ]);
 }
 
 export async function getBooks(): Promise<Book[]> {
-  const books = ((await get<Book[]>(KEYS.BOOKS)) || []).map(normalizeStoredBook);
-  if (books.some((book) => Boolean(book.cover))) {
-    void migrateEmbeddedCovers(books);
+  const cached = ((await get<Book[]>(KEYS.BOOKS)) || []).filter(isCurrentBook);
+  const cachedById = new Map(cached.map((book) => [book.resourceId, book]));
+  try {
+    const books = (await listBooks()).map((book) => ({
+      ...cachedById.get(book.resourceId),
+      ...book,
+      seriesId: cachedById.get(book.resourceId)?.seriesId,
+    }));
+    await set(KEYS.BOOKS, books.map(stripBookCover));
+    return books;
+  } catch (error) {
+    if (!isDesktopRuntime) throw error;
+    return cached.map(stripBookCover);
   }
-  return books.map(stripBookCover);
 }
 
 export async function saveBookCover(bookId: string, cover: string) {
@@ -53,22 +67,22 @@ export async function saveBookCover(bookId: string, cover: string) {
 }
 
 export async function getBookCover(bookId: string): Promise<string | undefined> {
-  return await get<string>(`${KEYS.BOOK_COVER}${bookId}`);
+  return get<string>(`${KEYS.BOOK_COVER}${bookId}`);
 }
 
 export async function saveSeries(series: Series[]) {
   updateStartupSnapshot({ series });
   await set(KEYS.SERIES, series);
+  if (!isDesktopRuntime) await putWebStateSection('series', series);
 }
 
 export async function getSeries(): Promise<Series[]> {
+  if (!isDesktopRuntime) return (await loadWebState()).series || [];
   return (await get<Series[]>(KEYS.SERIES)) || [];
 }
 
 export function saveProgress(progress: ReadingProgress) {
-  const write = progressWriteQueue
-    .catch(() => {})
-    .then(() => saveProgressInOrder(progress));
+  const write = progressWriteQueue.catch(() => {}).then(() => saveProgressInOrder(progress));
   progressWriteQueue = write;
   return write;
 }
@@ -87,241 +101,139 @@ async function saveProgressInOrder(progress: ReadingProgress) {
     ]);
     updateStartupSnapshot({ lastReadBookId: progress.bookId });
   }
-  if (typeof window !== 'undefined') {
-    const detail: ProgressSavedDetail = {
-      progress,
-      lastReadBookId: becomesLastRead ? progress.bookId : undefined,
-    };
-    window.dispatchEvent(new CustomEvent('zenith:progress-saved', { detail }));
+  if (!isDesktopRuntime) {
+    await putWebStateSection('progress', { [progress.bookId]: progress });
+    if (becomesLastRead) {
+      await putWebStateSection('lastRead', { bookId: progress.bookId, updatedAt: progress.updatedAt });
+    }
   }
+  window.dispatchEvent(new CustomEvent('zenith:progress-saved', {
+    detail: { progress, lastReadBookId: becomesLastRead ? progress.bookId : undefined } satisfies ProgressSavedDetail,
+  }));
 }
 
 export async function getProgress(bookId: string): Promise<ReadingProgress | undefined> {
-  return await get<ReadingProgress>(`${KEYS.PROGRESS}${bookId}`);
+  if (!isDesktopRuntime) {
+    const progress = (await loadWebState()).progress?.[bookId];
+    if (progress) await set(`${KEYS.PROGRESS}${bookId}`, progress);
+    return progress;
+  }
+  return get<ReadingProgress>(`${KEYS.PROGRESS}${bookId}`);
 }
 
 export async function getAllProgress(): Promise<ReadingProgress[]> {
+  if (!isDesktopRuntime) {
+    const progress = Object.values((await loadWebState()).progress || {});
+    await Promise.all(progress.map((item) => set(`${KEYS.PROGRESS}${item.bookId}`, item)));
+    return progress;
+  }
   const allKeys = await keys();
-  const progressKeys = allKeys.filter(
-    (key): key is string => typeof key === 'string' && key.startsWith(KEYS.PROGRESS),
-  );
+  const progressKeys = allKeys.filter((key): key is string => typeof key === 'string' && key.startsWith(KEYS.PROGRESS));
   const values = await Promise.all(progressKeys.map((key) => get<ReadingProgress>(key)));
   return values.filter((value): value is ReadingProgress => Boolean(value));
 }
 
 export async function getLastReadBookId(): Promise<string | undefined> {
-  return await get<string>(KEYS.LAST_READ);
+  if (!isDesktopRuntime) {
+    const lastRead = (await loadWebState()).lastRead;
+    return typeof lastRead === 'string' ? lastRead : lastRead?.bookId;
+  }
+  return get<string>(KEYS.LAST_READ);
 }
 
-export function getLastReadBookIdSync(): string | undefined {
+/**
+ * Record the selected book before its first locator is available.  This keeps
+ * the synchronous startup snapshot authoritative even when the application is
+ * closed during the first page or an older background reload completes later.
+ */
+export function markLastReadBook(bookId: string) {
+  const updatedAt = Date.now();
+  updateStartupSnapshot({ lastReadBookId: bookId });
+  window.dispatchEvent(new CustomEvent('zenith:progress-saved', {
+    detail: { lastReadBookId: bookId } satisfies ProgressSavedDetail,
+  }));
+  return Promise.all([
+    set(KEYS.LAST_READ, bookId),
+    set(KEYS.LAST_READ_UPDATED_AT, updatedAt),
+  ]).then(() => undefined);
+}
+
+export function getLastReadBookIdSync() {
   return getStartupSnapshotSync()?.lastReadBookId;
 }
 
 export async function saveSettings(settings: AppSettings) {
-  updateStartupSnapshot({ settings: normalizeSettings(settings) });
-  await set(KEYS.SETTINGS, settings);
+  const normalized = normalizeSettings(settings);
+  updateStartupSnapshot({ settings: normalized });
+  await set(KEYS.SETTINGS, normalized);
+  if (!isDesktopRuntime) await putWebStateSection('settings', normalized);
 }
 
 export async function getSettings(): Promise<AppSettings> {
-  const settings = await get<AppSettings>(KEYS.SETTINGS);
-  return normalizeSettings(settings);
+  if (!isDesktopRuntime) return normalizeSettings((await loadWebState()).settings);
+  return normalizeSettings(await get<AppSettings>(KEYS.SETTINGS));
 }
 
 export function getStartupSnapshotSync(): StartupSnapshot | undefined {
   if (typeof window === 'undefined') return undefined;
   try {
-    const raw = window.localStorage.getItem(KEYS.STARTUP_SNAPSHOT);
-    if (!raw) return undefined;
-    const snapshot = JSON.parse(raw) as Partial<StartupSnapshot>;
-    if (snapshot.version !== 1) return undefined;
-
-    return {
-      version: 1,
-      books: (snapshot.books || []).map(normalizeStoredBook).map(stripBookCover),
-      series: snapshot.series || [],
-      settings: normalizeSettings(snapshot.settings),
-      lastReadBookId: snapshot.lastReadBookId,
-      updatedAt: snapshot.updatedAt || 0,
-    };
-  } catch (error) {
-    console.warn('Failed to read startup snapshot', error);
+    const snapshot = JSON.parse(window.localStorage.getItem(KEYS.STARTUP_SNAPSHOT) || 'null') as StartupSnapshot | null;
+    if (snapshot?.version !== 2) return undefined;
+    return { ...snapshot, books: snapshot.books.filter(isCurrentBook), settings: normalizeSettings(snapshot.settings) };
+  } catch {
     return undefined;
   }
 }
 
 export function saveStartupSnapshot(snapshot: Omit<StartupSnapshot, 'version' | 'updatedAt'>) {
-  writeStartupSnapshot({
-    version: 1,
-    books: snapshot.books.map(normalizeStoredBook).map(stripBookCover),
-    series: snapshot.series,
-    settings: normalizeSettings(snapshot.settings),
-    lastReadBookId: snapshot.lastReadBookId,
-    updatedAt: Date.now(),
-  });
+  writeStartupSnapshot({ ...snapshot, books: snapshot.books.map(stripBookCover), version: 2, updatedAt: Date.now() });
 }
 
 export async function createSyncSnapshot(): Promise<SyncSnapshot> {
   const [books, series, settings, progress, lastReadBookId] = await Promise.all([
-    getBooks(),
-    getSeries(),
-    getSettings(),
-    getAllProgress(),
-    getLastReadBookId(),
+    getBooks(), getSeries(), getSettings(), getAllProgress(), getLastReadBookId(),
   ]);
-
   return {
     version: 2,
-    books: books.map(toSyncedBook),
+    books,
     series,
-    settings: {
-      ...settings,
-      webDavConfig: {
-        ...settings.webDavConfig,
-        password: undefined,
-      },
-    },
-    progress: progress.map((item) => ({
-      ...item,
-      bookFingerprint: item.bookFingerprint || books.find((book) => book.id === item.bookId)?.fingerprint,
-    })),
+    settings: { ...settings, webDavConfig: { ...settings.webDavConfig, password: undefined } },
+    progress,
     lastReadBookId,
     updatedAt: Date.now(),
   };
 }
 
 export async function applySyncSnapshot(snapshot: SyncSnapshot) {
-  await progressWriteQueue.catch(() => {});
-  const [localSettings, localBooks, localSeries] = await Promise.all([
-    getSettings(),
-    getBooks(),
-    getSeries(),
-  ]);
-  const [localLastReadBookId, localLastReadUpdatedAt] = await Promise.all([
-    getLastReadBookId(),
-    get<number>(KEYS.LAST_READ_UPDATED_AT),
-  ]);
-  const localByFingerprint = new Map(localBooks
-    .filter((book) => book.fingerprint)
-    .map((book) => [book.fingerprint!, book]));
-  const localById = new Map(localBooks.map((book) => [book.id, book]));
-  const remoteToLocalId = new Map<string, string>();
-  const mergedBooks = [...localBooks];
-  for (const remoteBook of snapshot.books || []) {
-    const local = (remoteBook.fingerprint && localByFingerprint.get(remoteBook.fingerprint))
-      || (snapshot.version === 1 ? localById.get(remoteBook.id) : undefined);
-    if (!local) continue;
-    remoteToLocalId.set(remoteBook.id, local.id);
-    const index = mergedBooks.findIndex((book) => book.id === local.id);
-    mergedBooks[index] = {
-      ...remoteBook,
-      ...local,
-      title: remoteBook.title || local.title,
-      author: remoteBook.author || local.author,
-      seriesName: remoteBook.seriesName ?? local.seriesName,
-      seriesIndex: remoteBook.seriesIndex ?? local.seriesIndex,
-    };
-  }
-  const mergedSeries = mergeSyncedSeries(localSeries, snapshot.series || [], remoteToLocalId);
-  const nextSettings = {
-    ...defaultSettings,
-    ...snapshot.settings,
-    webDavConfig: {
-      ...defaultSettings.webDavConfig,
-      ...snapshot.settings?.webDavConfig,
-      password: localSettings.webDavConfig.password,
-    },
-  };
+  const localBooks = await getBooks();
+  const available = new Set(localBooks.map((book) => book.id));
+  const series = (snapshot.series || []).map((item) => ({
+    ...item,
+    bookIds: item.bookIds.filter((id) => available.has(id)),
+  })).filter((item) => item.bookIds.length > 0);
+  const settings = normalizeSettings(snapshot.settings);
+  await Promise.all([saveSeries(series), saveSettings(settings)]);
+  await Promise.all((snapshot.progress || []).filter((item) => available.has(item.bookId)).map(saveProgress));
+}
 
-  const remoteLastReadUpdatedAt = (snapshot.progress || [])
-    .find((progress) => progress.bookId === snapshot.lastReadBookId)
-    ?.updatedAt || snapshot.updatedAt;
-  const acceptRemoteLastRead = Boolean(snapshot.lastReadBookId)
-    && remoteLastReadUpdatedAt >= (localLastReadUpdatedAt || 0);
-  const mappedRemoteLastReadId = snapshot.lastReadBookId
-    ? remoteToLocalId.get(snapshot.lastReadBookId)
-    : undefined;
-  const nextLastReadBookId = acceptRemoteLastRead && mappedRemoteLastReadId
-    ? mappedRemoteLastReadId
-    : localLastReadBookId;
-
-  saveStartupSnapshot({
-    books: mergedBooks,
-    series: mergedSeries,
-    settings: nextSettings,
-    lastReadBookId: nextLastReadBookId,
+function loadWebState() {
+  webStateRequest ||= getWebState<WebState>().finally(() => {
+    window.setTimeout(() => { webStateRequest = undefined; }, 50);
   });
-
-  await saveBooks(mergedBooks);
-  await saveSeries(mergedSeries);
-  await saveSettings(nextSettings);
-
-  await Promise.all((snapshot.progress || []).map(async (progress) => {
-    const mappedBook = (progress.bookFingerprint && localByFingerprint.get(progress.bookFingerprint))
-      || (remoteToLocalId.has(progress.bookId) ? localById.get(remoteToLocalId.get(progress.bookId)!) : undefined);
-    const mappedProgress = mappedBook
-      ? { ...progress, bookId: mappedBook.id, bookFingerprint: mappedBook.fingerprint }
-      : progress;
-    const local = await get<ReadingProgress>(`${KEYS.PROGRESS}${mappedProgress.bookId}`);
-    if (!local || progress.updatedAt >= local.updatedAt) {
-      await set(`${KEYS.PROGRESS}${mappedProgress.bookId}`, mappedProgress);
-    }
-  }));
-  if (acceptRemoteLastRead && mappedRemoteLastReadId) {
-    await Promise.all([
-      set(KEYS.LAST_READ, mappedRemoteLastReadId),
-      set(KEYS.LAST_READ_UPDATED_AT, remoteLastReadUpdatedAt),
-    ]);
-  }
-
-  if (typeof window !== 'undefined') {
-    const detail: ProgressSavedDetail = { lastReadBookId: nextLastReadBookId };
-    window.dispatchEvent(new CustomEvent('zenith:progress-saved', { detail }));
-  }
+  return webStateRequest;
 }
 
-function toSyncedBook(book: Book): Book {
+function normalizeSettings(settings?: Partial<AppSettings>): AppSettings {
   return {
-    ...book,
-    path: '',
-    localResourceId: undefined,
-    cover: undefined,
+    ...defaultSettings,
+    ...settings,
+    pageMargins: { ...defaultSettings.pageMargins, ...settings?.pageMargins },
+    webDavConfig: { ...defaultSettings.webDavConfig, ...settings?.webDavConfig },
   };
 }
 
-function mergeSyncedSeries(localSeries: Series[], remoteSeries: Series[], idMap: Map<string, string>) {
-  const merged = new Map(localSeries.map((item) => [item.name.trim().toLocaleLowerCase(), item]));
-  for (const remote of remoteSeries) {
-    const mappedIds = remote.bookIds.map((id) => idMap.get(id)).filter((id): id is string => Boolean(id));
-    if (mappedIds.length === 0) continue;
-    const key = remote.name.trim().toLocaleLowerCase();
-    const local = merged.get(key);
-    merged.set(key, local
-      ? { ...local, bookIds: Array.from(new Set([...local.bookIds, ...mappedIds])) }
-      : { ...remote, bookIds: mappedIds });
-  }
-  return Array.from(merged.values());
-}
-
-async function migrateProgressToLocalBooks(books: Book[]) {
-  const localByFingerprint = new Map(books
-    .filter((book) => book.fingerprint)
-    .map((book) => [book.fingerprint!, book]));
-  if (localByFingerprint.size === 0) return;
-  const allKeys = await keys();
-  const progressKeys = allKeys.filter(
-    (key): key is string => typeof key === 'string' && key.startsWith(KEYS.PROGRESS),
-  );
-  await Promise.all(progressKeys.map(async (key) => {
-    const progress = await get<ReadingProgress>(key);
-    if (!progress?.bookFingerprint) return;
-    const localBook = localByFingerprint.get(progress.bookFingerprint);
-    if (!localBook || progress.bookId === localBook.id) return;
-    const targetKey = `${KEYS.PROGRESS}${localBook.id}`;
-    const current = await get<ReadingProgress>(targetKey);
-    if (!current || progress.updatedAt >= current.updatedAt) {
-      await set(targetKey, { ...progress, bookId: localBook.id });
-    }
-  }));
+function isCurrentBook(book: Book) {
+  return Boolean(book?.resourceId && book.id === book.resourceId);
 }
 
 function stripBookCover(book: Book): Book {
@@ -330,41 +242,10 @@ function stripBookCover(book: Book): Book {
   return lightBook;
 }
 
-function normalizeStoredBook(book: Book): Book {
-  const normalized = {
-    ...book,
-    source: (book.source as string | undefined) === 'local' ? 'external' : book.source,
-    localResourceId: book.localResourceId || book.path || undefined,
-  };
-  if (normalized.fileName?.trim()) return normalized;
-  const fileName = fileNameFromPath(book.path);
-  return fileName ? { ...normalized, fileName } : normalized;
-}
-
-function normalizeSettings(settings?: Partial<AppSettings>): AppSettings {
-  const legacy = settings as (Partial<AppSettings> & { txtReadingFlow?: 'paged' | 'scroll' }) | undefined;
-  const pageTurnAnimation = settings?.pageTurnAnimation
-    || (legacy?.txtReadingFlow === 'scroll' ? 'scroll' : defaultSettings.pageTurnAnimation);
-  return {
-    ...defaultSettings,
-    ...settings,
-    pageMode: pageTurnAnimation === 'scroll' ? 'single' : settings?.pageMode || defaultSettings.pageMode,
-    pageTurnAnimation,
-    pageMargins: {
-      ...defaultSettings.pageMargins,
-      ...settings?.pageMargins,
-    },
-    webDavConfig: {
-      ...defaultSettings.webDavConfig,
-      ...settings?.webDavConfig,
-    },
-  };
-}
-
 function updateStartupSnapshot(partial: Partial<Omit<StartupSnapshot, 'version' | 'updatedAt'>>) {
   const current = getStartupSnapshotSync();
   writeStartupSnapshot({
-    version: 1,
+    version: 2,
     books: (partial.books || current?.books || []).map(stripBookCover),
     series: partial.series || current?.series || [],
     settings: normalizeSettings(partial.settings || current?.settings),
@@ -374,29 +255,9 @@ function updateStartupSnapshot(partial: Partial<Omit<StartupSnapshot, 'version' 
 }
 
 function writeStartupSnapshot(snapshot: StartupSnapshot) {
-  if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(KEYS.STARTUP_SNAPSHOT, JSON.stringify(snapshot));
   } catch (error) {
     console.warn('Failed to write startup snapshot', error);
   }
-}
-
-async function migrateEmbeddedCovers(books: Book[]) {
-  try {
-    await Promise.all([
-      set(KEYS.BOOKS, books.map(stripBookCover)),
-      ...books
-        .filter((book) => Boolean(book.cover))
-        .map((book) => saveBookCover(book.id, book.cover!)),
-    ]);
-  } catch (error) {
-    console.warn('Failed to migrate embedded book covers', error);
-  }
-}
-
-function fileNameFromPath(path: string) {
-  const normalized = path.replace(/[\\/]+/g, '/');
-  const segments = normalized.split('/');
-  return segments[segments.length - 1]?.trim() || '';
 }

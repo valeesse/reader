@@ -15,12 +15,16 @@ export type ReaderMetric = {
   detail?: Record<string, string | number | boolean | undefined>;
 };
 
-const MAX_METRICS = 400;
+const MAX_METRICS = 2048;
 const metrics: ReaderMetric[] = [];
 
 export function recordReaderMetric(metric: Omit<ReaderMetric, 'at'>) {
-  metrics.push({ ...metric, at: Date.now() });
+  const recorded = { ...metric, at: Date.now() };
+  metrics.push(recorded);
   if (metrics.length > MAX_METRICS) metrics.splice(0, metrics.length - MAX_METRICS);
+  if (typeof window !== 'undefined') {
+    queueMicrotask(() => window.dispatchEvent(new CustomEvent('zenith-reader-metric', { detail: recorded })));
+  }
 }
 
 export function measureReaderTask<T>(

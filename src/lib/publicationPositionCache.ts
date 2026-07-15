@@ -15,15 +15,15 @@ type CachedEpubPositions = {
   updatedAt: number;
 };
 
-export async function getCachedEpubPositionCounts(path: string, cacheKey: string) {
-  const cached = await get<CachedEpubPositions>(cacheId(path));
+export async function getCachedEpubPositionCounts(resourceId: string, cacheKey: string) {
+  const cached = await get<CachedEpubPositions>(cacheId(resourceId));
   if (!cached || cached.version !== CACHE_VERSION || cached.cacheKey !== cacheKey) return undefined;
   if (!Array.isArray(cached.counts) || cached.counts.some((item) => !item.href || !Number.isFinite(item.count))) return undefined;
   return cached.counts;
 }
 
-export async function saveCachedEpubPositionCounts(path: string, cacheKey: string, counts: EpubPositionCount[]) {
-  await set(cacheId(path), {
+export async function saveCachedEpubPositionCounts(resourceId: string, cacheKey: string, counts: EpubPositionCount[]) {
+  await set(cacheId(resourceId), {
     version: CACHE_VERSION,
     cacheKey,
     counts,
@@ -31,6 +31,6 @@ export async function saveCachedEpubPositionCounts(path: string, cacheKey: strin
   } satisfies CachedEpubPositions);
 }
 
-function cacheId(path: string) {
-  return `${CACHE_PREFIX}${path}`;
+function cacheId(resourceId: string) {
+  return `${CACHE_PREFIX}${resourceId}`;
 }

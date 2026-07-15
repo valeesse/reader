@@ -1392,10 +1392,39 @@ Xn([
   // Angular attributes
   "ng-*"
 ]);
-const Yn = Math.pow(2, 32), mi = () => Math.round(Math.random() * Yn).toString(36), _e = () => `${Math.round(performance.now())}-${mi()}-${mi()}`, yt = 1;
+const Yn = Math.pow(2, 32), mi = () => Math.round(Math.random() * Yn).toString(36), _e = () => `${Math.round(performance.now())}-${mi()}-${mi()}`, yt = 1, READIUM_DIRECT_TURN_BRIDGE_V1 = "__readium_private_turn_bridge_v1__";
 class qn {
   constructor(t) {
-    this.destination = null, this.registrar = /* @__PURE__ */ new Map(), this.origin = "", this.channelId = "", this.receiver = this.receive.bind(this), this.preLog = [], this.wnd = t, t.addEventListener("message", this.receiver);
+    this.destination = null, this.registrar = /* @__PURE__ */ new Map(), this.origin = "", this.channelId = "", this.receiver = this.receive.bind(this), this.preLog = [], this.directBridgeActive = !0, this.directBridge = (e, i, n) => {
+      if (!this.directBridgeActive || !this.destination || e !== this.channelId || i !== "go_next" && i !== "go_prev") return;
+      const s = this.registrar.get(i);
+      if (!s || s.length !== 1) return;
+      let o = !1, a;
+      try {
+        s[0].cb(n, (d) => {
+          o || (o = !0, a = d);
+        });
+      } catch {
+        return;
+      }
+      if (!o) return;
+      const l = a !== null && typeof a == "object" ? { ...a, transport: "direct" } : a;
+      return {
+        _readium: yt,
+        _channel: this.channelId,
+        key: "_ack",
+        data: l
+      };
+    }, this.wnd = t, t.addEventListener("message", this.receiver);
+    try {
+      Object.prototype.hasOwnProperty.call(t, READIUM_DIRECT_TURN_BRIDGE_V1) || Object.defineProperty(t, READIUM_DIRECT_TURN_BRIDGE_V1, {
+        configurable: !0,
+        enumerable: !1,
+        value: this.directBridge,
+        writable: !1
+      });
+    } catch {
+    }
   }
   receive(t) {
     if (t.source === null) throw Error("Event source is null");
@@ -1460,6 +1489,11 @@ class qn {
     return !!this.destination;
   }
   destroy() {
+    this.directBridgeActive = !1;
+    try {
+      this.wnd[READIUM_DIRECT_TURN_BRIDGE_V1] === this.directBridge && delete this.wnd[READIUM_DIRECT_TURN_BRIDGE_V1];
+    } catch {
+    }
     this.destination = null, this.channelId = "", this.preLog = [], this.registrar.clear(), this.wnd.removeEventListener("message", this.receiver);
   }
   send(t, e, i = void 0, n = []) {
@@ -3163,12 +3197,15 @@ const Oi = "readium-column-snapper-style", Fs = 200, H = class H extends xt {
     const t = this.doc().scrollLeft;
     return this.rtl ? Math.abs(t) : Math.max(0, this.wnd.scrollX > 0 ? this.wnd.scrollX : t);
   }
+  currentProgress() {
+    const t = this.cachedScrollWidth, e = this.wnd.innerWidth, i = this.normScroll(), n = Math.max(1, t - e);
+    return {
+      start: Math.max(0, Math.min(1, i / n)),
+      end: Math.max(0, Math.min(1, (i + e) / t))
+    };
+  }
   reportProgress() {
-    const t = this.cachedScrollWidth, e = this.wnd.innerWidth, i = this.normScroll(), n = Math.max(1, t - e), s = Math.max(0, Math.min(1, i / n)), o = Math.max(0, Math.min(1, (i + e) / t));
-    this.comms.send("progress", {
-      start: s,
-      end: o
-    });
+    this.comms.send("progress", this.currentProgress());
   }
   shake() {
     if (this.overscroll !== 0 || this.shakeTimeout !== 0) return;
@@ -3377,15 +3414,27 @@ const Oi = "readium-column-snapper-style", Fs = 200, H = class H extends xt {
         this.doc().scrollLeft = 0, this.reportProgress(), T(this.wnd), a(!0);
       });
     }), e.register("go_prev", H.moduleName, (o, a) => {
+      const l = performance.now();
       this.cachedScrollWidth = this.doc().scrollWidth;
-      let l;
-      const d = this.pageStride();
-      this.rtl ? l = s(this.normScroll() - d) : l = n(this.normScroll() - d), this.reportProgress(), l && this.checkSuspiciousSnap("left", d), a(l);
+      let d;
+      const h = this.pageStride();
+      this.rtl ? d = s(this.normScroll() - h) : d = n(this.normScroll() - h), d && this.checkSuspiciousSnap("left", h), a({
+        kind: "turn",
+        ok: d,
+        progress: this.currentProgress(),
+        iframeElapsedMs: performance.now() - l
+      });
     }), e.register("go_next", H.moduleName, (o, a) => {
+      const l = performance.now();
       this.cachedScrollWidth = this.doc().scrollWidth;
-      let l;
-      const d = this.pageStride();
-      this.rtl ? l = s(this.normScroll() + d) : l = n(this.normScroll() + d), this.reportProgress(), l && this.checkSuspiciousSnap("right", d), a(l);
+      let d;
+      const h = this.pageStride();
+      this.rtl ? d = s(this.normScroll() + h) : d = n(this.normScroll() + h), d && this.checkSuspiciousSnap("right", h), a({
+        kind: "turn",
+        ok: d,
+        progress: this.currentProgress(),
+        iframeElapsedMs: performance.now() - l
+      });
     }), e.register("unfocus", H.moduleName, (o, a) => {
       this.snappingCancelled = !0, T(this.wnd), a(!0);
     }), e.register("shake", H.moduleName, (o, a) => {
@@ -3394,6 +3443,15 @@ const Oi = "readium-column-snapper-style", Fs = 200, H = class H extends xt {
       this.wnd.requestAnimationFrame(() => {
         this.cachedScrollWidth = this.doc().scrollWidth, this.snapCurrentOffset(!1, !0), this.reportProgress(), a(!0);
       });
+    }), e.register("focus_progression", H.moduleName, (o, a) => {
+      const l = Number(o);
+      if (!Number.isFinite(l) || l < 0 || l > 1) {
+        a(!1);
+        return;
+      }
+      this.cachedScrollWidth = this.doc().scrollWidth;
+      const d = (this.cachedScrollWidth - t.innerWidth) * l;
+      this.rtl ? this.doc().scrollLeft = -this.snapNormOffset(d) : this.doc().scrollLeft = this.snapOffset(d), this.reportProgress(), T(this.wnd), a(!0);
     }), e.register("first_visible_locator", H.moduleName, (o, a) => {
       const l = de(t, !1);
       this.comms.send("first_visible_locator", l.serialize()), a(!0);
@@ -4773,7 +4831,7 @@ class Dt {
   }
   handle(t) {
     const e = t.data;
-    if (!e._readium) {
+    if (e === null || typeof e != "object" || !e._readium) {
       console.warn("Ignoring", e);
       return;
     }
@@ -4783,7 +4841,8 @@ class Dt {
           if (!e.id) return;
           const i = this.registry.get(e.id);
           if (!i) return;
-          this.registry.delete(e.id), i.cb(!!e.data);
+          const n = i.key === "go_next" || i.key === "go_prev" ? e.data !== null && typeof e.data == "object" ? { ...e.data, transport: e.data.transport ?? "postMessage" } : e.data : e.data;
+          this.registry.delete(e.id), i.cb(n, "postMessage");
           return;
         }
         // @ts-ignore
@@ -4804,6 +4863,17 @@ class Dt {
    */
   send(t, e, i, n = !1, s = []) {
     const o = _e();
+    if (this.ready && typeof i == "function" && (t === "go_next" || t === "go_prev")) {
+      let a;
+      try {
+        if (!this.wnd.frameElement?.isConnected) throw new Error("Direct turn target is detached");
+        const l = this.wnd[READIUM_DIRECT_TURN_BRIDGE_V1];
+        typeof l == "function" && (a = l(this.channelId, t, e));
+      } catch {
+      }
+      if (a !== null && typeof a == "object" && a._readium === yt && a._channel === this.channelId && a.key === "_ack")
+        return i?.(a.data, "direct"), o;
+    }
     return i && this.registry.set(o, {
       // Add callback to the registry
       cb: i,
@@ -4918,6 +4988,13 @@ class Ks {
     if (!this.frame.parentElement) throw Error("Trying to show frame that is not attached to the DOM");
     return this.comms ? this.comms.resume() : this.comms = new Dt(this.frame.contentWindow, this.source), new Promise((e, i) => {
       this.comms?.send("activate", void 0, () => {
+        if (t !== void 0 && this.currModules.includes("column_snapper")) {
+          this.comms?.send("focus_progression", t, () => {
+            this.applyContentProtection();
+            this.frame.style.removeProperty("visibility"), this.frame.style.removeProperty("aria-hidden"), this.frame.style.removeProperty("opacity"), this.frame.style.removeProperty("pointer-events"), this.hidden = !1, e();
+          });
+          return;
+        }
         this.comms?.send("focus", void 0, () => {
           this.applyContentProtection();
           const n = () => {
@@ -7218,7 +7295,7 @@ class Nn {
 }
 class Mn {
   constructor(t, e = {}, i = []) {
-    this.hidden = !0, this.destroyed = !1, this.currModules = [], this.frame = document.createElement("iframe"), this.frame.sandbox.value = "allow-same-origin allow-scripts", this.frame.classList.add("readium-navigator-iframe"), this.frame.style.visibility = "hidden", this.frame.style.setProperty("aria-hidden", "true"), this.frame.style.opacity = "0", this.frame.style.position = "absolute", this.frame.style.pointerEvents = "none", this.frame.style.transition = "visibility 0s, opacity 0.1s linear", this.source = t, this.contentProtectionConfig = { ...e }, this.keyboardPeripheralsConfig = [...i];
+    this.hidden = !0, this.destroyed = !1, this.currModules = [], this.preparedLayoutKey = void 0, this.frame = document.createElement("iframe"), this.frame.classList.add("readium-navigator-iframe"), this.frame.style.visibility = "hidden", this.frame.style.setProperty("aria-hidden", "true"), this.frame.style.opacity = "0", this.frame.style.position = "absolute", this.frame.style.pointerEvents = "none", this.frame.style.transition = "visibility 0s, opacity 0.1s linear", this.source = t, this.contentProtectionConfig = { ...e }, this.keyboardPeripheralsConfig = [...i];
   }
   async load(t) {
     return new Promise((e, i) => {
@@ -7231,7 +7308,7 @@ class Mn {
           }
           return;
         }
-        this.comms?.halt(), this.loader.destroy(), this.loader = new Lt(n, t), this.currModules = t, this.comms = void 0;
+        this.preparedLayoutKey = void 0, this.comms?.halt(), this.loader.destroy(), this.loader = new Lt(n, t), this.currModules = t, this.comms = void 0;
         try {
           e(n);
         } catch {
@@ -7283,6 +7360,13 @@ class Mn {
     if (!this.frame.parentElement) throw Error("Trying to show frame that is not attached to the DOM");
     return this.comms ? this.comms.resume() : this.comms = new Dt(this.frame.contentWindow, this.source), new Promise((e, i) => {
       this.comms?.send("activate", void 0, () => {
+        if (t !== void 0 && this.currModules.includes("column_snapper")) {
+          this.comms?.send("focus_progression", t, () => {
+            this.applyContentProtection();
+            this.frame.style.removeProperty("visibility"), this.frame.style.removeProperty("aria-hidden"), this.frame.style.removeProperty("opacity"), this.frame.style.removeProperty("pointer-events"), this.hidden = !1, e();
+          });
+          return;
+        }
         this.comms?.send("focus", void 0, () => {
           this.applyContentProtection();
           const n = () => {
@@ -7294,7 +7378,7 @@ class Mn {
     });
   }
   setCSSProperties(t) {
-    this.destroyed || !this.frame.contentWindow || (this.hidden && (this.comms ? this.comms?.resume() : this.comms = new Dt(this.frame.contentWindow, this.source)), this.comms?.send("update_properties", t), this.hidden && this.comms?.halt());
+    this.preparedLayoutKey = void 0, this.destroyed || !this.frame.contentWindow || (this.hidden && (this.comms ? this.comms?.resume() : this.comms = new Dt(this.frame.contentWindow, this.source)), this.comms?.send("update_properties", t), this.hidden && this.comms?.halt());
   }
   get iframe() {
     if (this.destroyed) throw Error("Trying to use frame when it doesn't exist");
@@ -7324,12 +7408,108 @@ class Mn {
     return this.loader;
   }
 }
-const Wi = 5, Bi = 3;
+const Wi = 3;
 class to {
   constructor(t, e, i, n, s, o) {
-    this.pool = /* @__PURE__ */ new Map(), this.blobs = /* @__PURE__ */ new Map(), this.inprogress = /* @__PURE__ */ new Map(), this.pendingUpdates = /* @__PURE__ */ new Map(), this.injector = null, this.container = t, this.positions = e, this.currentCssProperties = i, this.injector = n ?? null, this.contentProtectionConfig = s || {}, this.keyboardPeripheralsConfig = o || [];
+    this.pool = /* @__PURE__ */ new Map(), this.blobs = /* @__PURE__ */ new Map(), this.inprogress = /* @__PURE__ */ new Map(), this.constructing = /* @__PURE__ */ new Map(), this.pendingUpdates = /* @__PURE__ */ new Map(), this.injector = null, this.reservedHref = void 0, this.reservationGeneration = 0, this.currentHref = void 0, this.container = t, this.positions = e, this.currentCssProperties = i, this.injector = n ?? null, this.contentProtectionConfig = s || {}, this.keyboardPeripheralsConfig = o || [];
+  }
+  releaseBlob(t) {
+    if (t === this.currentHref || t === this.reservedHref || this.pool.has(t) || this.inprogress.has(t) || this.constructing.has(t))
+      return;
+    const e = this.blobs.get(t);
+    e && (this.blobs.delete(t), this.pendingUpdates.delete(t), this.injector?.releaseBlobUrl?.(e), URL.revokeObjectURL(e));
+  }
+  pruneBlobs() {
+    for (const t of Array.from(this.blobs.keys()))
+      this.releaseBlob(t);
+  }
+  evict(t) {
+    const e = this.pool.get(t);
+    if (!e)
+      return;
+    this.pool.get(t) === e && this.pool.delete(t), this.pendingUpdates.has(t) && this.pendingUpdates.set(t, { inPool: !1 }), e.comms?.halt(), e.frame.remove(), this.releaseBlob(t), Promise.resolve(e.destroy()).catch(() => {
+    });
+  }
+  enforceLimit(t = []) {
+    const e = [this.currentHref, this.reservedHref, ...t].filter((i, n, s) => i && s.indexOf(i) === n), i = new Set(e.slice(0, Wi));
+    for (const n of this.pool.keys()) {
+      if (this.pool.size <= Wi)
+        break;
+      i.has(n) || this.evict(n);
+    }
+    for (const n of this.pool.keys()) {
+      if (this.pool.size <= Wi)
+        break;
+      n !== this.currentHref && n !== this.reservedHref && this.evict(n);
+    }
+  }
+  reserve(t) {
+    const e = t === this.currentHref ? void 0 : t;
+    this.reservedHref !== e && (this.reservedHref = e, this.reservationGeneration += 1);
+    const i = new Set([this.currentHref, e]), n = e && !this.pool.has(e) ? 1 : 0;
+    for (const s of Array.from(this.pool.keys())) {
+      if (this.pool.size + n <= Wi)
+        break;
+      i.has(s) || this.evict(s);
+    }
+    this.enforceLimit(), this.pruneBlobs();
+    return this.reservationGeneration;
+  }
+  release(t) {
+    (t === void 0 || this.reservedHref === t) && this.reservedHref !== void 0 && (this.reservedHref = void 0, this.reservationGeneration += 1, this.enforceLimit(), this.pruneBlobs());
+  }
+  async claimConstructionSlot(t, e) {
+    for (; e(); ) {
+      if (this.pool.has(t))
+        return;
+      if (this.constructing.has(t)) {
+        await new Promise((i) => window.setTimeout(i, 4));
+        continue;
+      }
+      if (this.pool.size + this.constructing.size < Wi) {
+        const i = {};
+        this.constructing.set(t, i);
+        return i;
+      }
+      this.enforceLimit();
+      await new Promise((i) => window.setTimeout(i, 4));
+    }
+  }
+  async constructFrame(t, e, i, n, s) {
+    if (!s())
+      return;
+    const o = await this.claimConstructionSlot(e, s);
+    if (!o)
+      return this.pool.get(e);
+    let a;
+    try {
+      if (!s()) return;
+      let l = this.blobs.get(e);
+      if (!l) {
+        const d = t.readingOrder.findWithHref(e);
+        if (!d) return;
+        l = await new Nn(t, this.currentBaseURL || "", d, {
+          cssProperties: this.currentCssProperties,
+          injector: this.injector
+        }).build(), this.blobs.set(e, l);
+      }
+      if (!s()) return;
+      a = new Mn(l, this.contentProtectionConfig, this.keyboardPeripheralsConfig), n && await a.hide();
+      if (!s()) return;
+      this.container.appendChild(a.iframe), await a.load(i);
+      if (!s()) return;
+      const d = this.pool.get(e);
+      d && d !== a && this.evict(e), this.pool.set(e, a), this.enforceLimit([e]);
+      return a;
+    } finally {
+      if (a && this.pool.get(e) !== a)
+        a.comms?.halt(), a.frame.remove(), await a.destroy().catch(() => {
+        });
+      this.constructing.get(e) === o && this.constructing.delete(e), this.pruneBlobs();
+    }
   }
   async destroy() {
+    this.release();
     let t = this.inprogress.values(), e = t.next();
     const i = [];
     for (; e.value; )
@@ -7348,96 +7528,92 @@ class to {
     let s = this.positions.findIndex((l) => l.locations.position === e.locations.position);
     if (s < 0) throw Error(`Locator not found in position list: ${e.locations.position} > ${this.positions.reduce((l, d) => d.locations.position || 0 > l ? d.locations.position || 0 : l, 0)}`);
     const o = this.positions[s].href;
-    this.inprogress.has(o) && await this.inprogress.get(o);
-    const a = new Promise(async (l, d) => {
-      const keep = new Set(this.positions.slice(Math.max(0, s - Wi), s + Wi + 1).map((p) => p.href)), h = Array.from(this.pool.keys()).filter((p) => !keep.has(p)), c = [...new Set(this.positions.slice(Math.max(0, s - Bi + 1), s + Bi).map((p) => p.href))];
-      h.forEach(async (p) => {
-        c.includes(p) || this.pool.has(p) && (await this.pool.get(p)?.destroy(), this.pool.delete(p), this.pendingUpdates.has(p) && this.pendingUpdates.set(p, { inPool: !1 }));
-      }), this.currentBaseURL !== void 0 && t.baseURL !== this.currentBaseURL && (this.blobs.forEach((p) => {
-        this.injector?.releaseBlobUrl?.(p), URL.revokeObjectURL(p);
-      }), this.blobs.clear()), this.currentBaseURL = t.baseURL;
+    this.currentHref = o, n ? this.release() : this.release(o);
+    const l = this.inprogress.get(o);
+    l && await l;
+    const a = (async () => {
+      if (n) {
+        // A layout-mode transition (paged <-> scrolled) changes the modules and
+        // the CSS baked into every publication blob. Merely calling release()
+        // keeps the current frame/blob alive, so update() reloads the same
+        // paginated document while the navigator already reports `scrolled`.
+        // Dispose the old generation completely before constructing the new
+        // current frame and its bounded neighbours.
+        const p = Array.from(this.pool.values());
+        this.pool.clear(), this._currentFrame = void 0;
+        await Promise.allSettled(p.map(async (f) => {
+          f.comms?.halt(), f.frame.remove(), await f.destroy();
+        }));
+        this.blobs.forEach((f) => {
+          this.injector?.releaseBlobUrl?.(f), URL.revokeObjectURL(f);
+        }), this.blobs.clear(), this.pendingUpdates.clear();
+      }
+      const h = Array.from(this.pool.keys()).filter((p) => p !== o && p !== this.reservedHref), c = [o, this.reservedHref, ...h].filter((p, f, b) => p && b.indexOf(p) === f).slice(0, Wi);
+      for (const p of Array.from(this.pool.keys()))
+        c.includes(p) || this.evict(p);
+      this.currentBaseURL !== void 0 && t.baseURL !== this.currentBaseURL && (this.blobs.forEach((p, f) => {
+        this.pendingUpdates.set(f, { inPool: this.pool.has(f) });
+      }), this.pruneBlobs()), this.currentBaseURL = t.baseURL;
       const u = async (p) => {
-        if (n && (this.blobs.forEach((S) => {
-          this.injector?.releaseBlobUrl?.(S), URL.revokeObjectURL(S);
-        }), this.blobs.clear(), this.pendingUpdates.clear()), this.pendingUpdates.has(p) && this.pendingUpdates.get(p)?.inPool === !1) {
-          const S = this.blobs.get(p);
-          S && (this.injector?.releaseBlobUrl?.(S), URL.revokeObjectURL(S), this.blobs.delete(p), this.pendingUpdates.delete(p));
+        p !== o && this.inprogress.has(p) && await this.inprogress.get(p);
+        const S = this.reservationGeneration, f = () => p === this.currentHref || S === this.reservationGeneration && this.reservedHref === p;
+        if (!f()) return;
+        if (n && (this.blobs.forEach((C, b) => {
+          this.pendingUpdates.set(b, { inPool: this.pool.has(b) });
+        }), this.pruneBlobs()), this.pendingUpdates.has(p) && this.pendingUpdates.get(p)?.inPool === !1) {
+          const C = this.blobs.get(p);
+          C && (this.injector?.releaseBlobUrl?.(C), URL.revokeObjectURL(C), this.blobs.delete(p), this.pendingUpdates.delete(p));
         }
         if (this.pool.has(p)) {
-          const S = this.pool.get(p);
+          const C = this.pool.get(p);
           if (!this.blobs.has(p))
-            await S.destroy(), this.pool.delete(p), this.pendingUpdates.delete(p);
+            this.pool.get(p) === C && this.pool.delete(p), this.pendingUpdates.delete(p), await C.destroy();
           else {
-            await S.load(i);
+            await C.load(i);
+            f() || this.evict(p);
             return;
           }
         }
-        const f = t.readingOrder.findWithHref(p);
-        if (!f) return;
-        if (!this.blobs.has(p)) {
-          const C = await new Nn(
-            t,
-            this.currentBaseURL || "",
-            f,
-            {
-              cssProperties: this.currentCssProperties,
-              injector: this.injector
-            }
-          ).build();
-          this.blobs.set(p, C);
-        }
-        const b = new Mn(this.blobs.get(p), this.contentProtectionConfig, this.keyboardPeripheralsConfig);
-        p !== o && await b.hide(), this.container.appendChild(b.iframe), await b.load(i), this.pool.set(p, b);
+        await this.constructFrame(t, p, i, p !== o, f);
       };
-      try {
-        await Promise.all(c.map((p) => u(p)));
-      } catch (p) {
-        d(p);
-      }
+      await Promise.all(c.map((p) => u(p)));
+      if (this.currentHref !== o) return;
       const m = this.pool.get(o);
       if ((m?.source !== this._currentFrame?.source || n) && (await this._currentFrame?.hide(), m && await m.load(i), m && await m.show(e.locations.progression), this._currentFrame = m, m)) {
         const p = this.container.ownerDocument.activeElement;
         p && p.tagName === "IFRAME" && p !== m.iframe && m.iframe.focus({ preventScroll: !0 });
       }
-      l();
-    });
-    this.inprogress.set(o, a), await a, this.inprogress.delete(o);
+    })();
+    this.inprogress.set(o, a);
+    try {
+      await a;
+    } finally {
+      this.inprogress.get(o) === a && this.inprogress.delete(o), this.pruneBlobs();
+    }
   }
-  async prepare(t, e, i) {
-    const n = t.readingOrder.findWithHref(e);
-    if (!n)
+  async prepare(t, e, i, n = !1) {
+    const s = this.reservationGeneration, l = () => this.currentHref === e || s === this.reservationGeneration && this.reservedHref === e;
+    const o = t.readingOrder.findWithHref(e);
+    if (!o || n && !l())
       return;
-    if (this.inprogress.has(e))
-      await this.inprogress.get(e);
-    const s = this.pool.get(e);
-    if (s && this.blobs.has(e)) {
-      await s.load(i);
+    const d = this.inprogress.get(e);
+    if (d)
+      return await d;
+    const a = this.pool.get(e);
+    if (a && this.blobs.has(e)) {
+      if (n && !l()) return;
+      await a.load(i);
       return;
     }
-    const o = new Promise(async (a, l) => {
-      let d;
-      try {
-        let h = this.blobs.get(e);
-        h || (h = await new Nn(
-          t,
-          this.currentBaseURL || "",
-          n,
-          {
-            cssProperties: this.currentCssProperties,
-            injector: this.injector
-          }
-        ).build(), this.blobs.set(e, h));
-        d = new Mn(h, this.contentProtectionConfig, this.keyboardPeripheralsConfig);
-        await d.hide(), this.container.appendChild(d.iframe), await d.load(i), this.pool.set(e, d), a();
-      } catch (h) {
-        await d?.destroy(), l(h);
-      }
-    });
-    this.inprogress.set(e, o);
+    const h = (async () => {
+      const c = await this.constructFrame(t, e, i, !0, () => !n || l());
+      if (c && n && !l()) this.evict(e);
+    })();
+    this.inprogress.set(e, h);
     try {
-      await o;
+      await h;
     } finally {
-      this.inprogress.delete(e);
+      this.inprogress.get(e) === h && this.inprogress.delete(e), this.pruneBlobs();
     }
   }
   setCSSProperties(t) {
@@ -7450,7 +7626,7 @@ class to {
           return !1;
       return !0;
     })(this.currentCssProperties || {}, t)) {
-      this.currentCssProperties = t, this.pool.forEach((i) => {
+      this.release(), this.currentCssProperties = t, this.pool.forEach((i) => {
         i.setCSSProperties(t);
       });
       for (const i of this.blobs.keys())
@@ -7483,7 +7659,7 @@ class to {
 }
 class eo {
   constructor(t, e, i, n = {}, s = []) {
-    this.currModules = [], this.cachedPage = void 0, this.peripherals = t, this.debugHref = i, this.contentProtectionConfig = { ...n }, this.keyboardPeripheralsConfig = [...s], this.frame = document.createElement("iframe"), this.frame.sandbox.value = "allow-same-origin allow-scripts", this.frame.classList.add("readium-navigator-iframe"), this.frame.classList.add("blank"), this.frame.scrolling = "no", this.frame.style.visibility = "hidden", this.frame.style.setProperty("aria-hidden", "true"), this.frame.style.display = "none", this.frame.style.position = "absolute", this.frame.style.pointerEvents = "none", this.frame.style.transformOrigin = "0 0", this.frame.style.transform = "scale(1)", this.frame.style.background = "#fff", this.frame.style.touchAction = "none", this.frame.dataset.originalHref = i, this.source = "about:blank", this.wrapper = document.createElement("div"), this.wrapper.style.position = "relative", this.wrapper.style.float = this.wrapper.style.cssFloat = e === I.rtl ? "right" : "left", this.wrapper.appendChild(this.frame);
+    this.currModules = [], this.cachedPage = void 0, this.peripherals = t, this.debugHref = i, this.contentProtectionConfig = { ...n }, this.keyboardPeripheralsConfig = [...s], this.frame = document.createElement("iframe"), this.frame.classList.add("readium-navigator-iframe"), this.frame.classList.add("blank"), this.frame.scrolling = "no", this.frame.style.visibility = "hidden", this.frame.style.setProperty("aria-hidden", "true"), this.frame.style.display = "none", this.frame.style.position = "absolute", this.frame.style.pointerEvents = "none", this.frame.style.transformOrigin = "0 0", this.frame.style.transform = "scale(1)", this.frame.style.background = "#fff", this.frame.style.touchAction = "none", this.frame.dataset.originalHref = i, this.source = "about:blank", this.wrapper = document.createElement("div"), this.wrapper.style.position = "relative", this.wrapper.style.float = this.wrapper.style.cssFloat = e === I.rtl ? "right" : "left", this.wrapper.appendChild(this.frame);
   }
   async load(t, e) {
     return this.source === e && this.loadPromise && [...this.currModules].sort().join("|") === [...t].sort().join("|") ? this.loadPromise : (this.loaded && this.source !== e && this.window.stop(), this.source = e, this.loadPromise = new Promise((i, n) => {
@@ -9172,11 +9348,11 @@ const Lo = (r) => ({
 });
 class zn extends Pn {
   constructor(t, e, i, n = [], s = void 0, o = { preferences: {}, defaults: {} }) {
-    super(), this._preferencesEditor = null, this._injector = null, this._isNavigating = !1, this._navigatorProtector = null, this._keyboardPeripheralsManager = null, this._suspiciousActivityListener = null, this._keyboardPeripheralListener = null, this._decorations = /* @__PURE__ */ new Map(), this._decorationObservers = /* @__PURE__ */ new Map(), this._decorationActivationState = /* @__PURE__ */ new Map(), this._decorationActivationConsumed = !1, this.reflowViewport = {
+    super(), this._preferencesEditor = null, this._injector = null, this._isNavigating = !1, this.turnRequestId = 0, this._navigatorProtector = null, this._keyboardPeripheralsManager = null, this._suspiciousActivityListener = null, this._keyboardPeripheralListener = null, this._decorations = /* @__PURE__ */ new Map(), this._decorationObservers = /* @__PURE__ */ new Map(), this._decorationActivationState = /* @__PURE__ */ new Map(), this._decorationActivationConsumed = !1, this.positionNotificationRevision = 0, this.positionNotificationTimers = /* @__PURE__ */ new Set(), this.scrollPositionTimer = void 0, this.destroyed = !1, this.reflowViewport = {
       readingOrder: [],
       progressions: /* @__PURE__ */ new Map(),
       positions: null
-    }, this.pub = e, this.container = t, this.listeners = Lo(i), this.currentLocation = s, n.length && (this.positions = n), this._preferences = new Ht(o.preferences), this._defaults = new mo(o.defaults), this._settings = new Yi(this._preferences, this._defaults);
+    }, this.pub = e, this.container = t, this.listeners = Lo(i), this.currentLocation = s, this.positionsByHref = /* @__PURE__ */ new Map(), n.length && (this.positions = n), this._preferences = new Ht(o.preferences), this._defaults = new mo(o.defaults), this._settings = new Yi(this._preferences, this._defaults), this.rebuildPositionsByHref();
     const a = Et(e.metadata), l = a === "cjk-horizontal", d = a === "cjk-vertical", c = d || a === "mongolian-vertical", u = l || d;
     this._css = new Co({
       rsProperties: new Eo({ noVerticalPagination: c || void 0 }),
@@ -9219,8 +9395,19 @@ class zn extends Pn {
     const n = Et(t.metadata);
     return n === "cjk-vertical" || n === "mongolian-vertical" || i === v.reflowable && e ? v.scrolled : v.reflowable;
   }
+  rebuildPositionsByHref() {
+    this.positionsByHref.clear();
+    for (const t of this.positions || []) {
+      const e = this.positionsByHref.get(t.href);
+      e ? e.push(t) : this.positionsByHref.set(t.href, [t]);
+    }
+    for (const t of this.positionsByHref.values())
+      t.sort((e, i) => (e.locations?.progression ?? 0) - (i.locations?.progression ?? 0));
+  }
   async load() {
-    if (this.positions?.length || (this.positions = await this.pub.positionsFromManifest()), !this._injector) {
+    if (!this.positions?.length)
+      this.positions = await this.pub.positionsFromManifest(), this.rebuildPositionsByHref();
+    if (!this._injector) {
       const t = await this._readiumRulesPromise;
       this._injector = new Rn({
         rules: [...t, ...this._injectablesConfig.rules],
@@ -9291,11 +9478,14 @@ class zn extends Pn {
     this.framePool.setCSSProperties(e), this._css.userProperties.view === "paged" && this._layout === v.scrolled ? await this.setLayout(v.reflowable) : this._css.userProperties.view === "scroll" && this._layout === v.reflowable && await this.setLayout(v.scrolled), this._css.setContainerWidth();
   }
   async resizeHandler() {
+    this.invalidatePositionNotifications();
+    this.clearPreparedReady();
     const t = this.container.parentElement || document.documentElement;
     if (this._layout === v.fixed) {
       if (this.container.style.width = `${At(t) - this._settings.constraint}px`, !this.framePool) return;
       this.framePool.resizeHandler();
     } else {
+      this.framePool?.release();
       const e = this._css.userProperties.colCount, i = this._css.userProperties.lineLength;
       this._css.resizeHandler(), (this._css.userProperties.view !== "scroll" && e !== this._css.userProperties.colCount || i !== this._css.userProperties.lineLength) && await this.commitCSS(this._css);
     }
@@ -9428,7 +9618,7 @@ class zn extends Pn {
         this.listeners.zoom(e);
         break;
       case "progress":
-        this.syncLocation(e);
+        i === this._cframes[0] && this.syncLocation(e, "scroll");
         break;
       case "content_protection":
         const o = e;
@@ -9555,7 +9745,7 @@ class zn extends Pn {
   }
   // End of Decoration
   async destroy() {
-    this._suspiciousActivityListener && window.removeEventListener(ct, this._suspiciousActivityListener), this._keyboardPeripheralListener && window.removeEventListener(dt, this._keyboardPeripheralListener), this._navigatorProtector?.destroy(), this._keyboardPeripheralsManager?.destroy(), await this.framePool?.destroy(), this._decorations.clear(), this._decorationObservers.clear(), this._decorationActivationState.clear();
+    this.destroyed = !0, this.invalidatePositionNotifications(), this._suspiciousActivityListener && window.removeEventListener(ct, this._suspiciousActivityListener), this._keyboardPeripheralListener && window.removeEventListener(dt, this._keyboardPeripheralListener), this._navigatorProtector?.destroy(), this._keyboardPeripheralsManager?.destroy(), await this.framePool?.destroy(), this._decorations.clear(), this._decorationObservers.clear(), this._decorationActivationState.clear();
   }
   async prepare(t) {
     if (this._layout === v.fixed || !this.framePool)
@@ -9567,8 +9757,51 @@ class zn extends Pn {
     const i = this.framePool.pool.get(e.href)?.iframe?.contentWindow;
     return i ? [i] : [];
   }
+  async reservePrepared(t) {
+    if (this._layout === v.fixed || !this.framePool)
+      return [];
+    const e = this.pub.readingOrder.findWithHref(t.href);
+    if (!e)
+      return [];
+    this.framePool.reserve(e.href);
+    await this.framePool.prepare(this.pub, e.href, this.determineModules(), !0);
+    const i = this.framePool.pool.get(e.href)?.iframe?.contentWindow;
+    return i ? [i] : [];
+  }
+  markPreparedReady(t, e, i) {
+    if (this._layout === v.fixed || !this.framePool)
+      return;
+    const n = this.pub.readingOrder.findWithHref(t.href), s = n && this.framePool.pool.get(n.href);
+    s && (!i || s.window === i) && (s.preparedLayoutKey = e);
+  }
+  isPreparedReady(t, e) {
+    if (this._layout === v.fixed || !this.framePool)
+      return !1;
+    const i = this.pub.readingOrder.findWithHref(t.href), n = i && this.framePool.pool.get(i.href);
+    return !!n && n.preparedLayoutKey === e;
+  }
+  clearPreparedReady(t) {
+    if (this._layout === v.fixed || !this.framePool)
+      return;
+    const e = t && this.pub.readingOrder.findWithHref(t.href);
+    if (t) {
+      const i = e && this.framePool.pool.get(e.href);
+      i && (i.preparedLayoutKey = void 0);
+      return;
+    }
+    this.framePool.pool.forEach((i) => {
+      i.preparedLayoutKey = void 0;
+    });
+  }
+  releasePrepared(t) {
+    if (this._layout === v.fixed || !this.framePool)
+      return;
+    const e = t && this.pub.readingOrder.findWithHref(t.href);
+    this.framePool.release(e?.href);
+  }
   async changeResource(t) {
     if (t === 0) return !1;
+    this.invalidatePositionNotifications();
     if (this._layout === v.fixed) {
       const n = this.framePool, s = n.viewport.positions[0];
       if (t === 1) {
@@ -9618,89 +9851,143 @@ class zn extends Pn {
         }
     return await this.apply(), !0;
   }
-  findLastPositionInProgressionRange(t, e) {
-    const i = t.findLastIndex((n) => {
-      const s = n.locations.progression;
-      return !!(s && s > e.start && s <= e.end);
-    });
-    return i !== -1 ? t[i] : void 0;
-  }
   findNearestPositions(t) {
-    const e = this.positions.filter(
-      (o) => o.href === this.currentLocation.href
-    );
-    let i = this.currentLocation, n;
-    const s = e.findLastIndex((o) => (o.locations.progression ?? 0) <= t.start);
-    if (s !== -1) {
-      i = e[s];
-      const o = e.slice(s + 1);
-      n = this.findLastPositionInProgressionRange(o, t);
+    const e = this.currentLocation?.href ? this.currentLocation : this.positions?.[0], i = e?.href || "", n = this.positionsByHref.get(i) || [];
+    let s = 0, o = n.length;
+    for (; s < o; ) {
+      const h = s + o >> 1;
+      (n[h].locations?.progression ?? 0) <= t.start ? s = h + 1 : o = h;
     }
-    return { first: i, last: n };
+    let a = e, l;
+    const d = s - 1;
+    if (d !== -1) {
+      a = n[d], s = d + 1, o = n.length;
+      for (; s < o; ) {
+        const h = s + o >> 1;
+        (n[h].locations?.progression ?? 0) <= t.end ? s = h + 1 : o = h;
+      }
+      const c = s - 1, u = c > d ? n[c] : void 0, m = u?.locations?.progression;
+      m && m > t.start && m <= t.end && (l = u);
+    }
+    return { first: a, last: l };
   }
   updateViewport(t) {
     this.reflowViewport.readingOrder = [], this.reflowViewport.progressions.clear(), this.reflowViewport.positions = null, this.currentLocation && (this.reflowViewport.readingOrder.push(this.currentLocation.href), this.reflowViewport.progressions.set(this.currentLocation.href, t), this.currentLocation.locations?.position !== void 0 && (this.reflowViewport.positions = [this.currentLocation.locations.position], this.lastLocationInView?.locations?.position !== void 0 && this.reflowViewport.positions.push(this.lastLocationInView.locations.position)));
   }
-  async syncLocation(t) {
-    const e = t, i = this.findNearestPositions(e);
-    this.currentLocation = i.first.copyWithLocations({
-      progression: e.start
-    }), this.lastLocationInView = i.last, this.updateViewport(e), this.listeners.positionChanged(this.currentLocation), await this.framePool.update(this.pub, this.currentLocation, this.determineModules());
+  progressEquals(t) {
+    const e = this.reflowViewport.progressions.get(this.currentLocation.href);
+    return e?.start === t.start && e?.end === t.end;
+  }
+  commitProgress(t) {
+    if (this.progressEquals(t)) return;
+    const e = performance.now(), i = this.findNearestPositions(t), n = performance.now() - e;
+    if (!i.first) return;
+    return this.currentLocation = i.first.copyWithLocations({
+      progression: t.start
+    }), this.lastLocationInView = i.last, this.updateViewport(t), { locator: this.currentLocation, locatorLookupMs: n };
+  }
+  notifyPositionChanged(t, e) {
+    const i = t.copyWithLocations({ ...t.locations }), n = Object.freeze({ ...e }), s = this.positionNotificationRevision, o = () => {
+      this.positionNotificationTimers.delete(a), this.scrollPositionTimer === a && (this.scrollPositionTimer = void 0), !this.destroyed && s === this.positionNotificationRevision && this.currentLocation.href === i.href && this.listeners.positionChanged(i, n);
+    };
+    e.cause === "scroll" && this.scrollPositionTimer !== void 0 && (this.ownerWindow.clearTimeout(this.scrollPositionTimer), this.positionNotificationTimers.delete(this.scrollPositionTimer));
+    const a = this.ownerWindow.setTimeout(o, 0);
+    this.positionNotificationTimers.add(a), e.cause === "scroll" && (this.scrollPositionTimer = a);
+  }
+  invalidatePositionNotifications() {
+    this.positionNotificationRevision += 1, this.positionNotificationTimers.forEach((t) => this.ownerWindow.clearTimeout(t)), this.positionNotificationTimers.clear(), this.scrollPositionTimer = void 0;
+  }
+  syncLocation(t, e = "scroll") {
+    const i = this.commitProgress(t);
+    i && this.notifyPositionChanged(i.locator, {
+      cause: e,
+      callbackReleased: !1
+    });
   }
   goBackward(t, e) {
+    const r = ++this.turnRequestId;
     if (this._isNavigating) {
-      e(!1);
+      e(!1, void 0, r);
       return;
     }
     const i = this._cframes[0];
     if (this._layout !== v.fixed && !i?.msg) {
-      e(!1);
+      e(!1, void 0, r);
       return;
     }
     this._isNavigating = !0;
     const n = (s) => {
-      this._isNavigating = !1, console.error("Failed to go backward:", s), e(!1);
+      this._isNavigating = !1, console.error("Failed to go backward:", s), e(!1, void 0, r);
     };
     this._layout === v.fixed ? this.changeResource(-1).then((s) => {
-      this._isNavigating = !1, e(s);
-    }).catch(n) : i.msg.send("go_prev", void 0, async (s) => {
-      if (s)
-        this._isNavigating = !1, e(!0);
+      this._isNavigating = !1, e(s, void 0, r);
+    }).catch(n) : i.msg.send("go_prev", void 0, async (s, o) => {
+      const a = s?.kind === "turn", l = a ? !!s.ok : !!s, d = a ? this.commitProgress(s.progress) : void 0, h = s?.transport ?? o;
+      if (l) {
+        this._isNavigating = !1;
+        try {
+          e(!0, h, r);
+        } finally {
+          d && this.notifyPositionChanged(d.locator, {
+            cause: "turn",
+            callbackReleased: !0,
+            turnRequestId: r,
+            iframeElapsedMs: s.iframeElapsedMs,
+            locatorLookupMs: d.locatorLookupMs,
+            transport: h
+          });
+        }
+      }
       else {
         try {
-          const o = await this.changeResource(-1);
-          this._isNavigating = !1, e(o);
-        } catch (o) {
-          n(o);
+          const c = await this.changeResource(-1);
+          this._isNavigating = !1, e(c, h, r);
+        } catch (c) {
+          n(c);
         }
       }
     });
   }
   goForward(t, e) {
+    const r = ++this.turnRequestId;
     if (this._isNavigating) {
-      e(!1);
+      e(!1, void 0, r);
       return;
     }
     const i = this._cframes[0];
     if (this._layout !== v.fixed && !i?.msg) {
-      e(!1);
+      e(!1, void 0, r);
       return;
     }
     this._isNavigating = !0;
     const n = (s) => {
-      this._isNavigating = !1, console.error("Failed to go forward:", s), e(!1);
+      this._isNavigating = !1, console.error("Failed to go forward:", s), e(!1, void 0, r);
     };
     this._layout === v.fixed ? this.changeResource(1).then((s) => {
-      this._isNavigating = !1, e(s);
-    }).catch(n) : i.msg.send("go_next", void 0, async (s) => {
-      if (s)
-        this._isNavigating = !1, e(!0);
+      this._isNavigating = !1, e(s, void 0, r);
+    }).catch(n) : i.msg.send("go_next", void 0, async (s, o) => {
+      const a = s?.kind === "turn", l = a ? !!s.ok : !!s, d = a ? this.commitProgress(s.progress) : void 0, h = s?.transport ?? o;
+      if (l) {
+        this._isNavigating = !1;
+        try {
+          e(!0, h, r);
+        } finally {
+          d && this.notifyPositionChanged(d.locator, {
+            cause: "turn",
+            callbackReleased: !0,
+            turnRequestId: r,
+            iframeElapsedMs: s.iframeElapsedMs,
+            locatorLookupMs: d.locatorLookupMs,
+            transport: h
+          });
+        }
+      }
       else {
         try {
-          const o = await this.changeResource(1);
-          this._isNavigating = !1, e(o);
-        } catch (o) {
-          n(o);
+          const c = await this.changeResource(1);
+          this._isNavigating = !1, e(c, h, r);
+        } catch (c) {
+          n(c);
         }
       }
     });
@@ -9731,8 +10018,8 @@ class zn extends Pn {
   get readingProgression() {
     return this.currentProgression;
   }
-  async setLayout(t) {
-    this._layout !== t && (this._layout = t, await this.framePool.update(this.pub, this.currentLocator, this.determineModules(), !0), this.attachListener());
+  async setLayout(t, e = !1) {
+    (this._layout !== t || e) && (this.invalidatePositionNotifications(), this.clearPreparedReady(), this.framePool.release(), this._layout = t, await this.framePool.update(this.pub, this.currentLocator, this.determineModules(), !0), this.attachListener());
   }
   get publication() {
     return this.pub;

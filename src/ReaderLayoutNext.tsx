@@ -1,7 +1,19 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Book, ReaderSeekRequest, ReaderTocItem } from './types';
 import { useAppContext } from './store/AppStore';
-import { AlignJustify, ArrowLeftRight, ArrowUpDown, BookOpen, ChevronLeft, Columns2, List, Monitor, Moon, Settings2, StepForward, Sun, Zap } from 'lucide-react';
+import AlignJustify from 'lucide-react/dist/esm/icons/align-justify.mjs';
+import ArrowLeftRight from 'lucide-react/dist/esm/icons/arrow-left-right.mjs';
+import ArrowUpDown from 'lucide-react/dist/esm/icons/arrow-up-down.mjs';
+import BookOpen from 'lucide-react/dist/esm/icons/book-open.mjs';
+import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.mjs';
+import Columns2 from 'lucide-react/dist/esm/icons/columns-2.mjs';
+import List from 'lucide-react/dist/esm/icons/list.mjs';
+import Monitor from 'lucide-react/dist/esm/icons/monitor.mjs';
+import Moon from 'lucide-react/dist/esm/icons/moon.mjs';
+import Settings2 from 'lucide-react/dist/esm/icons/settings-2.mjs';
+import StepForward from 'lucide-react/dist/esm/icons/step-forward.mjs';
+import Sun from 'lucide-react/dist/esm/icons/sun.mjs';
+import Zap from 'lucide-react/dist/esm/icons/zap.mjs';
 import { AnimatePresence, motion } from 'motion/react';
 import { ReadiumReaderViewer } from './ReadiumReaderViewer';
 import { READER_FONT_OPTIONS, READING_SETTING_LIMITS } from './lib/readingSettings';
@@ -228,7 +240,9 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
                     <SegmentButton
                       key={item.value}
                       active={settings.pageTurnAnimation === item.value}
-                      onClick={() => updateSettings({ pageTurnAnimation: item.value })}
+                      onClick={() => updateSettings(item.value === 'scroll'
+                        ? { pageTurnAnimation: item.value, pageMode: 'single' }
+                        : { pageTurnAnimation: item.value })}
                       title={item.description}
                       layoutId="reader-page-turn-segment"
                     >

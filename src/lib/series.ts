@@ -52,7 +52,7 @@ export function displayBookFileName(book: Book) {
 }
 
 export function preferredBookFileName(book: Book) {
-  return book.fileName || fileNameFromPath(book.path) || book.title;
+  return book.fileName || book.title;
 }
 
 function cleanSeriesName(value: string) {
@@ -64,10 +64,4 @@ function cleanSeriesName(value: string) {
 
 function preferredBookFileStem(book: Book) {
   return preferredBookFileName(book).replace(/\.[a-z0-9]+$/i, '').trim();
-}
-
-function fileNameFromPath(path: string) {
-  const normalized = path.replace(/[\\/]+/g, '/');
-  const segments = normalized.split('/');
-  return segments[segments.length - 1]?.trim() || '';
 }

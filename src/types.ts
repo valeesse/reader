@@ -1,22 +1,17 @@
 export type BookType = 'epub' | 'txt';
-export type BookSource = 'external' | 'managed' | 'webdav';
 
 export interface Book {
   id: string;
+  resourceId: string;
   title: string;
   author: string;
   cover?: string; // base64 or blob URL
   type: BookType;
-  path: string;
-  fingerprint?: string;
-  localResourceId?: string;
   fileName?: string;
   seriesName?: string;
   seriesIndex?: number;
   seriesId?: string;
   addedAt: number;
-  source?: BookSource;
-  remotePath?: string;
 }
 
 export interface Series {
@@ -27,7 +22,6 @@ export interface Series {
 
 export interface ReadingProgress {
   bookId: string;
-  bookFingerprint?: string;
   location?: string; // epubcfi for epub
   scrollPercentage?: number; // for txt
   updatedAt: number;
@@ -69,7 +63,7 @@ export interface AppSettings {
 }
 
 export interface SyncSnapshot {
-  version: 1 | 2;
+  version: 2;
   books: Book[];
   series: Series[];
   settings: AppSettings;
@@ -83,11 +77,9 @@ export interface WebDavBook {
   title: string;
   author: string;
   type: BookType;
-  path: string;
   fingerprint: string;
   fileName: string;
   addedAt: number;
-  source: 'webdav';
   remotePath: string;
   size?: number;
   modifiedAt?: number;

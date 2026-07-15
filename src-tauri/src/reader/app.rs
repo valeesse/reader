@@ -1,27 +1,45 @@
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let process_started_at = std::time::Instant::now();
+    // The real WebView becomes visible only after index.html has parsed its
+    // zero-dependency shell. A second native splash window would add a
+    // distracting environment-window transition without accelerating cargo.
     tauri::Builder::default()
         .manage(ReaderState::default())
-        .setup(|app| {
-            let handle = app.handle().clone();
-            std::thread::spawn(move || {
-                let state = handle.state::<ReaderState>();
-                let Ok(_txt_guard) = state.txt_books.lock() else {
-                    return;
-                };
-                let Ok(_epub_guard) = state.epub_books.lock() else {
-                    return;
-                };
-                let _ = trim_reader_disk_cache(&handle, reader_disk_cache_max_bytes());
-            });
+        .setup(move |app| {
+            let library_started_at = std::time::Instant::now();
+            initialize_library(app.handle(), &app.state::<ReaderState>())?;
+            eprintln!(
+                "[startup] native library ready in {} ms; process elapsed {} ms",
+                library_started_at.elapsed().as_millis(),
+                process_started_at.elapsed().as_millis(),
+            );
+
+            // Cache trimming walks every cached file and can take seconds on a
+            // large library. It is maintenance work, never a window-creation
+            // prerequisite, so run it after the WebView has started loading.
+            if let Ok(reader) = reader_service(&app.state::<ReaderState>()) {
+                tauri::async_runtime::spawn_blocking(move || {
+                    let started_at = std::time::Instant::now();
+                    match reader.maintain_disk_cache() {
+                        Ok(()) => eprintln!(
+                            "[startup] background cache maintenance finished in {} ms",
+                            started_at.elapsed().as_millis(),
+                        ),
+                        Err(error) => eprintln!("[startup] background cache maintenance failed: {error}"),
+                    }
+                });
+            }
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            startup_shell_ready,
             scan_library,
-            import_managed_books,
-            identify_local_books,
-            pick_book_files_fast,
+            reader_books,
+            reader_cover,
+            get_library_root,
+            set_library_root,
             pick_library_directory_fast,
             open_txt_book,
             read_txt_preview,

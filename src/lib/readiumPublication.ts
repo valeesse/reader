@@ -83,14 +83,14 @@ export type ReadiumResourceLike = {
   close: () => void;
 };
 
-export async function createReadiumPublicationFromPath(path: string, fallbackTitle: string): Promise<ReadiumPublicationLike> {
-  const opened = await openEpubBook(path, fallbackTitle);
+export async function createReadiumPublication(resourceId: string, fallbackTitle: string): Promise<ReadiumPublicationLike> {
+  const opened = await openEpubBook(resourceId, fallbackTitle);
   const { book, sessionId, cacheKey } = opened;
   const readingOrder = new LinkCollection(book.readingOrder.map(nativeLinkToReadiumLink));
   const resources = new LinkCollection(book.resources.map(nativeLinkToReadiumLink));
   const toc = new LinkCollection(book.toc.map(nativeLinkToReadiumLink));
-  const resourceManager = new EpubResourceManager(path, sessionId);
-  const cachedCounts = await getCachedEpubPositionCounts(path, cacheKey).catch(() => undefined);
+  const resourceManager = new EpubResourceManager(resourceId, sessionId);
+  const cachedCounts = await getCachedEpubPositionCounts(resourceId, cacheKey).catch(() => undefined);
   const positions = createPositionsFromCounts(readingOrder.items, cachedCounts || coarsePositionCounts(readingOrder.items));
   let lastPrefetchKey = '';
   let lastPrefetch: Promise<void> = Promise.resolve();
@@ -117,7 +117,7 @@ export async function createReadiumPublicationFromPath(path: string, fallbackTit
       const key = hrefs.join('\n');
       if (key === lastPrefetchKey) return lastPrefetch;
       lastPrefetchKey = key;
-      lastPrefetch = prefetchEpubResources(path, sessionId, hrefs).catch((error) => {
+      lastPrefetch = prefetchEpubResources(resourceId, sessionId, hrefs).catch((error) => {
         if (lastPrefetchKey === key) lastPrefetchKey = '';
         throw error;
       });
@@ -129,7 +129,7 @@ export async function createReadiumPublicationFromPath(path: string, fallbackTit
       const start = Math.max(0, direction > 0 ? index : index - radius);
       const end = Math.min(readingOrder.items.length, direction < 0 ? index + 1 : index + radius + 1);
       const targets = readingOrder.items.slice(start, end);
-      await prefetchEpubResources(path, sessionId, targets.map((link) => link.href));
+      await prefetchEpubResources(resourceId, sessionId, targets.map((link) => link.href));
       await resourceManager.prepare(targets, direction);
     },
     advancePrefetchGeneration: () => resourceManager.advanceGeneration(),
@@ -139,11 +139,11 @@ export async function createReadiumPublicationFromPath(path: string, fallbackTit
       if (signal.aborted) return;
       const refined = createPositionsFromCounts(readingOrder.items, counts);
       positions.splice(0, positions.length, ...refined);
-      await saveCachedEpubPositionCounts(path, cacheKey, counts);
+      await saveCachedEpubPositionCounts(resourceId, cacheKey, counts);
     },
     close: () => {
       resourceManager.close();
-      closeEpubBook(path, sessionId).catch(() => {});
+      closeEpubBook(resourceId, sessionId).catch(() => {});
     },
   };
 }
@@ -355,9 +355,9 @@ class ReadiumResource {
 }
 
 class EpubResourceManager {
-  private path: string;
+  private resourceId: string;
   private sessionId: string;
-  private payloads = new ReaderContentCache<{ href: string; mediaType: string; text?: string | null; base64?: string | null; filePath?: string | null }>(
+  private payloads = new ReaderContentCache<{ href: string; mediaType: string; text?: string | null; filePath?: string | null; binaryUrl?: string | null }>(
     'epub-payload', EPUB_PAYLOAD_CACHE_LIMIT, EPUB_FRONTEND_CACHE_BYTES,
   );
   private transformed = new ReaderContentCache<string>('epub-transformed', 24, EPUB_TRANSFORMED_CACHE_BYTES);
@@ -367,8 +367,8 @@ class EpubResourceManager {
   private blobSizes = new Map<string, number>();
   private blobBytes = 0;
 
-  constructor(path: string, sessionId: string) {
-    this.path = path;
+  constructor(resourceId: string, sessionId: string) {
+    this.resourceId = resourceId;
     this.sessionId = sessionId;
   }
 
@@ -378,7 +378,7 @@ class EpubResourceManager {
 
   async sourceText(link: ReadiumLink) {
     const payload = await this.payloadFor(link.href);
-    return payload.text ?? (payload.base64 ? new TextDecoder().decode(base64ToBytes(payload.base64)) : '');
+    return payload.text ?? '';
   }
 
   async read(link: ReadiumLink) {
@@ -388,11 +388,12 @@ class EpubResourceManager {
     }
 
     const payload = await this.payloadFor(link.href);
-    if (payload.filePath) {
-      const response = await fetch(toLocalAssetUrl(payload.filePath));
+    const binaryUrl = payload.binaryUrl || (payload.filePath ? toLocalAssetUrl(payload.filePath) : undefined);
+    if (binaryUrl) {
+      const response = await fetch(binaryUrl);
+      if (!response.ok) throw new Error(`EPUB binary resource failed (${response.status})`);
       return new Uint8Array(await response.arrayBuffer());
     }
-    if (payload.base64) return base64ToBytes(payload.base64);
     if (typeof payload.text === 'string') return new TextEncoder().encode(payload.text);
     return undefined;
   }
@@ -402,7 +403,7 @@ class EpubResourceManager {
     if (link.mediaType.isHTML || link.type === 'text/css') {
       return this.transformed.getOrCreate(normalized, async () => {
         const payload = await this.payloadFor(link.href);
-        const text = payload.text ?? (payload.base64 ? new TextDecoder().decode(base64ToBytes(payload.base64)) : undefined);
+        const text = payload.text ?? undefined;
         if (typeof text !== 'string') return '';
         const result = link.mediaType.isHTML
           ? await this.rewriteHtml(text, link.href)
@@ -412,7 +413,7 @@ class EpubResourceManager {
       });
     }
     const payload = await this.payloadFor(link.href);
-    const text = payload.text ?? (payload.base64 ? new TextDecoder().decode(base64ToBytes(payload.base64)) : undefined);
+    const text = payload.text ?? undefined;
     return text;
   }
 
@@ -447,10 +448,10 @@ class EpubResourceManager {
   private payloadFor(href: string) {
     const normalized = normalizeZipPath(stripHash(href));
     return this.payloads.getOrCreate(normalized, async () => {
-      const payload = await readEpubResource(this.path, this.sessionId, normalized);
+      const payload = await readEpubResource(this.resourceId, this.sessionId, normalized);
       const bytes = typeof payload.text === 'string'
         ? estimateStringBytes(payload.text)
-        : payload.base64 ? Math.ceil(payload.base64.length * 0.75) : 256;
+        : 256;
       this.payloads.updateSize(normalized, bytes);
       return payload;
     });
@@ -467,14 +468,15 @@ class EpubResourceManager {
     const link = new ReadiumLink({ href: normalized });
     const payload = await this.payloadFor(normalized);
     const type = payload.mediaType || link.type;
-    if (payload.filePath && type !== 'text/css' && !link.mediaType.isHTML) {
-      return toLocalAssetUrl(payload.filePath);
+    const directUrl = payload.binaryUrl || (payload.filePath ? toLocalAssetUrl(payload.filePath) : undefined);
+    if (directUrl && type !== 'text/css' && !link.mediaType.isHTML) {
+      return directUrl;
     }
     const content = type === 'text/css'
-      ? await this.rewriteCss(payload.text ?? new TextDecoder().decode(base64ToBytes(payload.base64 || '')), normalized)
+      ? await this.rewriteCss(payload.text ?? '', normalized)
       : typeof payload.text === 'string'
         ? payload.text
-        : bytesToBlobPart(base64ToBytes(payload.base64 || ''));
+        : '';
     const blob = new Blob([content], { type });
     const url = URL.createObjectURL(blob);
     this.rememberBlobUrl(normalized, url, blob.size);
@@ -534,7 +536,9 @@ class EpubResourceManager {
         try {
           parts.push(`url(${quote}${await this.blobUrlFor(resolved)}${suffix}${quote})`);
         } catch (error) {
-          warnEpubRewriteOnce(`css:${resolved}`, 'Failed to rewrite EPUB CSS resource URL', { href, resolved, error });
+          if (!isMissingOptionalEpubResource(error)) {
+            warnEpubRewriteOnce(`css:${resolved}`, 'Failed to rewrite EPUB CSS resource URL', { href, resolved, error });
+          }
           parts.push(match[0]);
         }
       }
@@ -664,11 +668,12 @@ export function createLocator(values: {
   text?: unknown;
 }): ReadiumLocatorLike {
   const text = createLocatorText(values.text);
+  const locations = createLocatorLocations(values.locations);
   const locator = {
     href: values.href,
     type: values.type,
     title: values.title,
-    locations: values.locations || {},
+    locations,
     text,
     serialize() {
       return {
@@ -693,6 +698,29 @@ export function createLocator(values: {
     },
   };
   return locator;
+}
+
+function createLocatorLocations(value?: Record<string, unknown>) {
+  const serializedHtmlId = typeof value?.htmlId === 'string' ? value.htmlId : undefined;
+  const locations: Record<string, unknown> & {
+    getCssSelector: () => string | undefined;
+    htmlId: () => string | undefined;
+  } = {
+    ...(value || {}),
+    // The vendored Readium navigator deliberately accesses these semantic
+    // locations through methods (matching Readium's Locations model), not by
+    // reading the JSON properties directly.  Keep the properties serializable
+    // while exposing the model-compatible accessors used by go(locator).
+    getCssSelector() {
+      return typeof locations.cssSelector === 'string' ? locations.cssSelector : undefined;
+    },
+    htmlId() {
+      return typeof locations.htmlIdValue === 'string'
+        ? locations.htmlIdValue
+        : serializedHtmlId;
+    },
+  };
+  return locations;
 }
 
 function createLocatorText(value: unknown): ReadiumTextLike | undefined {
@@ -736,8 +764,15 @@ async function rewriteElementUrl(element: Element, attribute: string, baseDir: s
   try {
     element.setAttribute(attribute, `${await resolveUrl(resolved)}${suffix}`);
   } catch (error) {
-    warnEpubRewriteOnce(`html:${resolved}`, 'Failed to rewrite EPUB resource URL', { attribute, value, resolved, error });
+    if (!isMissingOptionalEpubResource(error)) {
+      warnEpubRewriteOnce(`html:${resolved}`, 'Failed to rewrite EPUB resource URL', { attribute, value, resolved, error });
+    }
   }
+}
+
+function isMissingOptionalEpubResource(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /(?:missing resource|resource is not in the manifest)/i.test(message);
 }
 
 function warnEpubRewriteOnce(key: string, message: string, detail: Record<string, unknown>) {
@@ -845,17 +880,4 @@ function mimeFromPath(path: string) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
-}
-
-function base64ToBytes(value: string) {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-function bytesToBlobPart(bytes: Uint8Array) {
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }

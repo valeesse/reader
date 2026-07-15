@@ -1,16 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Book, WebDavBook } from '../types';
 import { useAppContext } from '../store/AppStore';
-import { cacheWebDavBook, downloadWebDavBook, listWebDavBooks } from '../lib/native';
-import { BookOpen, Cloud, Download, FolderTree, LoaderCircle, RefreshCw, Search } from 'lucide-react';
+import { downloadWebDavBook, listWebDavBooks } from '../lib/native';
+import { Cloud, Download, FolderTree, LoaderCircle, RefreshCw, Search } from 'lucide-react';
 
-export function WebDavLibrary({ onReadBook }: { onReadBook: (book: Book) => void }) {
+export function WebDavLibrary({ onReadBook: _onReadBook }: { onReadBook: (book: Book) => void }) {
   const { settings } = useAppContext();
   const [books, setBooks] = useState<WebDavBook[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
-  const [openingBookId, setOpeningBookId] = useState<string | null>(null);
   const [downloadingBookId, setDownloadingBookId] = useState<string | null>(null);
 
   const canBrowse =
@@ -58,23 +57,6 @@ export function WebDavLibrary({ onReadBook }: { onReadBook: (book: Book) => void
       return a.fileName.localeCompare(b.fileName, 'zh-Hans-CN');
     });
   }, [books, query]);
-
-  const openRemoteBook = async (book: WebDavBook) => {
-    try {
-      setOpeningBookId(book.id);
-      setStatus(`正在打开 ${book.title}...`);
-      const local = await cacheWebDavBook(settings.webDavConfig, book.remotePath);
-      onReadBook({
-        ...book,
-        ...local,
-      });
-      setStatus(`已打开 ${book.title}。`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : '打开云端图书失败。');
-    } finally {
-      setOpeningBookId(null);
-    }
-  };
 
   const downloadRemoteBook = async (book: WebDavBook) => {
     try {
@@ -162,14 +144,7 @@ export function WebDavLibrary({ onReadBook }: { onReadBook: (book: Book) => void
                   </div>
 
                   <div className="flex shrink-0 items-center gap-2">
-                    <button
-                      onClick={() => openRemoteBook(book)}
-                      disabled={openingBookId === book.id}
-                      className="flex items-center justify-center gap-2 rounded-lg bg-[#007AFF] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-60"
-                    >
-                      {openingBookId === book.id ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
-                      打开
-                    </button>
+                    <span className="text-xs text-black/40 dark:text-white/40">下载后放入书库目录即可阅读</span>
                     <button
                       onClick={() => downloadRemoteBook(book)}
                       disabled={downloadingBookId === book.id}

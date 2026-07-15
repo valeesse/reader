@@ -1,18 +1,11 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { homeDir } from '@tauri-apps/api/path';
-import { AppSettings, Book, WebDavBook } from '../types';
+import { AppSettings, WebDavBook } from '../types';
+import { clearCache, epubCommand, getCacheStats, isDesktopRuntime, ReaderCacheStats, txtCommand } from './backend';
 
-type NativeBook = Book;
 let fallbackDialogDirectoryPromise: Promise<string> | undefined;
-
-export interface ScanProgress {
-  visited: number;
-  matched: number;
-  currentPath: string;
-}
 
 export interface NativeTxtChapter {
   id: string;
@@ -69,26 +62,26 @@ export interface NativeEpubResource {
   href: string;
   mediaType: string;
   text?: string | null;
-  base64?: string | null;
   filePath?: string | null;
+  binaryUrl?: string | null;
 }
 
-export interface ReaderCacheStats {
-  bytes: number;
-  files: number;
-  maxBytes: number;
-}
+export type { ReaderCacheStats } from './backend';
 
 export function isTauriApp() {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  return isDesktopRuntime;
 }
 
 export async function showMainWindow() {
   if (!isTauriApp()) return;
   try {
-    await getCurrentWindow().show();
+    await invoke('startup_shell_ready');
   } catch (error) {
-    console.warn('Failed to show main window', error);
+    try {
+      await getCurrentWindow().show();
+    } catch (fallbackError) {
+      console.warn('Failed to show main window', error, fallbackError);
+    }
   }
 }
 
@@ -111,24 +104,6 @@ export async function selectLibraryDirectory(): Promise<string | undefined> {
   return selected;
 }
 
-export async function selectBookFiles(): Promise<string[]> {
-  const defaultPath = await libraryDialogDirectory();
-  try {
-    return await invoke<string[]>('pick_book_files_fast', { initialDirectory: defaultPath });
-  } catch (error) {
-    console.info('Fast file picker unavailable; using Tauri dialog', error);
-  }
-  const selected = await open({
-    directory: false,
-    multiple: true,
-    title: '导入 EPUB / TXT',
-    filters: [{ name: 'Books', extensions: ['epub', 'txt'] }],
-    defaultPath,
-  });
-  const paths = Array.isArray(selected) ? selected : typeof selected === 'string' ? [selected] : [];
-  return paths;
-}
-
 export function prewarmLibraryDialogDirectory() {
   void libraryDialogDirectory();
 }
@@ -138,57 +113,37 @@ async function libraryDialogDirectory() {
   return fallbackDialogDirectoryPromise;
 }
 
-export async function importManagedBooks(paths: string[]): Promise<Book[]> {
-  if (paths.length === 0) return [];
-  return invoke<NativeBook[]>('import_managed_books', { paths });
+export async function openTxtBook(resourceId: string): Promise<NativeTxtBookInfo> {
+  return txtCommand('open', 'open_txt_book', { resourceId });
 }
 
-export async function identifyLocalBooks(paths: string[]) {
-  if (paths.length === 0) return [];
-  return invoke<Array<{ path: string; fingerprint: string; localResourceId: string }>>('identify_local_books', { paths });
+export async function readTxtPreview(resourceId: string, maxChars = 12000): Promise<NativeTxtPreview> {
+  return txtCommand('preview', 'read_txt_preview', { resourceId, maxChars });
 }
 
-export async function scanLibraryPath(path: string): Promise<Book[]> {
-  return invoke<NativeBook[]>('scan_library', { path });
+export async function readTxtWindow(resourceId: string, sessionId: string, start: number, end: number): Promise<NativeTxtWindow> {
+  return txtCommand('read', 'read_txt_window', { resourceId, sessionId, start, end });
 }
 
-export async function onLibraryScanProgress(callback: (progress: ScanProgress) => void) {
-  return listen<ScanProgress>('library-scan://progress', (event) => callback(event.payload));
+export async function closeTxtBook(resourceId: string, sessionId: string) {
+  await txtCommand('close', 'close_txt_book', { resourceId, sessionId });
 }
 
-export async function openTxtBook(path: string): Promise<NativeTxtBookInfo> {
-  return invoke<NativeTxtBookInfo>('open_txt_book', { path });
+export async function openEpubBook(resourceId: string, fallbackTitle: string): Promise<NativeEpubOpenResult> {
+  return epubCommand('open', 'open_epub_book', { resourceId, fallbackTitle });
 }
 
-export async function readTxtPreview(path: string, maxChars = 12000): Promise<NativeTxtPreview> {
-  return invoke<NativeTxtPreview>('read_txt_preview', { path, maxChars });
+export async function readEpubResource(resourceId: string, sessionId: string, href: string): Promise<NativeEpubResource> {
+  return epubCommand('read', 'read_epub_resource', { resourceId, sessionId, href });
 }
 
-export async function readTxtWindow(path: string, sessionId: string, start: number, end: number): Promise<NativeTxtWindow> {
-  return invoke<NativeTxtWindow>('read_txt_window', { path, sessionId, start, end });
+export async function prefetchEpubResources(resourceId: string, sessionId: string, hrefs: string[]) {
+  if (hrefs.length === 0) return;
+  await epubCommand('prefetch', 'prefetch_epub_resources', { resourceId, sessionId, hrefs });
 }
 
-export async function closeTxtBook(path: string, sessionId: string) {
-  if (!isTauriApp()) return;
-  await invoke('close_txt_book', { path, sessionId });
-}
-
-export async function openEpubBook(path: string, fallbackTitle: string): Promise<NativeEpubOpenResult> {
-  return invoke<NativeEpubOpenResult>('open_epub_book', { path, fallbackTitle });
-}
-
-export async function readEpubResource(path: string, sessionId: string, href: string): Promise<NativeEpubResource> {
-  return invoke<NativeEpubResource>('read_epub_resource', { path, sessionId, href });
-}
-
-export async function prefetchEpubResources(path: string, sessionId: string, hrefs: string[]) {
-  if (!isTauriApp() || hrefs.length === 0) return;
-  await invoke('prefetch_epub_resources', { path, sessionId, hrefs });
-}
-
-export async function closeEpubBook(path: string, sessionId: string) {
-  if (!isTauriApp()) return;
-  await invoke('close_epub_book', { path, sessionId });
+export async function closeEpubBook(resourceId: string, sessionId: string) {
+  await epubCommand('close', 'close_epub_book', { resourceId, sessionId });
 }
 
 export function toLocalAssetUrl(path: string) {
@@ -196,13 +151,11 @@ export function toLocalAssetUrl(path: string) {
 }
 
 export async function getReaderCacheStats() {
-  if (!isTauriApp()) return { bytes: 0, files: 0, maxBytes: 0 } satisfies ReaderCacheStats;
-  return invoke<ReaderCacheStats>('reader_cache_stats');
+  return getCacheStats();
 }
 
 export async function clearReaderCache() {
-  if (!isTauriApp()) return;
-  await invoke('clear_reader_cache');
+  await clearCache();
 }
 
 export async function saveImageFromSource(src: string, suggestedName = 'image') {
@@ -287,7 +240,7 @@ export async function cacheWebDavBook(
   config: AppSettings['webDavConfig'],
   remotePath: string,
 ) {
-  return invoke<{ path: string; fingerprint: string; localResourceId: string }>('webdav_cache_book', { config, remotePath });
+  return invoke<{ resourceId: string }>('webdav_cache_book', { config, remotePath });
 }
 
 export async function downloadWebDavBook(

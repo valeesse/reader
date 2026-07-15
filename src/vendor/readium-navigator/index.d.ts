@@ -21,9 +21,18 @@ export type ReadiumFrameClickEvent = {
   doNotDisturb?: boolean;
 };
 
+export type ReadiumPositionChangedContext = {
+  cause: 'turn' | 'scroll';
+  callbackReleased: boolean;
+  turnRequestId?: number;
+  iframeElapsedMs?: number;
+  locatorLookupMs?: number;
+  transport?: 'direct' | 'postMessage';
+};
+
 export type ReadiumNavigatorListeners = Partial<{
   frameLoaded: (wnd: Window) => void;
-  positionChanged: (locator: ReadiumLocator) => void;
+  positionChanged: (locator: ReadiumLocator, context?: ReadiumPositionChangedContext) => void;
   tap: (event: ReadiumFrameClickEvent) => boolean;
   click: (event: ReadiumFrameClickEvent) => boolean;
   zoom: (scale: number) => void;
@@ -49,10 +58,17 @@ export class EpubNavigator {
   load(): Promise<void>;
   destroy(): Promise<void>;
   submitPreferences(preferences: any): Promise<void>;
+  setLayout(layout: 'fixed' | 'reflowable' | 'scrolled', force?: boolean): Promise<void>;
+  readonly layout: 'fixed' | 'reflowable' | 'scrolled';
   resizeHandler(): Promise<void>;
   prepare(locator: ReadiumLocator): Promise<Window[]>;
-  goBackward(animated: boolean, callback: (ok: boolean) => void): void;
-  goForward(animated: boolean, callback: (ok: boolean) => void): void;
+  reservePrepared(locator: ReadiumLocator): Promise<Window[]>;
+  markPreparedReady(locator: ReadiumLocator, token: string, frameWindow?: Window): void;
+  isPreparedReady(locator: ReadiumLocator, token: string): boolean;
+  clearPreparedReady(locator?: ReadiumLocator): void;
+  releasePrepared(locator?: ReadiumLocator): void;
+  goBackward(animated: boolean, callback: (ok: boolean, transport?: 'direct' | 'postMessage', turnRequestId?: number) => void): void;
+  goForward(animated: boolean, callback: (ok: boolean, transport?: 'direct' | 'postMessage', turnRequestId?: number) => void): void;
   go(locator: ReadiumLocator, animated: boolean, callback: (ok: boolean) => void): void;
   readonly currentLocator: ReadiumLocator;
   readonly viewport: {

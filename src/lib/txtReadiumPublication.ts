@@ -25,11 +25,11 @@ type TxtChunk = {
 };
 
 export async function createTxtReadiumPublication(
-  path: string,
+  resourceId: string,
   title: string,
   author?: string,
 ): Promise<ReadiumPublicationLike> {
-  const info = await openTxtBook(path);
+  const info = await openTxtBook(resourceId);
   const chunks = createChunks(info);
   const readingOrder = new LinkCollection(chunks.map((chunk) => new ReadiumLink({
     href: chunk.href,
@@ -44,7 +44,7 @@ export async function createTxtReadiumPublication(
       title: chapter.title,
     });
   }));
-  const manager = new TxtResourceManager(path, info, chunks);
+  const manager = new TxtResourceManager(resourceId, info, chunks);
   const positions = createTxtPositions(chunks, info.totalChars);
 
   return {
@@ -62,10 +62,10 @@ export async function createTxtReadiumPublication(
     prefetchAroundHref: async (href, radius = 2, direction = 0) => manager.prefetch(href, radius, direction),
     prepareContentAroundHref: async (href, radius = 2, direction = 0) => manager.prefetch(href, radius, direction),
     advancePrefetchGeneration: () => manager.advanceGeneration(),
-    contentKey: `${path}:${info.totalBytes}:${info.totalChars}:txt-content-v2`,
+    contentKey: `${resourceId}:${info.totalBytes}:${info.totalChars}:txt-content-v2`,
     close: () => {
       manager.close();
-      closeTxtBook(path, info.sessionId).catch(() => {});
+      closeTxtBook(resourceId, info.sessionId).catch(() => {});
     },
   };
 }
@@ -151,7 +151,7 @@ class TxtResourceManager {
   private closed = false;
 
   constructor(
-    private path: string,
+    private resourceId: string,
     private info: NativeTxtBookInfo,
     private chunks: TxtChunk[],
   ) {}
@@ -165,7 +165,7 @@ class TxtResourceManager {
     const chunk = this.chunks.find((item) => item.href === link.href.split('#')[0]);
     if (!chunk) throw new Error(`TXT 虚拟资源不存在: ${link.href}`);
     return this.cache.getOrCreate(chunk.href, async () => {
-      const window = await readTxtWindow(this.path, this.info.sessionId, chunk.start, chunk.end);
+      const window = await readTxtWindow(this.resourceId, this.info.sessionId, chunk.start, chunk.end);
       const xhtml = txtWindowToXhtml(window.text, window.start, this.info);
       this.cache.updateSize(chunk.href, estimateStringBytes(xhtml));
       return xhtml;

@@ -1,0 +1,9 @@
+.git
+.opencode
+node_modules
+dist
+target
+src-tauri/target
+books
+*.log
+.env*

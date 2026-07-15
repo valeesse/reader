@@ -1,12 +1,13 @@
 # Zenith Reader
 
-Zenith Reader 是一个基于 Tauri 2、Rust、React 19 和 Readium 的本地桌面阅读器，面向以 EPUB 和 TXT 为主的个人书库场景。
+Zenith Reader 是一个基于 Rust、Tauri 2、React 19 和 Readium 的桌面/Web 双端阅读器，面向以 EPUB 和 TXT 为主的个人书库场景。
 
 它的重点不是“在线内容平台”，而是把本地文件访问、较大的文本体积、连续阅读体验和可调排版放在第一位。
 
 ## 当前能力
 
 - 扫描本地文件夹，递归发现 `.epub` 和 `.txt`
+- 支持将固定书库目录通过 Docker 部署为局域网 Web 阅读器
 - 构建本地书库，支持搜索、筛选、排序和最近阅读入口
 - EPUB 与 TXT 阅读统一基于 Readium navigator，支持目录、资源读取和章节切换
 - TXT 阅读支持中文常见章节名识别，也兼容 `Chapter 1` 这类英文格式
@@ -30,7 +31,8 @@ Zenith Reader 是一个基于 Tauri 2、Rust、React 19 和 Readium 的本地桌
 ## 技术栈
 
 - 桌面壳：Tauri 2
-- 原生层：Rust
+- 共享阅读核心：Rust `reader-core`
+- Web 服务：Axum
 - 前端：React 19 + TypeScript + Vite
 - 样式：Tailwind CSS 4
 - EPUB / TXT 渲染：Readium navigator
@@ -65,6 +67,14 @@ Rust 侧负责更适合放在原生环境里的工作：
 
 - `src-tauri/src/lib.rs`
 
+### 双端运行模型
+
+- 桌面端通过原生目录选择器配置一个书库根目录，之后只扫描该目录。
+- Web 端通过 `ZENITH_LIBRARY_DIR` 配置固定目录，浏览器不会接触服务器路径。
+- 两端使用完整文件 SHA-256 作为稳定书籍 ID，因此在书库内移动或重命名文件后，阅读进度仍可保留。
+- EPUB/TXT 解析、流式 TXT 索引、资源缓存和会话管理由 `crates/reader-core` 共用。
+- 桌面状态保存在本机；Web 状态保存在服务器，仅在 Web 设备之间同步。
+
 ## 性能设计
 
 ### TXT：按窗口读取与渲染
@@ -89,12 +99,19 @@ EPUB 的 manifest、spine、toc 和资源读取放在 Rust 侧完成，前端主
 - 每本书的元数据按文件签名持久化，不再只有一个全局“最近 EPUB”缓存
 - 打开后的 ZIP 目录与文件句柄会复用，批量预取只打开一次归档
 - 文本资源使用同时受数量和字节约束的 LRU 缓存
-- 图片、字体等二进制资源持久化到磁盘，并通过 Tauri asset URL 直接提供给 Readium，避免重复 Blob 拷贝
+- 图片、字体等二进制资源持久化到受控缓存目录。桌面端通过 Tauri asset URL，Web 端通过重新验证阅读会话的同源流式 URL 直接提供给 Readium；JSON 和 IPC 不传输 base64
 - 前端对资源 Promise、Blob URL 和相邻章节预取做去重与上限控制
 - 相邻 reading-order 资源会推进到完成 HTML/CSS 重写、字体/关键图片准备和隐藏 iframe 排版的 L1 状态
 - 内容与版面使用不同缓存键；主题只重绘，字号、窗口、单双页等布局变化只淘汰版面层
 - 运行期缓存同时受数量和字节预算约束，并可取消已经失去阅读方向价值的后台工作
 - 目录中的 `#fragment` 会保留为 Readium locator fragment
+
+二进制资源协议按运行环境适配，但共享同一个 Rust cache：
+
+- Tauri `read_epub_resource` 对文本返回 `text`，对二进制返回已验证位于 core cache 根下的 `filePath`；前端使用 `convertFileSrc`。
+- Web `POST /api/epub/read` 对文本返回 `text`，对二进制只返回 `binaryUrl`。浏览器 GET 该 URL 时，服务端再次验证 `resourceId`、`sessionId` 和 `href`，再通过异步文件流响应，不暴露绝对路径。
+- EPUB 封面提取到受控 cover cache。桌面端使用 asset URL，Web 书籍列表返回同源 cover URL。
+- 批量预取使用独立 ZIP handle，不占用 demand archive mutex；文本进入有数量/字节预算的内存 LRU，二进制只写磁盘。
 
 ### 按书暖缓存
 
@@ -139,6 +156,27 @@ pnpm tauri:dev
 pnpm dev
 ```
 
+### 启动 Web 服务
+
+开发环境分别启动服务端和 Vite；Vite 会把 `/api` 代理到 `127.0.0.1:8080`：
+
+```bash
+pnpm server:dev
+pnpm dev
+```
+
+### Docker 部署
+
+默认 Compose 将仓库下的 `./books` 只读挂载为服务器书库：
+
+```bash
+docker compose up --build -d
+```
+
+打开 `http://服务器地址:8080`。状态与阅读缓存分别保存在 `zenith-state` 和 `zenith-cache` 卷中。部署到其他位置时，修改 `docker-compose.yml` 中 `./books:/data/books:ro` 左侧的宿主机目录即可。
+
+当前 Web 服务不包含鉴权，适合可信局域网部署，不应直接暴露到公网。
+
 ## 常用命令
 
 ```bash
@@ -167,6 +205,15 @@ src-tauri/
   src/
   Cargo.toml
   tauri.conf.json
+
+crates/reader-core/
+  src/
+
+server/
+  src/
+
+Dockerfile
+docker-compose.yml
 ```
 
 ## 适合继续演进的方向

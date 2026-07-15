@@ -1,227 +1,78 @@
-import React, { Suspense, lazy, useState, useEffect, useRef } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { AppProvider, useAppContext } from './store/AppStore';
-import { Sidebar } from './components/Sidebar';
-import { Library } from './components/Library';
-import { SettingsView } from './components/SettingsView';
-import { WebDavLibrary } from './components/WebDavLibrary';
-import { SeriesView } from './SeriesViewNext';
 import { Book } from './types';
-import { importManagedBooks, isTauriApp, onLibraryScanProgress, prewarmLibraryDialogDirectory, scanLibraryPath, selectBookFiles, selectLibraryDirectory, showMainWindow } from './lib/native';
-import { AnimatePresence, motion } from 'motion/react';
+import { markLastReadBook } from './lib/storage';
 import './reader-overrides.css';
 
 let readerLayoutModulePromise: Promise<typeof import('./ReaderLayoutNext')> | undefined;
-
-function loadReaderLayout() {
-  readerLayoutModulePromise ||= import('./ReaderLayoutNext');
-  return readerLayoutModulePromise;
-}
-
+const loadReaderLayout = () => readerLayoutModulePromise ||= import('./ReaderLayoutNext');
 const ReaderLayout = lazy(() => loadReaderLayout().then((module) => ({ default: module.ReaderLayout })));
+const LibraryShell = lazy(() => import('./LibraryShell').then((module) => ({ default: module.LibraryShell })));
 
 function MainLayout() {
-  const { books, addBooks, settings, isLoading, lastReadBookId } = useAppContext();
+  const { books, settings, isLoading, stateReconciled, lastReadBookId } = useAppContext();
   const initialReadingBook = !isLoading && lastReadBookId
     ? books.find((item) => item.id === lastReadBookId) || null
     : null;
-  const [currentView, setCurrentView] = useState<'library' | 'webdav' | 'series' | 'settings'>('library');
   const [readingBook, setReadingBook] = useState<Book | null>(() => initialReadingBook);
-  const [startupResolved, setStartupResolved] = useState(() => !isLoading && !initialReadingBook);
-  const [readerPresentable, setReaderPresentable] = useState(() => !initialReadingBook);
-  const [scanMessage, setScanMessage] = useState('');
-  const [isScanning, setIsScanning] = useState(false);
-  const startupResumeCheckedRef = useRef(false);
-  const startupResumeCancelledRef = useRef(false);
-  const didShowWindowRef = useRef(false);
-  const mountedRef = useRef(true);
+  const [startupResolved, setStartupResolved] = useState(() => Boolean(initialReadingBook));
+  const startupResumePendingRef = useRef(true);
 
-  useEffect(() => () => {
-    mountedRef.current = false;
+  const presentApplication = useCallback(() => {
+    const startup = (window as Window & { __ZENITH_STARTUP__?: { hideOverlay?: () => void } }).__ZENITH_STARTUP__;
+    startup?.hideOverlay?.();
   }, []);
 
-  const showWindowOnce = () => {
-    if (didShowWindowRef.current) return;
-    didShowWindowRef.current = true;
-    void showMainWindow();
-  };
-
   useEffect(() => {
-    if (isLoading || startupResumeCheckedRef.current) return;
-    startupResumeCheckedRef.current = true;
-
-    const resolveStartup = async () => {
-      try {
-        const book = lastReadBookId ? books.find((item) => item.id === lastReadBookId) : undefined;
-        if (book) {
-          const publicationModulePromise = import('./lib/readerPublication');
-          const layoutModulePromise = loadReaderLayout();
-          const publicationModule = await publicationModulePromise;
-          void publicationModule.prewarmReaderPublication(book).catch(() => {});
-          await layoutModulePromise;
-          if (mountedRef.current && !startupResumeCancelledRef.current) {
-            setReadingBook(book);
-          }
-        }
-      } finally {
-        if (mountedRef.current) setStartupResolved(true);
-      }
-    };
-
-    void resolveStartup();
-  }, [books, isLoading, lastReadBookId]);
-
-  useEffect(() => {
-    if (isLoading || !startupResolved || didShowWindowRef.current) return;
-    if (readingBook && !readerPresentable) return;
-
-    const readyTimerId = window.setTimeout(() => {
-      console.info('[startup] first presentable screen ready', {
-        elapsedMs: Math.round(performance.now()),
-        route: readingBook ? 'reader' : 'library',
-      });
-      showWindowOnce();
-    }, 0);
-
-    return () => window.clearTimeout(readyTimerId);
-  }, [isLoading, readerPresentable, readingBook, startupResolved]);
-
-  useEffect(() => {
-    if (!startupResolved || readingBook) return;
-    const idleId = window.requestIdleCallback(() => {
-      prewarmLibraryDialogDirectory();
-      void loadReaderLayout();
-    }, { timeout: 1800 });
-    return () => window.cancelIdleCallback(idleId);
-  }, [readingBook, startupResolved]);
-
-  useEffect(() => {
-    const fallbackId = window.setTimeout(() => {
-      if (didShowWindowRef.current) return;
-      console.warn('[startup] reader recovery timed out; showing library fallback', {
-        elapsedMs: Math.round(performance.now()),
-        isLoading,
-        startupResolved,
-      });
-      setReadingBook(null);
-      setReaderPresentable(true);
+    if (isLoading || !startupResumePendingRef.current) return;
+    const book = lastReadBookId ? books.find((item) => item.id === lastReadBookId) : undefined;
+    if (book) {
+      setReadingBook(book);
       setStartupResolved(true);
-      showWindowOnce();
-    }, 2500);
-
-    return () => window.clearTimeout(fallbackId);
-  }, []);
-
-  // Apply theme to document
-  useEffect(() => {
-    if (settings.theme === 'dark') {
-      document.documentElement.classList.add('dark');
-      document.documentElement.classList.remove('sepia');
-    } else if (settings.theme === 'sepia') {
-      document.documentElement.classList.add('sepia');
-      document.documentElement.classList.remove('dark');
-    } else {
-      document.documentElement.classList.remove('dark', 'sepia');
+      startupResumePendingRef.current = false;
+    } else if (stateReconciled) {
+      setStartupResolved(true);
+      startupResumePendingRef.current = false;
     }
+  }, [books, isLoading, lastReadBookId, stateReconciled]);
+
+  useEffect(() => {
+    if (!readingBook || readingBook.id === lastReadBookId) return;
+    void markLastReadBook(readingBook.id).catch((error) => {
+      console.warn('Failed to record last-read book', error);
+    });
+  }, [lastReadBookId, readingBook?.id]);
+
+  useEffect(() => {
+    document.documentElement.classList.remove('startup-dark', 'startup-sepia');
+    if (settings.theme === 'dark') document.documentElement.classList.add('dark');
+    else if (settings.theme === 'sepia') document.documentElement.classList.add('sepia');
+    else document.documentElement.classList.remove('dark', 'sepia');
+    if (settings.theme !== 'dark') document.documentElement.classList.remove('dark');
+    if (settings.theme !== 'sepia') document.documentElement.classList.remove('sepia');
   }, [settings.theme]);
 
-  const handleAddFiles = async () => {
-    let unlistenProgress: (() => void) | undefined;
-    try {
-      if (!isTauriApp()) {
-        setScanMessage('请在 Tauri 桌面应用中添加本地路径。');
-        return;
-      }
-
-      setIsScanning(true);
-      setScanMessage('正在打开文件夹选择器...');
-      await nextPaint();
-      const path = await selectLibraryDirectory();
-      if (!path) return;
-
-      setScanMessage('正在准备扫描 EPUB / TXT...');
-      unlistenProgress = await onLibraryScanProgress((progress) => {
-        const fileName = progress.currentPath.split(/[\\/]/).pop();
-        setScanMessage(
-          `正在扫描：已检查 ${progress.visited} 项，发现 ${progress.matched} 本${fileName ? `，当前 ${fileName}` : ''}`,
-        );
-      });
-
-      const scannedBooks = await scanLibraryPath(path);
-      await addBooks(scannedBooks);
-      setScanMessage(`扫描完成，发现 ${scannedBooks.length} 本书。`);
-    } catch (err) {
-      console.warn("Directory picking cancelled or failed", err);
-      setScanMessage(err instanceof Error ? err.message : '扫描失败，请检查路径权限。');
-    } finally {
-      unlistenProgress?.();
-      setIsScanning(false);
-    }
-  };
-
-  const handleImportFiles = async () => {
-    try {
-      setIsScanning(true);
-      setScanMessage('正在打开文件选择器...');
-      await nextPaint();
-      const paths = await selectBookFiles();
-      if (paths.length === 0) return;
-      setScanMessage(`正在导入 ${paths.length} 个文件到托管书库...`);
-      const importedBooks = await importManagedBooks(paths);
-      await addBooks(importedBooks);
-      setScanMessage(`导入完成，共处理 ${importedBooks.length} 本书。`);
-    } catch (error) {
-      setScanMessage(error instanceof Error ? error.message : '导入失败。');
-    } finally {
-      setIsScanning(false);
-    }
-  };
-
   const closeReader = () => {
-    startupResumeCancelledRef.current = true;
+    startupResumePendingRef.current = false;
     setReadingBook(null);
   };
 
-  if (isLoading || !startupResolved) {
-    return <StartupSplash theme={settings.theme} />;
-  }
+  if (isLoading || !startupResolved) return <StartupSplash theme={settings.theme} />;
 
   return (
     <div className="h-screen w-full flex gap-2 overflow-hidden bg-[#F2F2F7] dark:bg-[#000000] text-[#1C1C1E] dark:text-[#F2F2F7] selection:bg-[#007AFF]/30 font-sans transition-colors duration-500 p-2">
-      
       {!readingBook && (
-        <Sidebar 
-          currentView={currentView} 
-          onChangeView={setCurrentView} 
-        />
+        <Suspense fallback={<StartupSplash theme={settings.theme} />}>
+          <LibraryShell onReadBook={setReadingBook} onPresentable={presentApplication} />
+        </Suspense>
       )}
-
-      {!readingBook && (
-        <main className="flex-1 flex overflow-hidden rounded-2xl glass-surface">
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={currentView}
-              initial={{ opacity: 0, x: 12, scale: 0.995 }}
-              animate={{ opacity: 1, x: 0, scale: 1 }}
-              exit={{ opacity: 0, x: -12, scale: 0.995 }}
-              transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
-              className="flex-1 flex min-w-0"
-            >
-              {currentView === 'library' && <Library onReadBook={setReadingBook} />}
-              {currentView === 'webdav' && <WebDavLibrary onReadBook={setReadingBook} />}
-              {currentView === 'series' && <SeriesView onReadBook={setReadingBook} />}
-              {currentView === 'settings' && <SettingsView onAddFiles={handleAddFiles} onImportFiles={handleImportFiles} scanMessage={scanMessage} isScanning={isScanning} />}
-            </motion.div>
-          </AnimatePresence>
-        </main>
-      )}
-
       {readingBook && (
         <Suspense fallback={null}>
           <ReaderLayout
             book={readingBook}
             onClose={closeReader}
             onOpenBook={setReadingBook}
-            onPresentable={() => setReaderPresentable(true)}
+            onPresentable={presentApplication}
           />
         </Suspense>
       )}
@@ -229,21 +80,11 @@ function MainLayout() {
   );
 }
 
-function nextPaint() {
-  return new Promise<void>((resolve) => requestAnimationFrame(() => window.setTimeout(resolve, 0)));
-}
-
 function StartupSplash({ theme }: { theme: 'light' | 'dark' | 'sepia' }) {
   const background = theme === 'dark' ? 'bg-[#121212]' : theme === 'sepia' ? 'bg-[#FDFCF8]' : 'bg-[#F2F2F7]';
-  return (
-    <div className={`fixed inset-0 ${background}`} />
-  );
+  return <div className={`fixed inset-0 ${background}`} />;
 }
 
 export default function App() {
-  return (
-    <AppProvider>
-      <MainLayout />
-    </AppProvider>
-  );
+  return <AppProvider><MainLayout /></AppProvider>;
 }

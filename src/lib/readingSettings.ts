@@ -23,6 +23,8 @@ export function normalizeSettings(settings: AppSettings): AppSettings {
     || (legacy.txtReadingFlow === 'scroll' ? 'scroll' : defaultSettings.pageTurnAnimation);
   return {
     ...settings,
+    // Continuous scrolling has one physical reading column. Keep the persisted
+    // setting and the selected page tab consistent with the actual layout.
     pageMode: pageTurnAnimation === 'scroll' ? 'single' : settings.pageMode || defaultSettings.pageMode,
     pageTurnAnimation,
     fontFamily: settings.fontFamily?.trim() || defaultSettings.fontFamily,

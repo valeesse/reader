@@ -4,6 +4,7 @@ dist/
 coverage/
 books/
 src-tauri/target/
+target/
 .vite/
 .turbo/
 .DS_Store

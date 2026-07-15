@@ -131,9 +131,7 @@ async fn webdav_cache_book(
     webdav_download_to_path(&client, &config, &remote_path, &target_path).await?;
     let fingerprint = book_fingerprint(&target_path)?;
     Ok(CachedWebDavBook {
-        path: target_path.to_string_lossy().to_string(),
-        local_resource_id: fingerprint.clone(),
-        fingerprint,
+        resource_id: fingerprint,
     })
 }
 
