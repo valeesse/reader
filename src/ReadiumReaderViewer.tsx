@@ -692,10 +692,21 @@ export function ReadiumReaderViewer({
         try {
           suppressResizeUntilRef.current = performance.now() + 180;
           releaseSurface();
-          await navigator.resizeHandler?.();
+          const forceRequestedLayout = () => {
+            if (navigatorRef.current === navigator) {
+              applyReadiumFrameSettingsToNavigator(navigator, settingsRef.current, book.type);
+            }
+          };
+          // resizeHandler synchronously chooses its responsive effective column
+          // count before returning its promise. Override it in the same task so
+          // an automatic one-column/zero-gap intermediate can never be painted.
+          const resizeOperation = navigator.resizeHandler?.();
+          forceRequestedLayout();
+          await resizeOperation;
           if (navigatorRef.current !== navigator) return;
-          applyReadiumFrameSettingsToNavigator(navigator, settingsRef.current, book.type);
-          if (before) await navigateToLocator(navigator, before);
+          forceRequestedLayout();
+          if (before) await navigateToLocator(navigator, before, forceRequestedLayout);
+          forceRequestedLayout();
           invalidateReadiumPageGeometry(navigator);
           pageCounterRefreshRef.current(navigator.currentLocator, 0);
           revealReadiumFrames(containerRef.current, navigator);
@@ -1546,7 +1557,7 @@ function textPositionAt(nodes: Text[], offset: number) {
   return node ? { node, offset: node.length } : undefined;
 }
 
-function navigateToLocator(navigator: EpubNavigator, locator: ReadiumLocator) {
+function navigateToLocator(navigator: EpubNavigator, locator: ReadiumLocator, beforeCorrection?: () => void) {
   return new Promise<void>((resolve) => {
     const directNavigator = navigator as EpubNavigator & {
       loadLocator?: (locator: ReadiumLocator, callback: (ok: boolean) => void) => void;
@@ -1559,17 +1570,23 @@ function navigateToLocator(navigator: EpubNavigator, locator: ReadiumLocator) {
       if (completed) return;
       completed = true;
       window.clearTimeout(timeoutId);
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        restoreAnchorOffset(navigator, locator);
-        // A rebuilt iframe can report its first usable geometry one frame
-        // before ReadiumCSS has finished applying the final column/scroll
-        // measurements. Re-apply the semantic correction against that final
-        // geometry before unlocking page turns.
+      beforeCorrection?.();
+      requestAnimationFrame(() => {
+        beforeCorrection?.();
         requestAnimationFrame(() => {
+          beforeCorrection?.();
           restoreAnchorOffset(navigator, locator);
-          resolve();
+          // A rebuilt iframe can report its first usable geometry one frame
+          // before ReadiumCSS has finished applying the final column/scroll
+          // measurements. Re-apply both layout and semantic correction against
+          // that final geometry before unlocking page turns.
+          requestAnimationFrame(() => {
+            beforeCorrection?.();
+            restoreAnchorOffset(navigator, locator);
+            resolve();
+          });
         });
-      }));
+      });
     };
     // A large uncached TXT reflow can legitimately exceed 700ms. Unlocking the
     // layout transaction while Readium is still navigating lets the next

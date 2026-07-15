@@ -67,6 +67,7 @@ const sampleExpression = `(() => {
     scrollLeft: scroller.scrollLeft,
     scrollTop: scroller.scrollTop,
     columnCount,
+    columnGap,
     expectedChapterTotal,
     pageCounter,
     pageCounterTotal,
@@ -157,6 +158,14 @@ try {
   };
   if (!resized || resized.innerWidth === before.innerWidth || resized.containerWidth === before.containerWidth) {
     throw new Error(`Reader iframe retained its old geometry: ${JSON.stringify(report)}`);
+  }
+  for (const [stage, sample] of Object.entries({ resized, contracted, restored })) {
+    if (sample.columnCount !== before.columnCount) {
+      throw new Error(`Reader changed page mode during ${stage}: ${JSON.stringify(report)}`);
+    }
+    if (before.columnCount > 1 && sample.columnGap < 1) {
+      throw new Error(`Reader lost its spread gap during ${stage}: ${JSON.stringify(report)}`);
+    }
   }
   if (!anchorVisibleAfterResize || !anchorVisibleAfterContract || !anchorVisibleAfterRestore) {
     throw new Error(`Reader lost its semantic anchor while resizing: ${JSON.stringify(report)}`);
