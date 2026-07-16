@@ -180,10 +180,34 @@ export function serializeReadiumLocator(locator: any) {
 
 export function progressionFromLocator(locator: any, publication: ReadiumPublicationLike) {
   const page = pageFromLocator(locator, publication);
-  return page.current / page.total;
+  return page.total > 1 ? (page.current - 1) / (page.total - 1) : 0;
 }
 
 const publicationPositionRanges = new WeakMap<object, Map<string, { first: number; count: number }>>();
+
+export function invalidatePublicationPositionRanges(publication: ReadiumPublicationLike) {
+  publicationPositionRanges.delete(publication as object);
+}
+
+export function locatorAtProgress(publication: ReadiumPublicationLike, progress: number) {
+  const positions = publication.positions;
+  if (positions.length === 0) return publication.readingOrder.items[0]?.locator;
+  const normalized = clamp(progress, 0, 1);
+  if (normalized === 0) {
+    const first = positions[0];
+    return first.copyWithLocations({ ...first.locations, progression: 0, totalProgression: 0, position: 1 });
+  }
+  if (normalized === 1) {
+    const last = positions[positions.length - 1];
+    return last.copyWithLocations({
+      ...last.locations,
+      progression: 1,
+      totalProgression: 1,
+      position: positions.length,
+    });
+  }
+  return positions[Math.round(normalized * (positions.length - 1))];
+}
 
 export function pageFromLocator(locator: any, publication: ReadiumPublicationLike) {
   const positions = publication.positions;

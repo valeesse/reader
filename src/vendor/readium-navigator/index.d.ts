@@ -61,6 +61,7 @@ export class EpubNavigator {
   setLayout(layout: 'fixed' | 'reflowable' | 'scrolled', force?: boolean): Promise<void>;
   readonly layout: 'fixed' | 'reflowable' | 'scrolled';
   resizeHandler(): Promise<void>;
+  refreshPositions(): void;
   prepare(locator: ReadiumLocator): Promise<Window[]>;
   reservePrepared(locator: ReadiumLocator): Promise<Window[]>;
   markPreparedReady(locator: ReadiumLocator, token: string, frameWindow?: Window): void;

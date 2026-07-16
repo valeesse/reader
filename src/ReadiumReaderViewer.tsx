@@ -12,6 +12,8 @@ import { useAppContext } from './store/AppStore';
 import { getProgress, saveProgress } from './lib/storage';
 import {
   deserializeReadiumLocator,
+  invalidatePublicationPositionRanges,
+  locatorAtProgress,
   pageFromLocator,
   progressionFromLocator,
   ReadiumLocatorLike,
@@ -912,8 +914,15 @@ export function ReadiumReaderViewer({
           if (!controller.signal.aborted) {
             positionsRefinedRef.current = true;
             const navigator = navigatorRef.current;
+            invalidatePublicationPositionRanges(publication);
+            navigator?.refreshPositions();
+            resourceStripRef.current?.updatePositions();
             if (navigator?.currentLocator) {
               setPageCounter(formatEpubPageCounter(navigator, navigator.currentLocator, publication));
+              const progress = progressionFromLocator(navigator.currentLocator, publication);
+              lastEmittedProgressRef.current = progress;
+              setPageLabel(formatProgressLabel(progress));
+              onProgressChangeRef.current(progress);
             }
           }
         }).catch((error) => {
@@ -1062,11 +1071,12 @@ export function ReadiumReaderViewer({
     const publication = publicationRef.current;
     const navigator = navigatorRef.current;
     if (!publication || !navigator || publication.positions.length === 0) return;
-    const index = Math.max(0, Math.min(publication.positions.length - 1, Math.ceil(seekRequest.progress * publication.positions.length) - 1));
+    const target = locatorAtProgress(publication, seekRequest.progress);
+    if (!target) return;
     if (isContinuousScroll(settingsRef.current) && resourceStripRef.current) {
-      void resourceStripRef.current.go(publication.positions[index], false);
+      void resourceStripRef.current.go(target, false);
     } else {
-      navigator.go(publication.positions[index], false, () => {});
+      navigator.go(target, false, () => {});
     }
   }, [seekRequest, loading]);
 
@@ -1650,8 +1660,7 @@ function createReadiumDefaults(settings: ReturnType<typeof useAppContext>['setti
 
 function legacyProgressPosition(progress: number | undefined, publication: ReadiumPublicationLike) {
   if (progress === undefined || publication.positions.length === 0) return undefined;
-  const index = Math.min(publication.positions.length - 1, Math.max(0, Math.round(progress * (publication.positions.length - 1))));
-  return publication.positions[index];
+  return locatorAtProgress(publication, progress);
 }
 
 function normalizeLocatorToPublicationPosition(
@@ -2409,7 +2418,7 @@ function formatProgressLabel(progress: number) {
 
 function formatResourceStripPageCounter(locator: ReadiumLocator, publication: ReadiumPublicationLike) {
   const page = pageFromLocator(locator, publication);
-  const percent = Math.max(0, Math.min(100, Math.round((page.current / Math.max(1, page.total)) * 100)));
+  const percent = Math.max(0, Math.min(100, Math.round(progressionFromLocator(locator, publication) * 100)));
   return `全书位置 ${page.current} / ${page.total} · ${percent}%`;
 }
 

@@ -70,6 +70,16 @@ export class ContinuousResourceStrip {
     return this.currentLocatorValue;
   }
 
+  updatePositions() {
+    this.positionRanges.clear();
+    for (const position of this.publication.positions) {
+      const href = this.publication.readingOrder.findWithHref(position.href)?.href || position.href.split('#')[0];
+      const range = this.positionRanges.get(href) || [];
+      range.push(position);
+      this.positionRanges.set(href, range);
+    }
+  }
+
   async mount(locator?: ReadiumLocatorLike) {
     if (this.destroyed) return;
     const target = locator || this.currentLocatorValue;

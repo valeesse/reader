@@ -9407,6 +9407,9 @@ class zn extends Pn {
     for (const t of this.positionsByHref.values())
       t.sort((e, i) => (e.locations?.progression ?? 0) - (i.locations?.progression ?? 0));
   }
+  refreshPositions() {
+    this.positions = this.pub.positions || this.positions, this.rebuildPositionsByHref();
+  }
   async load() {
     if (!this.positions?.length)
       this.positions = await this.pub.positionsFromManifest(), this.rebuildPositionsByHref();
