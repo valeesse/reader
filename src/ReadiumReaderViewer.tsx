@@ -1634,7 +1634,7 @@ function createReadiumPreferences(settings: ReturnType<typeof useAppContext>['se
     backgroundColor: readerThemeColors(settings.theme).background,
     textColor: readerThemeColors(settings.theme).text,
     fontFamily: settings.fontFamily,
-    fontSize: readiumFontScale(settings.fontSize, bookType),
+    fontSize: readiumFontScale(settings.fontSize, bookType, settings.fontFamily),
     lineHeight: settings.lineHeight,
     paragraphSpacing: settings.paragraphSpacing,
     letterSpacing: settings.letterSpacing,

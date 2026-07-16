@@ -1,5 +1,21 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "Zenith LXGW WenKai";
+  src: url("/fonts/LXGWWenKaiGBScreen.ttf") format("truetype");
+  font-display: swap;
+  font-style: normal;
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: "Zenith LXGW 975 Yuan";
+  src: url("/fonts/LXGW975YuanSC-400W.ttf") format("truetype");
+  font-display: swap;
+  font-style: normal;
+  font-weight: 400;
+}
+
 @theme {
   --font-sans: "Inter", "SF Pro Text", "PingFang SC", ui-sans-serif, system-ui, sans-serif;
 }

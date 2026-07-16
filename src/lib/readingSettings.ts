@@ -16,6 +16,8 @@ export const READER_FONT_OPTIONS = [
   { value: "'PingFang SC', 'Microsoft YaHei', sans-serif", label: '黑体' },
   { value: "'Songti SC', 'SimSun', serif", label: '宋体' },
   { value: "'Kaiti SC', 'KaiTi', serif", label: '楷体' },
+  { value: "'Zenith LXGW WenKai', 'Kaiti SC', 'KaiTi', serif", label: '霞鹜文楷' },
+  { value: "'Zenith LXGW 975 Yuan', 'PingFang SC', 'Microsoft YaHei', sans-serif", label: '霞鹜 975 圆体' },
 ] as const;
 
 export function normalizeSettings(settings: AppSettings): AppSettings {

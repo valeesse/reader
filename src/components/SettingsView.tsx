@@ -237,9 +237,12 @@ export function SettingsView({
                 value={settings.fontFamily}
                 onChange={(e) => updateSettings({ fontFamily: e.target.value })}
                 className="w-full bg-black/5 dark:bg-white/5 border border-transparent rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#007AFF] outline-none"
+                style={{ fontFamily: settings.fontFamily }}
               >
                 {READER_FONT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                  <option key={option.value} value={option.value} style={{ fontFamily: option.value }}>
+                    {option.label}
+                  </option>
                 ))}
               </select>
             </div>
