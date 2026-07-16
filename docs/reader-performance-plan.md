@@ -200,6 +200,49 @@ following functional results:
 The raw reports are `zenith-epub-single-{1,2}.json` and
 `zenith-txt-single-{1,2}.json` in the test machine's temporary directory.
 
+## Unified navigation and progress pipeline (2026-07-16)
+
+The reader now keeps resource boundaries as an internal loading concern while
+presenting one publication-wide navigation space in every layout:
+
+1. Paginated single/double-page and animated modes continue to use the bounded
+   Readium frame pool. Continuous scrolling uses a seven-resource virtual strip
+   while retaining the navigator as a warm backing surface.
+2. Publication progress spans the complete `[0, 1]` interval. Zero resolves to
+   the true beginning of the first resource and one resolves to progression one
+   in the final resource, rather than the beginning of the final sampled range.
+3. EPUB text-position refinement updates the publication range cache, Readium's
+   href index, and the continuous strip atomically without rebuilding visible
+   frames. The current locator is then mapped back to the refined progress.
+4. Progress input has separate draft and live values. The thumb reacts on every
+   input event while absolute navigation is serialized with latest-request-wins
+   semantics. A pointer/key release commits the final target; live locator
+   callbacks resume control after the handoff.
+5. TOC jumps and progress seeks share the same absolute-navigation channel.
+   Continuous-strip jumps reject stale generations, and Readium can recover its
+   absolute-navigation lock after a lost callback without reopening the book.
+6. The current TOC item follows the live locator. Multiple TOC fragments in one
+   XHTML resource are resolved against their laid-out element progression; the
+   directory highlights the result with `aria-current` and scrolls it into view.
+7. Startup render snapshots remain the immediate visual surface. TXT preview no
+   longer dismisses a valid snapshot early, and continuous mode synchronizes the
+   replayed locator to its active strip before the two-frame live handoff.
+
+### Verification
+
+The implementation was delivered as reviewable commits:
+
+- `9a44ddd`: bounded continuous resource strip and warm backing navigator.
+- `42e63b9`: synchronized refined positions and strict publication endpoints.
+- `af5ddae`: latest-wins absolute navigation and seek feedback separation.
+- `4242d1b`: live current-chapter tracking and directory reveal.
+- `6c33d7a`: active-surface startup handoff and bounded background preparation.
+- `23c444d`: fragment-aware chapter resolution within shared resources.
+
+`pnpm lint`, `pnpm build`, `cargo fmt --check`, strict Clippy, and the complete
+Rust test suite pass. Packaged CDP latency measurements still require a running
+instrumented Tauri release and are intentionally not inferred from build times.
+
 ## Persistent resume and startup pipeline (2026-07-15)
 
 Startup no longer waits for the application module graph before presenting a
