@@ -4,6 +4,7 @@ import { useAppContext } from '../store/AppStore';
 import { ArrowDownAZ, ArrowLeft, ArrowUpAZ, BookOpen, Clock3, Layers, Search } from 'lucide-react';
 import { motion } from 'motion/react';
 import { BookCover } from './BookCover';
+import { prewarmReaderPublication } from '../lib/readerPublication';
 import { displayBookFileName, seriesCoverBook, sortBooksInSeries } from '../lib/series';
 
 type SortKey = 'fileName' | 'addedAt' | 'recent';
@@ -166,6 +167,8 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-7" onScroll={handleLibraryScroll}>
         {recentBook && (
           <button
+            onPointerEnter={() => prewarmBook(recentBook)}
+            onFocus={() => prewarmBook(recentBook)}
             onClick={() => onReadBook(recentBook)}
             className="w-full text-left rounded-2xl border border-black/[0.055] dark:border-white/10 bg-white/55 dark:bg-white/[0.07] p-4 hover:bg-white/85 dark:hover:bg-white/10 transition-colors"
           >
@@ -294,6 +297,8 @@ function BookTile({ book, onReadBook }: { book: Book; onReadBook: (book: Book) =
     <motion.button
       whileHover={{ y: -4 }}
       whileTap={{ scale: 0.98 }}
+      onPointerEnter={() => prewarmBook(book)}
+      onFocus={() => prewarmBook(book)}
       onClick={() => onReadBook(book)}
       className="flex flex-col gap-3 cursor-pointer group text-left"
     >
@@ -375,6 +380,8 @@ function SeriesDetailView({
                 key={book.id}
                 whileHover={{ y: -3 }}
                 whileTap={{ scale: 0.985 }}
+                onPointerEnter={() => prewarmBook(book)}
+                onFocus={() => prewarmBook(book)}
                 onClick={() => onReadBook(book)}
                 className="group text-left overflow-hidden rounded-2xl border border-black/5 dark:border-white/10 bg-white/85 dark:bg-white/10 shadow-sm transition-colors hover:bg-white dark:hover:bg-white/15"
               >
@@ -394,6 +401,10 @@ function SeriesDetailView({
       </div>
     </div>
   );
+}
+
+function prewarmBook(book: Book) {
+  void prewarmReaderPublication(book).catch(() => {});
 }
 
 function formatSeriesIndex(book: Book, index: number) {

@@ -13,7 +13,10 @@ import { adaptiveReaderBudget, estimateStringBytes, ReaderContentCache, ReaderWo
 const TXT_TARGET_RESOURCE_CHARS = 12 * 1024;
 const TXT_MIN_RESOURCE_CHARS = 8 * 1024;
 const TXT_MAX_RESOURCE_CHARS = 16 * 1024;
-const TXT_POSITION_CHARS = 1024;
+// Positions are navigation samples, not rendered pages. A 4K interval keeps
+// progress/seek resolution well below one resource while avoiding thousands
+// of locator objects on the synchronous book-open path.
+const TXT_POSITION_CHARS = 4 * 1024;
 const TXT_RESOURCE_CACHE_LIMIT = 12;
 const TXT_RESOURCE_CACHE_BYTES = adaptiveReaderBudget(24 * 1024 * 1024, 12 * 1024 * 1024);
 

@@ -50,7 +50,10 @@ export class ContinuousResourceStrip {
   ) {
     this.settings = settings;
     for (const position of publication.positions) {
-      const href = publication.readingOrder.findWithHref(position.href)?.href || position.href.split('#')[0];
+      // Position hrefs are generated from reading-order hrefs. Normalizing the
+      // fragment directly avoids a linear reading-order lookup for every
+      // position (millions of comparisons for a large TXT).
+      const href = position.href.split('#')[0];
       const range = this.positionRanges.get(href) || [];
       range.push(position);
       this.positionRanges.set(href, range);
@@ -100,7 +103,7 @@ export class ContinuousResourceStrip {
   updatePositions() {
     this.positionRanges.clear();
     for (const position of this.publication.positions) {
-      const href = this.publication.readingOrder.findWithHref(position.href)?.href || position.href.split('#')[0];
+      const href = position.href.split('#')[0];
       const range = this.positionRanges.get(href) || [];
       range.push(position);
       this.positionRanges.set(href, range);

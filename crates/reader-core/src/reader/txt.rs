@@ -11,8 +11,13 @@ use std::{
 pub(super) fn preview(s: &ReaderService, id: &str, max: usize) -> Result<TxtPreview, ReaderError> {
     let path = s.resolve(id, "txt")?;
     let file = File::open(path).map_err(io_error)?;
-    let mut bytes = Vec::with_capacity(256 * 1024);
-    file.take(256 * 1024)
+    let max = max.clamp(1, 24000);
+    // Four bytes per requested Unicode scalar covers UTF-8's worst case and
+    // also leaves enough input for UTF-16/GBK previews. Avoid decoding a fixed
+    // 256 KiB when the UI only asks for the first 12K characters.
+    let preview_bytes = max.saturating_mul(4).saturating_add(3);
+    let mut bytes = Vec::with_capacity(preview_bytes);
+    file.take(preview_bytes as u64)
         .read_to_end(&mut bytes)
         .map_err(io_error)?;
     let (text, encoding) = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
@@ -27,7 +32,7 @@ pub(super) fn preview(s: &ReaderService, id: &str, max: usize) -> Result<TxtPrev
         (GBK.decode(&bytes).0.into_owned(), "gbk")
     };
     Ok(TxtPreview {
-        text: text.chars().take(max.clamp(1, 24000)).collect(),
+        text: text.chars().take(max).collect(),
         encoding: encoding.into(),
     })
 }

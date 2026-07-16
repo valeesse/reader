@@ -21,6 +21,14 @@ export function createReaderPublication(book: Book): Promise<ReadiumPublicationL
 export function prewarmReaderPublication(book: Book) {
   const existing = prewarmedPublications.get(book.resourceId);
   if (existing) return existing.promise;
+  // Pointer hover/focus should keep only the most likely next book warm.
+  // Otherwise moving across a shelf can leave several native sessions leased
+  // until their TTLs expire.
+  for (const [resourceId, entry] of prewarmedPublications) {
+    prewarmedPublications.delete(resourceId);
+    window.clearTimeout(entry.timer);
+    entry.promise.then((publication) => publication.close()).catch(() => {});
+  }
   const opening = openReaderPublication(book).catch((error) => {
     if (prewarmedPublications.get(book.resourceId)?.promise === opening) prewarmedPublications.delete(book.resourceId);
     throw error;

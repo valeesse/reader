@@ -21,7 +21,7 @@ import {
   serializeReadiumLocator,
 } from './lib/readiumPublication';
 import { createReaderPublication } from './lib/readerPublication';
-import { readTxtPreview, saveImageFromSource } from './lib/native';
+import { saveImageFromSource } from './lib/native';
 import { ReaderLoadError, ReaderLoading, ReaderPageCounter, ReaderViewerProps } from './components/reader/ReaderShared';
 import { createReaderLayoutKey, createReaderSettingsLayoutFingerprint, ReaderLayoutCache } from './lib/readerLayoutCache';
 import { recordReaderMetric } from './lib/readerPerformance';
@@ -71,7 +71,6 @@ export function ReadiumReaderViewer({
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
   const [savingImage, setSavingImage] = useState(false);
   const [saveStatus, setSaveStatus] = useState('');
-  const [txtPreview, setTxtPreview] = useState('');
   const settingsRef = useRef(settings);
   const appliedLayoutSettingsRef = useRef(settings);
   const onProgressChangeRef = useRef(onProgressChange);
@@ -236,7 +235,6 @@ export function ReadiumReaderViewer({
       loadingResolvedRef.current = true;
       if (forceReveal) revealReadiumFrames(containerRef.current, navigatorRef.current);
       setLoading(false);
-      setTxtPreview('');
       onPresentableRef.current?.();
     };
 
@@ -245,7 +243,6 @@ export function ReadiumReaderViewer({
       try {
         setLoading(true);
         setLoadError('');
-        setTxtPreview('');
         loadingResolvedRef.current = false;
         deferredHrefRef.current = '';
         deferredDirectionRef.current = 0;
@@ -258,13 +255,6 @@ export function ReadiumReaderViewer({
         const publicationStartedAt = performance.now();
         const publicationPromise = createReaderPublication(book);
         const storedProgress = await progressPromise;
-        if (book.type === 'txt' && !storedProgress?.location && storedProgress?.scrollPercentage === undefined) {
-          readTxtPreview(book.resourceId, 12_000).then((preview) => {
-            if (!cancelled && !loadingResolvedRef.current) {
-              setTxtPreview(preview.text);
-            }
-          }).catch(() => {});
-        }
         const publication = await publicationPromise;
         recordReaderMetric({
           kind: 'load',
@@ -1494,30 +1484,7 @@ export function ReadiumReaderViewer({
       <ReaderPageCounter value={pageCounter} />
 
       {loading && (
-        txtPreview ? (
-          <div
-            className="pointer-events-none absolute inset-0 z-20 overflow-hidden bg-inherit"
-            style={{
-              paddingLeft: `min(${settings.pageMargins.left}px, 18vw)`,
-              paddingRight: `min(${settings.pageMargins.right}px, 18vw)`,
-              paddingTop: `min(${settings.pageMargins.top}px, 30vh)`,
-              paddingBottom: `min(${settings.pageMargins.bottom}px, 30vh)`,
-            }}
-          >
-            <div
-              className="h-full overflow-hidden whitespace-pre-wrap"
-              style={{
-                color: readerThemeColors(settings.theme).text,
-                fontFamily: settings.fontFamily,
-                fontSize: `${settings.fontSize}px`,
-                letterSpacing: `${settings.letterSpacing}em`,
-                lineHeight: settings.lineHeight,
-              }}
-            >
-              {txtPreview}
-            </div>
-          </div>
-        ) : <ReaderLoading overlay />
+        <ReaderLoading overlay />
       )}
 
       <AnimatePresence>
