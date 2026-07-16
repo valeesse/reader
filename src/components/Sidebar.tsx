@@ -13,7 +13,7 @@ export function Sidebar({ currentView, onChangeView }: SidebarProps) {
   const { books, series } = useAppContext();
 
   return (
-    <aside className="fixed inset-x-2 bottom-2 z-40 h-[calc(2.75rem+env(safe-area-inset-bottom))] shrink-0 rounded-2xl glass-surface flex flex-row items-start px-1 pb-[env(safe-area-inset-bottom)] transition-[width,background-color] duration-300 overflow-hidden sm:static sm:w-16 min-[1100px]:w-56 sm:h-full sm:flex-col sm:px-0 sm:pt-5 sm:pb-2">
+    <aside className="app-sidebar fixed inset-x-2 bottom-2 z-40 h-[calc(2.75rem+env(safe-area-inset-bottom))] shrink-0 rounded-2xl glass-surface flex flex-row items-start px-1 pb-[env(safe-area-inset-bottom)] transition-[width,background-color] duration-300 overflow-hidden sm:static sm:h-full sm:flex-col sm:px-0 sm:pt-5 sm:pb-2">
 
       <div className="hidden sm:block px-3 min-[1100px]:px-5 pb-7">
         <h1 className="h-9 text-lg font-semibold tracking-[0.08em] text-[#1C1C1E] dark:text-[#f0f0eb] flex items-center justify-center min-[1100px]:justify-start gap-2.5">
