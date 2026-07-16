@@ -54,7 +54,7 @@ export function LibraryShell({ onReadBook, onPresentable }: { onReadBook: (book:
   return (
     <>
       <Sidebar currentView={currentView} onChangeView={setCurrentView} />
-      <main className="flex-1 flex overflow-hidden rounded-2xl glass-surface">
+      <main className="flex-1 flex min-w-0 overflow-hidden rounded-none sm:rounded-2xl glass-surface pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:pb-0">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={currentView}

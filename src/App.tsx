@@ -95,7 +95,7 @@ function MainLayout() {
   if (isLoading || !startupResolved) return <StartupSplash theme={settings.theme} />;
 
   return (
-    <div className="h-screen w-full flex gap-2 overflow-hidden bg-[#FBFAF7] dark:bg-[#111210] text-[#1C1C1E] dark:text-[#ecece7] selection:bg-[#007AFF]/20 font-sans transition-colors duration-500 p-2">
+    <div className="h-screen w-full flex gap-0 sm:gap-2 overflow-hidden bg-[#FBFAF7] dark:bg-[#111210] text-[#1C1C1E] dark:text-[#ecece7] selection:bg-[#007AFF]/20 font-sans transition-colors duration-500 p-0 sm:p-2">
       {(!readingBook || keepLibraryMounted) && (
         <div className="contents">
           <Suspense fallback={<StartupSplash theme={settings.theme} />}>

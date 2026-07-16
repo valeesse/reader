@@ -161,17 +161,18 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
   return (
     <div className="flex-1 flex relative overflow-hidden">
       <div className="flex-1 flex flex-col relative bg-[#FBFAF7]/80 dark:bg-[#171916]/80">
-        <header className="h-16 border-b border-black/[0.045] dark:border-white/5 flex items-center justify-between px-5 sm:px-8 bg-[#FBFAF7]/85 dark:bg-[#171916]/85 backdrop-blur-md sticky top-0 z-10">
+        <header className="h-14 sm:h-16 border-b border-black/[0.045] dark:border-white/5 flex items-center justify-between px-4 sm:px-8 bg-[#FBFAF7]/85 dark:bg-[#171916]/85 backdrop-blur-md sticky top-0 z-10">
           <h1 className="text-lg font-semibold tracking-[0.06em] text-[#1C1C1E] dark:text-white">所有书籍</h1>
+          <span className="text-xs tabular-nums text-black/40 dark:text-white/40">{filteredEntries.length} 本</span>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-7" onScroll={handleLibraryScroll}>
+        <div className="flex-1 overflow-y-auto px-3 py-4 min-[380px]:px-4 sm:p-6 lg:p-8 space-y-5 sm:space-y-7" onScroll={handleLibraryScroll}>
         {recentBook && (
           <button
             onPointerDown={() => prewarmWebReaderOnIntent(recentBook)}
             onFocus={() => prewarmWebReaderOnIntent(recentBook)}
             onClick={() => onReadBook(recentBook)}
-            className="w-full text-left rounded-2xl border border-black/[0.055] dark:border-white/10 bg-white/55 dark:bg-white/[0.07] p-4 hover:bg-white/85 dark:hover:bg-white/10 transition-colors"
+            className="w-full text-left rounded-2xl border border-black/[0.055] dark:border-white/10 bg-white/55 dark:bg-white/[0.07] p-3 sm:p-4 hover:bg-white/85 dark:hover:bg-white/10 transition-colors"
           >
             <div className="flex items-center gap-4">
               <div className="w-14 h-[74px] rounded-xl overflow-hidden bg-[#e4e5df] dark:bg-[#30332f] shrink-0 shadow-[0_6px_18px_rgba(35,40,33,0.12)]">
@@ -182,14 +183,14 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
                   <Clock3 className="w-4 h-4" />
                   最近阅读
                 </div>
-                <h2 className="mt-1 text-xl font-semibold text-[#1C1C1E] dark:text-white truncate">{recentBook.title}</h2>
+                <h2 className="mt-1 text-base sm:text-xl font-semibold text-[#1C1C1E] dark:text-white line-clamp-1">{recentBook.title}</h2>
                 <p className="mt-1 text-sm text-black/50 dark:text-white/50 truncate">{recentBook.author}</p>
               </div>
             </div>
           </button>
         )}
 
-        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 rounded-2xl border border-black/[0.05] dark:border-white/10 bg-white/45 dark:bg-white/[0.06] p-3">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2.5 sm:gap-3 rounded-2xl border border-black/[0.05] dark:border-white/10 bg-white/45 dark:bg-white/[0.06] p-2.5 sm:p-3">
           <div className="relative min-w-0 xl:w-80">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-black/35 dark:text-white/35" />
             <input
@@ -199,13 +200,13 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
               className="w-full h-10 rounded-xl bg-black/[0.035] dark:bg-white/10 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-[#007AFF]/35"
             />
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex rounded-xl bg-black/5 dark:bg-white/10 p-1">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2">
+            <div className="flex min-w-0 rounded-xl bg-black/5 dark:bg-white/10 p-1">
               {(['all', 'epub', 'txt'] as TypeFilter[]).map((value) => (
                 <button
                   key={value}
                   onClick={() => setTypeFilter(value)}
-                  className={`h-8 px-3 rounded-lg text-sm transition-colors ${typeFilter === value ? 'bg-white dark:bg-[#2C2C2E] shadow-sm text-[#1C1C1E] dark:text-white' : 'text-black/50 dark:text-white/50'}`}
+                  className={`h-8 flex-1 px-2 sm:px-3 rounded-lg text-xs sm:text-sm transition-colors ${typeFilter === value ? 'bg-white dark:bg-[#2C2C2E] shadow-sm text-[#1C1C1E] dark:text-white' : 'text-black/50 dark:text-white/50'}`}
                 >
                   {value === 'all' ? '全部' : value.toUpperCase()}
                 </button>
@@ -214,7 +215,7 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
             <select
               value={sortKey}
               onChange={(event) => setSortKey(event.target.value as SortKey)}
-              className="h-10 rounded-xl bg-black/[0.035] dark:bg-white/10 px-3 text-sm outline-none focus:ring-2 focus:ring-[#007AFF]/35"
+              className="h-10 min-w-0 max-w-[7.5rem] rounded-xl bg-black/[0.035] dark:bg-white/10 px-2 sm:px-3 text-xs sm:text-sm outline-none focus:ring-2 focus:ring-[#007AFF]/35"
             >
               <option value="recent">最近阅读</option>
               <option value="fileName">文件名</option>
@@ -230,7 +231,7 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-x-6 gap-y-8 content-start">
+        <div className="grid grid-cols-2 min-[520px]:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-x-3 min-[380px]:gap-x-4 sm:gap-x-5 lg:gap-x-6 gap-y-5 sm:gap-y-7 lg:gap-y-8 content-start">
           {visibleEntries.map((entry) => (
             entry.kind === 'series' ? (
               <SeriesTile key={entry.id} entry={entry} onOpenSeries={() => setSelectedSeriesId(entry.id)} />

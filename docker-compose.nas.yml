@@ -1,0 +1,15 @@
+services:
+  zenith-reader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zenith-reader
+    user: "1000:1001"
+    ports:
+      - "8080:8080"
+    volumes:
+      - /vol2/1000/Media/Book/轻小说:/data/books/light-novels:ro
+      - /vol2/1000/Media/Book/纯文本小说:/data/books/plain-text:ro
+      - ./data/state:/data/state
+      - ./data/cache:/data/cache
+    restart: unless-stopped
