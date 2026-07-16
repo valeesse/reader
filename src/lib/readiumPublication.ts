@@ -188,8 +188,11 @@ export function serializeReadiumLocator(locator: any) {
 }
 
 export function progressionFromLocator(locator: any, publication: ReadiumPublicationLike) {
-  const page = pageFromLocator(locator, publication);
-  return page.total > 1 ? (page.current - 1) / (page.total - 1) : 0;
+  const total = Math.max(1, publication.positions.length);
+  const range = positionRangeForLocator(locator, publication);
+  if (!range) return 0;
+  const local = clamp(typeof locator?.locations?.progression === 'number' ? locator.locations.progression : 0, 0, 1);
+  return clamp((range.first + local * range.count) / total, 0, 1);
 }
 
 const publicationPositionRanges = new WeakMap<object, Map<string, { first: number; count: number }>>();
@@ -221,11 +224,20 @@ export function locatorAtProgress(publication: ReadiumPublicationLike, progress:
 export function pageFromLocator(locator: any, publication: ReadiumPublicationLike) {
   const positions = publication.positions;
   const total = Math.max(1, positions.length);
+  const range = positionRangeForLocator(locator, publication);
+  if (!range) return { current: 1, total };
+  const local = clamp(typeof locator?.locations?.progression === 'number' ? locator.locations.progression : 0, 0, 1);
+  const localIndex = Math.min(range.count - 1, Math.floor(local * range.count));
+  return { current: range.first + localIndex + 1, total };
+}
+
+function positionRangeForLocator(locator: any, publication: ReadiumPublicationLike) {
   let ranges = publicationPositionRanges.get(publication as object);
   if (!ranges) {
     ranges = new Map();
-    positions.forEach((position, index) => {
-      const href = position.href.split('#')[0];
+    publication.positions.forEach((position, index) => {
+      const href = publication.readingOrder.findWithHref(position.href)?.href
+        || normalizeZipPath(stripHash(position.href));
       const existing = ranges?.get(href);
       if (existing) existing.count += 1;
       else ranges?.set(href, { first: index, count: 1 });
@@ -233,13 +245,8 @@ export function pageFromLocator(locator: any, publication: ReadiumPublicationLik
     publicationPositionRanges.set(publication as object, ranges);
   }
   const normalizedHref = publication.readingOrder.findWithHref(locator?.href || '')?.href
-    || `${locator?.href || ''}`.split('#')[0];
-  const range = ranges.get(normalizedHref);
-  if (!range) return { current: 1, total };
-
-  const local = clamp(typeof locator?.locations?.progression === 'number' ? locator.locations.progression : 0, 0, 1);
-  const localIndex = Math.min(range.count - 1, Math.floor(local * range.count));
-  return { current: range.first + localIndex + 1, total };
+    || normalizeZipPath(stripHash(`${locator?.href || ''}`));
+  return ranges.get(normalizedHref);
 }
 
 export { LinkCollection, ReadiumLink } from './readiumPublicationModel';

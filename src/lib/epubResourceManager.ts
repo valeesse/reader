@@ -47,12 +47,8 @@ export class EpubResourceManager {
   async read(link: ReadiumLink) {
     if (link.mediaType.isHTML || link.type === 'text/css') return new TextEncoder().encode(await this.readAsString(link) || '');
     const payload = await this.payloadFor(link.href);
-    const url = payload.binaryUrl || (payload.filePath ? toLocalAssetUrl(payload.filePath) : undefined);
-    if (url) {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`EPUB binary resource failed (${response.status})`);
-      return new Uint8Array(await response.arrayBuffer());
-    }
+    const bytes = await this.binaryBytes(payload);
+    if (bytes) return bytes;
     return typeof payload.text === 'string' ? new TextEncoder().encode(payload.text) : undefined;
   }
   async readAsString(link: ReadiumLink) {
@@ -94,13 +90,19 @@ export class EpubResourceManager {
     const link = new ReadiumLink({ href: key });
     const payload = await this.payloadFor(key);
     const type = payload.mediaType || link.type;
-    const direct = payload.binaryUrl || (payload.filePath ? toLocalAssetUrl(payload.filePath) : undefined);
-    if (direct && type !== 'text/css' && !link.mediaType.isHTML) return direct;
-    const content = type === 'text/css' ? await this.rewriteCss(payload.text ?? '', key) : payload.text ?? '';
+    const bytes = type !== 'text/css' && !link.mediaType.isHTML ? await this.binaryBytes(payload) : undefined;
+    const content = bytes || (type === 'text/css' ? await this.rewriteCss(payload.text ?? '', key) : payload.text ?? '');
     const blob = new Blob([content], { type });
     const url = URL.createObjectURL(blob);
     this.rememberBlobUrl(key, url, blob.size);
     return url;
+  }
+  private async binaryBytes(payload: { binaryUrl?: string | null; filePath?: string | null }) {
+    const url = payload.binaryUrl || (payload.filePath ? toLocalAssetUrl(payload.filePath) : undefined);
+    if (!url) return undefined;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`EPUB binary resource failed (${response.status})`);
+    return new Uint8Array(await response.arrayBuffer());
   }
   private rememberBlobUrl(key: string, url: string, bytes: number) {
     this.blobBytes += bytes - (this.blobSizes.get(key) || 0);

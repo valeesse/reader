@@ -148,6 +148,12 @@ button {
   overflow-anchor: none;
 }
 
+.zenith-resource-strip-spacer {
+  width: 100%;
+  pointer-events: none;
+  overflow-anchor: none;
+}
+
 .zenith-resource-strip-item {
   position: relative;
   width: 100%;

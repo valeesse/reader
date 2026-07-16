@@ -13,12 +13,11 @@ type PageGeometry = {
 const geometryCache = new WeakMap<Document, PageGeometry>();
 
 export function formatProgressLabel(progress: number) {
-  return `${Math.max(0, Math.min(100, Math.round(progress * 100)))}%`;
+  return formatProgressPercent(progress);
 }
 export function formatResourceStripPageCounter(locator: ReadiumLocator, publication: ReadiumPublicationLike) {
   const page = pageFromLocator(locator, publication);
-  const percent = Math.max(0, Math.min(100, Math.round(progressionFromLocator(locator, publication) * 100)));
-  return `全书位置 ${page.current} / ${page.total} · ${percent}%`;
+  return `全书位置 ${page.current} / ${page.total} · ${formatProgressPercent(progressionFromLocator(locator, publication))}`;
 }
 export function formatEpubPageCounter(navigator: EpubNavigator, locator: ReadiumLocator, publication: ReadiumPublicationLike) {
   const iframe = getLiveReadiumIframe(currentReadiumFrame(navigator));
@@ -44,7 +43,11 @@ export function formatEpubPageCounter(navigator: EpubNavigator, locator: Readium
   const current = Math.max(1, Math.min(total, Math.floor((offset + 1) / geometry.stride) + 1));
   const end = Math.min(total, current + (geometry.horizontal ? geometry.columnCount : 1) - 1);
   const page = pageFromLocator(locator, publication);
-  return `本章${geometry.horizontal ? '页' : '屏'} ${end > current ? `${current}–${end}` : current} / ${total} · 全书位置 ${page.current} / ${page.total} · ${Math.round((page.current / page.total) * 100)}%`;
+  return `本章${geometry.horizontal ? '页' : '屏'} ${end > current ? `${current}–${end}` : current} / ${total} · 全书位置 ${page.current} / ${page.total} · ${formatProgressPercent(progressionFromLocator(locator, publication))}`;
+}
+function formatProgressPercent(progress: number) {
+  const percent = Math.max(0, Math.min(100, progress * 100));
+  return `${percent === 0 || percent === 100 ? percent.toFixed(0) : percent.toFixed(1)}%`;
 }
 export function invalidateReadiumDocumentGeometry(doc: Document) { geometryCache.delete(doc); }
 export function invalidateReadiumPageGeometry(navigator: EpubNavigator) {

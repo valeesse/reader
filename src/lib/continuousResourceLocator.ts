@@ -1,13 +1,15 @@
 import { ReadiumLocatorLike, ReadiumPublicationLike } from './readiumPublication';
 import { clamp, cssSelector, distanceToElement } from './continuousResourceDom';
 import { StripRecord } from './continuousResourceStripTypes';
+import { normalizeZipPath, stripHash } from './readiumPublicationSupport';
 
 export function buildPositionRanges(publication: ReadiumPublicationLike) {
   const ranges = new Map<string, ReadiumLocatorLike[]>();
   for (const position of publication.positions) {
     // Position hrefs are generated from reading-order hrefs. Normalizing the
     // fragment directly avoids a linear reading-order lookup for every position.
-    const href = position.href.split('#')[0];
+    const href = publication.readingOrder.findWithHref(position.href)?.href
+      || normalizeZipPath(stripHash(position.href));
     const range = ranges.get(href) || [];
     range.push(position);
     ranges.set(href, range);

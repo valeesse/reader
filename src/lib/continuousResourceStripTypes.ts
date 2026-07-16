@@ -27,4 +27,7 @@ export type StripRecordEnvironment = {
   bookType: BookType;
   destroyed: () => boolean;
   go: (locator: ReadiumLocatorLike, smooth?: boolean) => Promise<boolean>;
+  estimatedHeight: (index: number) => number;
+  onRecordHeightChange: (record: StripRecord, previousHeight: number) => void;
+  bottomSpacer: HTMLDivElement;
 };

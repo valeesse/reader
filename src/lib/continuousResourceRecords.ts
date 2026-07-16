@@ -11,7 +11,7 @@ export function createRecord(environment: StripRecordEnvironment, index: number)
   wrapper.className = 'zenith-resource-strip-item';
   wrapper.dataset.resourceIndex = String(index);
   wrapper.dataset.resourceHref = publication.readingOrder.items[index]?.href || '';
-  wrapper.style.height = `${estimatedHeight(records, scroller)}px`;
+  wrapper.style.height = `${environment.estimatedHeight(index)}px`;
   const iframe = document.createElement('iframe');
   iframe.className = 'zenith-resource-strip-frame';
   // Executable publication content is stripped by the resource manager. Keeping
@@ -20,9 +20,9 @@ export function createRecord(environment: StripRecordEnvironment, index: number)
   iframe.setAttribute('aria-label', publication.readingOrder.items[index]?.title || `资源 ${index + 1}`);
   wrapper.appendChild(iframe);
   const next = sortedRecords(records).find((record) => record.index > index);
-  const height = estimatedHeight(records, scroller);
+  const height = environment.estimatedHeight(index);
   const insertingAboveViewport = Boolean(next && next.wrapper.offsetTop <= scroller.scrollTop + 1);
-  content.insertBefore(wrapper, next?.wrapper || null);
+  content.insertBefore(wrapper, next?.wrapper || environment.bottomSpacer);
   if (insertingAboveViewport) scroller.scrollTop += height;
   const record = {
     index,
@@ -153,6 +153,7 @@ export function measureRecord(environment: StripRecordEnvironment, record: Strip
   record.wrapper.style.height = `${measured}px`;
   record.iframe.style.height = `${measured}px`;
   if (aboveViewport) environment.scroller.scrollTop += measured - oldHeight;
+  environment.onRecordHeightChange(record, oldHeight);
 }
 
 export function removeRecord(environment: StripRecordEnvironment, record: StripRecord) {
@@ -164,8 +165,6 @@ export function removeRecord(environment: StripRecordEnvironment, record: StripR
   if (aboveViewport) environment.scroller.scrollTop = Math.max(0, environment.scroller.scrollTop - height);
 }
 
-function estimatedHeight(records: Map<number, StripRecord>, scroller: HTMLDivElement) {
-  const loaded = sortedRecords(records).filter((record) => record.loaded);
-  if (loaded.length === 0) return Math.max(DEFAULT_RESOURCE_HEIGHT, scroller.clientHeight * 1.5);
-  return loaded.reduce((sum, record) => sum + record.height, 0) / loaded.length;
+export function defaultResourceHeight(scroller: HTMLDivElement) {
+  return Math.max(DEFAULT_RESOURCE_HEIGHT, scroller.clientHeight * 1.5);
 }

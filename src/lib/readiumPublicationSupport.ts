@@ -73,11 +73,39 @@ export async function rewriteUrlAttributes(
   doc.querySelectorAll('[src], [poster]').forEach((element) => {
     for (const attribute of ['src', 'poster']) tasks.push(rewriteElementUrl(element, attribute, baseDir, resolveUrl));
   });
+  doc.querySelectorAll('[srcset]').forEach((element) => {
+    tasks.push(rewriteElementSrcset(element, baseDir, resolveUrl));
+  });
   doc.querySelectorAll('link, image, use').forEach((element) => {
     tasks.push(rewriteElementUrl(element, 'href', baseDir, resolveUrl));
     tasks.push(rewriteElementUrl(element, 'xlink:href', baseDir, resolveUrl));
   });
   await Promise.all(tasks);
+}
+
+async function rewriteElementSrcset(element: Element, baseDir: string, resolveUrl: (href: string) => Promise<string>) {
+  const value = element.getAttribute('srcset');
+  if (!value) return;
+  const candidates = value.split(',').map((candidate) => candidate.trim()).filter(Boolean);
+  const rewritten = await Promise.all(candidates.map(async (candidate) => {
+    const match = candidate.match(/^(\S+)(.*)$/);
+    if (!match) return candidate;
+    const rawUrl = match[1];
+    if (isExternalUrl(rawUrl) || rawUrl.startsWith('#')) return candidate;
+    const [pathPart, suffix = ''] = rawUrl.split(/(?=[?#])/);
+    const resolved = resolveZipPath(baseDir, pathPart);
+    try {
+      return `${await resolveUrl(resolved)}${suffix}${match[2]}`;
+    } catch (error) {
+      if (!isMissingOptionalEpubResource(error)) {
+        warnEpubRewriteOnce(`html-srcset:${resolved}`, 'Failed to rewrite EPUB srcset resource URL', {
+          value: rawUrl, resolved, error,
+        });
+      }
+      return candidate;
+    }
+  }));
+  element.setAttribute('srcset', rewritten.join(', '));
 }
 
 async function rewriteElementUrl(element: Element, attribute: string, baseDir: string, resolveUrl: (href: string) => Promise<string>) {

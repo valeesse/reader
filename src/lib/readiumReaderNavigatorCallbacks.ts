@@ -83,7 +83,7 @@ export function createNavigatorCallbacks(runtime: ReadiumReaderRuntime, options:
         runtime.operations.scheduleDeferredWork(locator.href, cacheDirection, false);
       });
       schedulePageCounter(locator);
-      if (Math.abs(progress - runtime.lastEmittedProgressRef.current) >= 0.001) {
+      if (Math.abs(progress - runtime.lastEmittedProgressRef.current) >= 0.0001) {
         runtime.lastEmittedProgressRef.current = progress;
         options.setPageLabel(formatProgressLabel(progress));
         runtime.onProgressChangeRef.current(progress);

@@ -12,13 +12,16 @@ import {
   snapshotResourceLocator,
   sortedRecords,
 } from './continuousResourceLocator';
-import { applyDocumentSettings, createRecord, measureRecord, removeRecord } from './continuousResourceRecords';
+import { applyDocumentSettings, createRecord, defaultResourceHeight, measureRecord, removeRecord } from './continuousResourceRecords';
 import { StripCallbacks, StripRecord, StripRecordEnvironment } from './continuousResourceStripTypes';
 
 export class ContinuousResourceStrip {
   private scroller: HTMLDivElement;
   private content: HTMLDivElement;
+  private topSpacer: HTMLDivElement;
+  private bottomSpacer: HTMLDivElement;
   private records = new Map<number, StripRecord>();
+  private resourceHeights = new Map<number, number>();
   private settings: AppSettings;
   private active = false;
   private destroyed = false;
@@ -53,6 +56,11 @@ export class ContinuousResourceStrip {
     this.scroller.className = 'zenith-resource-strip-scroller';
     this.content = document.createElement('div');
     this.content.className = 'zenith-resource-strip-content';
+    this.topSpacer = document.createElement('div');
+    this.topSpacer.className = 'zenith-resource-strip-spacer';
+    this.bottomSpacer = document.createElement('div');
+    this.bottomSpacer.className = 'zenith-resource-strip-spacer';
+    this.content.append(this.topSpacer, this.bottomSpacer);
     this.scroller.appendChild(this.content);
     this.host.replaceChildren(this.scroller);
     this.recordEnvironment = {
@@ -65,6 +73,12 @@ export class ContinuousResourceStrip {
       bookType: this.bookType,
       destroyed: () => this.destroyed,
       go: (locator, smooth) => this.go(locator, smooth),
+      estimatedHeight: (index) => this.estimatedHeight(index),
+      onRecordHeightChange: (record) => {
+        this.resourceHeights.set(record.index, record.height);
+        this.refreshSpacers();
+      },
+      bottomSpacer: this.bottomSpacer,
     };
     this.scroller.addEventListener('scroll', this.handleScroll, { passive: true });
     this.scroller.addEventListener('click', this.handleBackgroundClick);
@@ -103,8 +117,11 @@ export class ContinuousResourceStrip {
     if (current) await current.loadPromise;
     else await createRecord(this.recordEnvironment, index);
     if (this.destroyed) return;
+    this.resourceHeights.set(index, this.records.get(index)?.height || this.estimatedHeight(index));
+    this.refreshSpacers();
     await this.scrollToLocator(this.currentLocatorValue, false);
     this.emitLocator(true);
+    void this.ensureWindow(index, false);
   }
 
   setActive(active: boolean) {
@@ -114,10 +131,7 @@ export class ContinuousResourceStrip {
     cancelReaderIdle(this.windowIdle);
     this.windowIdle = null;
     if (active) {
-      this.windowIdle = scheduleReaderIdle(() => {
-        this.windowIdle = null;
-        if (this.active && !this.destroyed) void this.ensureWindow(this.currentIndex, false);
-      }, { timeout: 800 });
+      void this.ensureWindow(this.currentIndex, false);
     }
   }
 
@@ -150,6 +164,8 @@ export class ContinuousResourceStrip {
     const current = this.records.get(index);
     if (current) await current.loadPromise.catch(() => {});
     else await createRecord(this.recordEnvironment, index).catch(() => {});
+    if (this.destroyed || generation !== this.layoutGeneration) return false;
+    await this.ensureWindow(index, true);
     if (this.destroyed || generation !== this.layoutGeneration) return false;
     // Cross-resource jumps stay atomic because window rebalancing can stop a
     // WebView smooth scroll short; local fragment jumps remain animated.
@@ -262,6 +278,16 @@ export class ContinuousResourceStrip {
     this.mutationGeneration += 1;
     const start = Math.max(0, center - this.resourceRadius);
     const end = Math.min(this.publication.readingOrder.items.length - 1, center + this.resourceRadius);
+    const anchor = this.records.get(center);
+    const anchorOffset = anchor ? this.scroller.scrollTop - anchor.wrapper.offsetTop : 0;
+    const keep = new Set<number>();
+    for (let index = start; index <= end; index++) keep.add(index);
+    for (const record of sortedRecords(this.records)) {
+      if (keep.has(record.index)) continue;
+      this.resourceHeights.set(record.index, record.height);
+      removeRecord(this.recordEnvironment, record);
+    }
+    this.refreshSpacers(start, end);
     const additions: Array<() => Promise<void>> = [];
     for (let index = start; index <= end; index++) {
       if (!this.records.has(index)) additions.push(() => createRecord(this.recordEnvironment, index));
@@ -274,12 +300,9 @@ export class ContinuousResourceStrip {
       await settleWithConcurrency(additions, this.runtimePolicy.framePreparationConcurrency, waitForCenter);
     }
     if (this.destroyed) return;
-    const keep = new Set<number>();
-    for (let index = start; index <= end; index++) keep.add(index);
-    for (const record of sortedRecords(this.records)) {
-      if (keep.has(record.index) || this.records.size <= this.resourceRadius * 2 + 1) continue;
-      removeRecord(this.recordEnvironment, record);
-    }
+    this.refreshSpacers();
+    const restoredAnchor = this.records.get(center);
+    if (restoredAnchor) this.scroller.scrollTop = Math.max(0, restoredAnchor.wrapper.offsetTop + anchorOffset);
     this.publication.prefetchAroundHref(
       this.publication.readingOrder.items[center]?.href || '', this.resourceRadius + 1, 0,
     ).catch(() => {});
@@ -293,5 +316,28 @@ export class ContinuousResourceStrip {
     const colors = readerThemeColors(this.settings.theme);
     this.host.style.background = colors.background;
     this.scroller.style.background = colors.background;
+  }
+
+  private estimatedHeight(index: number) {
+    const known = this.resourceHeights.get(index);
+    if (known !== undefined) return known;
+    const measured = Array.from(this.resourceHeights.values()).filter((height) => height > 0);
+    return measured.length > 0
+      ? measured.reduce((sum, height) => sum + height, 0) / measured.length
+      : defaultResourceHeight(this.scroller);
+  }
+
+  private refreshSpacers(start?: number, end?: number) {
+    const records = sortedRecords(this.records);
+    const first = start ?? records[0]?.index ?? 0;
+    const last = end ?? records.at(-1)?.index ?? -1;
+    let top = 0;
+    let bottom = 0;
+    for (let index = 0; index < first; index++) top += this.estimatedHeight(index);
+    for (let index = last + 1; index < this.publication.readingOrder.items.length; index++) {
+      bottom += this.estimatedHeight(index);
+    }
+    this.topSpacer.style.height = `${Math.max(0, top)}px`;
+    this.bottomSpacer.style.height = `${Math.max(0, bottom)}px`;
   }
 }
