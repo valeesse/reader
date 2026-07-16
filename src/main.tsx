@@ -40,6 +40,7 @@ const resumeWarmupPromise = startup?.resumeBook
 void resumeWarmupPromise.catch(() => {});
 void appModulePromise.then(({ default: App }) => {
   root.render(<App />);
+  window.setTimeout(() => localStorage.removeItem('zenith_resume_render_v2'), 5000);
   window.requestAnimationFrame(() => {
     console.info('[startup] React first frame', {
       elapsedMs: Math.round(performance.now()),
@@ -48,6 +49,9 @@ void appModulePromise.then(({ default: App }) => {
   });
 }).catch((error) => {
   console.error('[startup] failed to load application', error);
-  const status = document.querySelector<HTMLElement>('.startup-status');
-  if (status) status.textContent = '启动失败，请查看控制台';
+  const overlay = document.getElementById('zenith-startup-overlay');
+  if (overlay) {
+    overlay.classList.add('startup-error');
+    overlay.textContent = '启动失败，请查看控制台';
+  }
 });

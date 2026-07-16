@@ -25,7 +25,6 @@ import { readTxtPreview, saveImageFromSource } from './lib/native';
 import { ReaderLoadError, ReaderLoading, ReaderPageCounter, ReaderViewerProps } from './components/reader/ReaderShared';
 import { createReaderLayoutKey, createReaderSettingsLayoutFingerprint, ReaderLayoutCache } from './lib/readerLayoutCache';
 import { recordReaderMetric } from './lib/readerPerformance';
-import { persistResumeRenderSnapshot } from './lib/resumeRenderSnapshot';
 import { ContinuousResourceStrip } from './lib/continuousResourceStrip';
 
 const DOUBLE_PAGE_CENTER_GAP = 56;
@@ -129,8 +128,6 @@ export function ReadiumReaderViewer({
   const prepareGenerationRef = useRef(0);
   const navigationStartedAtRef = useRef<number | null>(null);
   const pageTransitionRef = useRef<Animation | null>(null);
-  const resumeSnapshotTimerRef = useRef<number | null>(null);
-  const resumeSnapshotIdleRef = useRef<number | null>(null);
   const settingsLayoutFingerprintRef = useRef(createReaderSettingsLayoutFingerprint(settings, book.type));
 
   const scheduleStableAnchorCapture = (navigator: EpubNavigator, remainingFrames = 1) => {
@@ -214,11 +211,6 @@ export function ReadiumReaderViewer({
 
     const handlePageHide = () => {
       flushProgressSave();
-      const navigator = navigatorRef.current;
-      const publication = publicationRef.current;
-      if (navigator && publication && !layoutRestoringRef.current) {
-        persistResumeRenderSnapshot(book, navigator as any, publication, settingsRef.current);
-      }
     };
 
     const queueProgressSave = (locator: ReadiumLocator) => {
@@ -420,7 +412,6 @@ export function ReadiumReaderViewer({
                 onProgressChangeRef.current(progress);
               }
               queueProgressSave(locator);
-              scheduleResumeSnapshotCapture();
             },
             click: handlePointer,
             tap: handlePointer,
@@ -480,15 +471,12 @@ export function ReadiumReaderViewer({
               durationMs: performance.now() - assetsStartedAt,
             });
             const layoutStartedAt = performance.now();
-            await waitForLayoutFrames();
-            if (isContinuousScroll(settingsRef.current)) await stripMountPromise;
-            if (cancelled) return;
-            await replayStartupSnapshotTurns(navigator);
-            if (cancelled) return;
             if (isContinuousScroll(settingsRef.current) && strip) {
+              await stripMountPromise;
+              if (cancelled) return;
               await strip.go(navigator.currentLocator as ReadiumLocatorLike, false);
             }
-            await waitForLayoutFrames();
+            await waitForNextPaint();
             if (cancelled) return;
             const currentLocator = navigator.currentLocator;
             const currentLink = publication.readingOrder.findWithHref(currentLocator.href);
@@ -521,7 +509,6 @@ export function ReadiumReaderViewer({
             resolveLoading(false);
             scheduleStableAnchorCapture(navigator);
             scheduleToc(publication);
-            scheduleResumeSnapshotCapture(900);
             scheduleDeferredWork(initialPosition?.href || publication.readingOrder.items[0]?.href || '', 0, true);
           })
           .catch((error) => {
@@ -601,10 +588,6 @@ export function ReadiumReaderViewer({
       if (settingsApplyTimerRef.current !== null) window.clearTimeout(settingsApplyTimerRef.current);
       if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current);
       cancelDeferredWork(true);
-      if (resumeSnapshotTimerRef.current !== null) window.clearTimeout(resumeSnapshotTimerRef.current);
-      if (resumeSnapshotIdleRef.current !== null) window.cancelIdleCallback(resumeSnapshotIdleRef.current);
-      resumeSnapshotTimerRef.current = null;
-      resumeSnapshotIdleRef.current = null;
       flushProgressSave();
       const navigator = navigatorRef.current;
       navigatorRef.current = null;
@@ -892,21 +875,6 @@ export function ReadiumReaderViewer({
       refinementAbortRef.current?.abort();
       refinementAbortRef.current = null;
     }
-  };
-
-  const scheduleResumeSnapshotCapture = (delay = 900) => {
-    if (resumeSnapshotTimerRef.current !== null) window.clearTimeout(resumeSnapshotTimerRef.current);
-    if (resumeSnapshotIdleRef.current !== null) window.cancelIdleCallback(resumeSnapshotIdleRef.current);
-    resumeSnapshotTimerRef.current = window.setTimeout(() => {
-      resumeSnapshotTimerRef.current = null;
-      resumeSnapshotIdleRef.current = window.requestIdleCallback(() => {
-        resumeSnapshotIdleRef.current = null;
-        const navigator = navigatorRef.current;
-        const publication = publicationRef.current;
-        if (!navigator || !publication || layoutRestoringRef.current || navigationLockedRef.current) return;
-        persistResumeRenderSnapshot(book, navigator as any, publication, settingsRef.current);
-      }, { timeout: 900 });
-    }, delay);
   };
 
   const scheduleDeferredWork = (href: string, direction: -1 | 0 | 1, restartRefinement: boolean) => {
@@ -2172,31 +2140,12 @@ function isNearResourceBoundary(navigator: EpubNavigator, href: string, directio
     : viewportEntry.start <= pageFraction;
 }
 
-function waitForLayoutFrames() {
-  return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+function waitForNextPaint() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 }
 
-async function replayStartupSnapshotTurns(navigator: EpubNavigator) {
-  const startup = (window as Window & {
-    __ZENITH_STARTUP__?: { pendingSnapshotTurns?: number };
-  }).__ZENITH_STARTUP__;
-  const pending = Math.max(-6, Math.min(6, Math.trunc(startup?.pendingSnapshotTurns || 0)));
-  if (startup) startup.pendingSnapshotTurns = 0;
-  const direction: -1 | 1 = pending < 0 ? -1 : 1;
-  for (let index = 0; index < Math.abs(pending); index++) {
-    await new Promise<void>((resolve) => {
-      let completed = false;
-      const finish = () => {
-        if (completed) return;
-        completed = true;
-        window.clearTimeout(timer);
-        resolve();
-      };
-      const timer = window.setTimeout(finish, 700);
-      if (direction > 0) navigator.goForward(false, finish);
-      else navigator.goBackward(false, finish);
-    });
-  }
+function waitForLayoutFrames() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 }
 
 async function waitForFrameReadiness(doc: Document, bookType: 'epub' | 'txt') {
@@ -2211,11 +2160,8 @@ async function waitForFrameReadiness(doc: Document, bookType: 'epub' | 'txt') {
 }
 
 async function waitForCurrentFrameReadiness(navigator: EpubNavigator, bookType: 'epub' | 'txt') {
-  const frames = (navigator as EpubNavigator & { _cframes?: ReadiumFrameHandle[] })._cframes || [];
-  await Promise.all(frames.map((frame) => {
-    const doc = getLiveReadiumIframe(frame)?.contentDocument;
-    return doc ? waitForFrameReadiness(doc, bookType) : Promise.resolve();
-  }));
+  const doc = getLiveReadiumIframe(currentReadiumFrame(navigator))?.contentDocument;
+  if (doc) await waitForFrameReadiness(doc, bookType);
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {

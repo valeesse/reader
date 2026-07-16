@@ -49,150 +49,30 @@
         inset: 0;
         z-index: 9999;
         box-sizing: border-box;
-        display: flex;
+        display: block;
         width: 100%;
         height: 100%;
-        gap: 8px;
-        padding: 8px;
+        padding: 0;
         color: var(--startup-text);
       }
-      .startup-resume-frame {
-        position: absolute;
-        margin: 0;
-        border: 0;
-        background: transparent;
-        opacity: 1;
-      }
-      .startup-resume-turn {
-        position: absolute;
-        z-index: 2;
-        top: 0;
-        bottom: 0;
-        width: 18%;
-        border: 0;
-        padding: 0;
-        background: transparent;
-        cursor: pointer;
-      }
-      .startup-resume-turn.previous { left: 0; }
-      .startup-resume-turn.next { right: 0; }
-      .startup-sidebar,
-      .startup-main {
-        border: 1px solid var(--startup-line);
-        background: var(--startup-panel);
-        box-shadow: 0 12px 36px rgba(0, 0, 0, 0.06);
-        backdrop-filter: blur(24px);
-      }
-      .startup-sidebar {
-        width: 220px;
-        flex: 0 0 220px;
-        border-radius: 16px;
-        padding: 22px 14px;
-      }
-      .startup-brand {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 0 10px 24px;
-        font-size: 16px;
-        font-weight: 700;
-      }
-      .startup-logo {
+      .startup-shell.startup-error {
         display: grid;
-        width: 30px;
-        height: 30px;
         place-items: center;
-        border-radius: 9px;
-        background: #007aff;
-        color: white;
-        font-size: 18px;
-      }
-      .startup-nav {
-        height: 42px;
-        margin: 4px 0;
-        border-radius: 10px;
-        background: rgba(0, 122, 255, 0.12);
-      }
-      .startup-nav-line {
-        width: 96px;
-        height: 10px;
-        margin: 15px 16px;
-        border-radius: 8px;
-        background: rgba(0, 122, 255, 0.5);
-      }
-      .startup-main {
-        min-width: 0;
-        flex: 1;
-        border-radius: 16px;
-        padding: 32px;
-      }
-      .startup-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 30px;
-      }
-      .startup-title {
-        margin: 0;
-        font-size: 30px;
-        line-height: 1.2;
-        letter-spacing: -0.02em;
-      }
-      .startup-status {
         color: var(--startup-muted);
-        font-size: 13px;
-      }
-      .startup-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(142px, 1fr));
-        gap: 24px 18px;
-      }
-      .startup-cover {
-        aspect-ratio: 2 / 3;
-        border: 1px solid var(--startup-line);
-        border-radius: 12px;
-        background: var(--startup-card);
-      }
-      .startup-book-line {
-        width: 76%;
-        height: 10px;
-        margin-top: 12px;
-        border-radius: 8px;
-        background: var(--startup-line);
-      }
-      .startup-book-line.short {
-        width: 44%;
-        height: 8px;
-        margin-top: 8px;
-        opacity: 0.7;
-      }
-      @media (max-width: 640px) {
-        .startup-sidebar { width: 72px; flex-basis: 72px; }
-        .startup-brand span:last-child, .startup-nav-line { display: none; }
-        .startup-main { padding: 22px 18px; }
-      }
-      @media (prefers-reduced-motion: no-preference) {
-        .startup-cover, .startup-book-line {
-          animation: startup-pulse 1.4s ease-in-out infinite alternate;
-        }
-        @keyframes startup-pulse { to { opacity: 0.54; } }
+        font-size: 14px;
       }
     </style>
     <script>
       (function () {
-        window.__ZENITH_STARTUP__ = { shellParsedAt: performance.now(), startupSnapshot: null, resumeBook: null, renderSnapshot: null };
+        window.__ZENITH_STARTUP__ = { shellParsedAt: performance.now(), startupSnapshot: null, resumeBook: null };
         try {
           var snapshot = JSON.parse(localStorage.getItem('zenith_startup_snapshot_v2') || 'null');
-          var renderSnapshot = JSON.parse(localStorage.getItem('zenith_resume_render_v2') || 'null');
           window.__ZENITH_STARTUP__.startupSnapshot = snapshot;
           var theme = snapshot && snapshot.settings && snapshot.settings.theme;
           var lastReadBookId = snapshot && snapshot.lastReadBookId;
           window.__ZENITH_STARTUP__.resumeBook = lastReadBookId && Array.isArray(snapshot.books)
             ? snapshot.books.find(function (book) { return book.id === lastReadBookId; }) || null
             : null;
-          if (renderSnapshot && renderSnapshot.version === 2 && renderSnapshot.bookId === lastReadBookId) {
-            window.__ZENITH_STARTUP__.renderSnapshot = renderSnapshot;
-          }
           if (theme === 'dark') document.documentElement.classList.add('startup-dark');
           if (theme === 'sepia') document.documentElement.classList.add('startup-sepia');
         } catch (_) {}
@@ -202,29 +82,12 @@
   </head>
   <body>
     <div id="root">
-      <div class="startup-shell" aria-label="Zenith Reader 正在启动">
-        <aside class="startup-sidebar">
-          <div class="startup-brand"><span class="startup-logo">⌑</span><span>Zenith Reader</span></div>
-          <div class="startup-nav"><div class="startup-nav-line"></div></div>
-        </aside>
-        <main class="startup-main">
-          <div class="startup-header"><h1 class="startup-title">书库</h1><span class="startup-status">正在恢复书库…</span></div>
-          <div class="startup-grid">
-            <div><div class="startup-cover"></div><div class="startup-book-line"></div><div class="startup-book-line short"></div></div>
-            <div><div class="startup-cover"></div><div class="startup-book-line"></div><div class="startup-book-line short"></div></div>
-            <div><div class="startup-cover"></div><div class="startup-book-line"></div><div class="startup-book-line short"></div></div>
-            <div><div class="startup-cover"></div><div class="startup-book-line"></div><div class="startup-book-line short"></div></div>
-            <div><div class="startup-cover"></div><div class="startup-book-line"></div><div class="startup-book-line short"></div></div>
-          </div>
-        </main>
-      </div>
+      <div class="startup-shell" aria-label="Zenith Reader 正在启动"></div>
     </div>
     <script>
       (function () {
         window.__ZENITH_STARTUP__.shellReadyAt = performance.now();
         var resumeBook = window.__ZENITH_STARTUP__.resumeBook;
-        var renderSnapshot = window.__ZENITH_STARTUP__.renderSnapshot;
-        var snapshot = window.__ZENITH_STARTUP__.startupSnapshot;
         var shell = document.querySelector('.startup-shell');
         if (shell) {
           shell.id = 'zenith-startup-overlay';
@@ -232,137 +95,12 @@
         }
         var hideOverlay = function () {
           window.__ZENITH_STARTUP__.overlayHiddenAt = performance.now();
-          if (window.__ZENITH_STARTUP__.snapshotKeyHandler) {
-            window.removeEventListener('keydown', window.__ZENITH_STARTUP__.snapshotKeyHandler, true);
-            window.__ZENITH_STARTUP__.snapshotKeyHandler = null;
-          }
           var overlay = document.getElementById('zenith-startup-overlay');
           if (!overlay) return;
-          overlay.style.opacity = '0';
           overlay.style.pointerEvents = 'none';
-          setTimeout(function () { overlay.remove(); }, 90);
+          overlay.remove();
         };
         window.__ZENITH_STARTUP__.hideOverlay = hideOverlay;
-        if (resumeBook) {
-          var title = document.querySelector('.startup-title');
-          var status = document.querySelector('.startup-status');
-          if (title) title.textContent = '继续阅读';
-          if (status) status.textContent = '正在打开《' + resumeBook.title + '》…';
-        }
-        if (shell && resumeBook && renderSnapshot && Array.isArray(renderSnapshot.documents) && Array.isArray(renderSnapshot.pages)) {
-          var startupSettings = snapshot && snapshot.settings || {};
-          var expectedLayoutFingerprint = JSON.stringify({
-            pageMode: startupSettings.pageMode,
-            pageTurnAnimation: startupSettings.pageTurnAnimation,
-            fontFamily: startupSettings.fontFamily,
-            fontSize: startupSettings.fontSize,
-            lineHeight: startupSettings.lineHeight,
-            paragraphSpacing: startupSettings.paragraphSpacing,
-            letterSpacing: startupSettings.letterSpacing,
-            pageMargins: startupSettings.pageMargins,
-          });
-          var layoutMatches = renderSnapshot.layoutFingerprint === expectedLayoutFingerprint;
-          var viewportMatches = Math.abs((renderSnapshot.viewportWidth || 0) - innerWidth) <= 3
-            && Math.abs((renderSnapshot.viewportHeight || 0) - innerHeight) <= 3
-            && Math.abs((renderSnapshot.devicePixelRatio || 1) - (devicePixelRatio || 1)) <= 0.05;
-          var fresh = Date.now() - (renderSnapshot.capturedAt || 0) < 30 * 24 * 60 * 60 * 1000;
-          if (layoutMatches && viewportMatches && fresh) {
-            var currentPage = renderSnapshot.pages.find(function (page) { return page.relative === 0; });
-            var documentEntry = currentPage && renderSnapshot.documents.find(function (entry) { return entry.id === currentPage.documentId; });
-            if (currentPage && documentEntry && typeof documentEntry.html === 'string') {
-              shell.innerHTML = '';
-              shell.style.display = 'block';
-              shell.style.padding = '0';
-              shell.style.background = renderSnapshot.background || 'white';
-              var frame = document.createElement('iframe');
-              frame.className = 'startup-resume-frame';
-              // This is trusted, locally generated markup stripped of scripts,
-              // event handlers and active embeds. Its own default-src 'none'
-              // CSP keeps it inert; omitting sandbox also avoids WebView2's
-              // misleading script-injection and same-origin warnings.
-              frame.setAttribute('aria-label', '上次阅读页面');
-              frame.style.left = renderSnapshot.frameRect.left + 'px';
-              frame.style.top = renderSnapshot.frameRect.top + 'px';
-              frame.style.width = renderSnapshot.frameRect.width + 'px';
-              frame.style.height = renderSnapshot.frameRect.height + 'px';
-              frame.onload = function () {
-                try {
-                  window.__ZENITH_STARTUP__.snapshotPaintedAt = performance.now();
-                  var scroller = frame.contentDocument.scrollingElement;
-                  if (scroller) {
-                    scroller.scrollLeft = currentPage.scrollLeft || 0;
-                    scroller.scrollTop = currentPage.scrollTop || 0;
-                  }
-                  if (typeof installFrameInteraction === 'function') installFrameInteraction();
-                } catch (_) {}
-              };
-              frame.srcdoc = documentEntry.html;
-              shell.appendChild(frame);
-              var activeRelative = 0;
-              var wheelDelta = 0;
-              var showPage = function (relative) {
-                var page = renderSnapshot.pages.find(function (item) { return item.relative === relative; });
-                if (!page) return false;
-                var entry = renderSnapshot.documents.find(function (item) { return item.id === page.documentId; });
-                if (!entry) return false;
-                var applyOffset = function () {
-                  try {
-                    var scroller = frame.contentDocument.scrollingElement;
-                    scroller.scrollLeft = page.scrollLeft || 0;
-                    scroller.scrollTop = page.scrollTop || 0;
-                    installFrameInteraction();
-                  } catch (_) {}
-                };
-                if (frame.dataset.documentId !== page.documentId) {
-                  frame.dataset.documentId = page.documentId;
-                  frame.onload = applyOffset;
-                  frame.srcdoc = entry.html;
-                } else {
-                  applyOffset();
-                }
-                activeRelative = relative;
-                window.__ZENITH_STARTUP__.pendingSnapshotTurns = relative;
-                return true;
-              };
-              var turnPage = function (direction) {
-                return showPage(activeRelative + direction);
-              };
-              var wheelHandler = function (event) {
-                wheelDelta += Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
-                if (Math.abs(wheelDelta) < 48) return;
-                var direction = wheelDelta > 0 ? 1 : -1;
-                wheelDelta = 0;
-                if (turnPage(direction)) event.preventDefault();
-              };
-              var installFrameInteraction = function () {
-                try {
-                  frame.contentWindow.removeEventListener('wheel', wheelHandler);
-                  frame.contentWindow.addEventListener('wheel', wheelHandler, { passive: false });
-                } catch (_) {}
-              };
-              frame.dataset.documentId = currentPage.documentId;
-              var keyHandler = function (event) {
-                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-                var direction = event.key === 'ArrowRight' ? 1 : -1;
-                if (!turnPage(direction)) return;
-                event.preventDefault();
-                event.stopImmediatePropagation();
-              };
-              window.__ZENITH_STARTUP__.snapshotKeyHandler = keyHandler;
-              window.addEventListener('keydown', keyHandler, true);
-              var previousButton = document.createElement('button');
-              previousButton.className = 'startup-resume-turn previous';
-              previousButton.setAttribute('aria-label', '上一页');
-              previousButton.onclick = function () { turnPage(-1); };
-              var nextButton = document.createElement('button');
-              nextButton.className = 'startup-resume-turn next';
-              nextButton.setAttribute('aria-label', '下一页');
-              nextButton.onclick = function () { turnPage(1); };
-              shell.appendChild(previousButton);
-              shell.appendChild(nextButton);
-            }
-          }
-        }
         var internals = window.__TAURI_INTERNALS__;
         if (internals && typeof internals.invoke === 'function') {
           internals.invoke('startup_shell_ready').catch(function () {
