@@ -5,6 +5,7 @@ import { ArrowDownAZ, ArrowLeft, ArrowUpAZ, BookOpen, Clock3, Layers, Search } f
 import { motion } from 'motion/react';
 import { BookCover } from './BookCover';
 import { displayBookFileName, seriesCoverBook, sortBooksInSeries } from '../lib/series';
+import { warmReaderPublication } from '../lib/readerPublication';
 
 type SortKey = 'fileName' | 'addedAt' | 'recent';
 type SortOrder = 'asc' | 'desc';
@@ -176,6 +177,9 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
         {recentBook && (
           <button
             onClick={() => onReadBook(recentBook)}
+            onPointerEnter={() => warmReaderPublication(recentBook)}
+            onPointerDown={() => warmReaderPublication(recentBook)}
+            onFocus={() => warmReaderPublication(recentBook)}
             className="w-full text-left rounded-2xl border border-black/5 dark:border-white/10 bg-white/75 dark:bg-white/10 p-4 shadow-sm hover:bg-white dark:hover:bg-white/15 transition-colors"
           >
             <div className="flex items-center gap-4">
@@ -296,6 +300,9 @@ function BookTile({ book, onReadBook }: { book: Book; onReadBook: (book: Book) =
       whileHover={{ y: -4 }}
       whileTap={{ scale: 0.98 }}
       onClick={() => onReadBook(book)}
+      onPointerEnter={() => warmReaderPublication(book)}
+      onPointerDown={() => warmReaderPublication(book)}
+      onFocus={() => warmReaderPublication(book)}
       className="flex flex-col gap-3 cursor-pointer group text-left"
     >
       <div className="aspect-[3/4] rounded-xl shadow-xl border border-black/5 dark:border-white/10 group-hover:shadow-2xl transition-all duration-300 bg-gradient-to-br from-[#007AFF] to-[#AF52DE] overflow-hidden relative">
@@ -377,6 +384,9 @@ function SeriesDetailView({
                 whileHover={{ y: -3 }}
                 whileTap={{ scale: 0.985 }}
                 onClick={() => onReadBook(book)}
+                onPointerEnter={() => warmReaderPublication(book)}
+                onPointerDown={() => warmReaderPublication(book)}
+                onFocus={() => warmReaderPublication(book)}
                 className="group text-left overflow-hidden rounded-2xl border border-black/5 dark:border-white/10 bg-white/85 dark:bg-white/10 shadow-sm transition-colors hover:bg-white dark:hover:bg-white/15"
               >
                 <div className="relative aspect-[3/4] overflow-hidden bg-gradient-to-br from-[#007AFF] to-[#AF52DE]">

@@ -19,7 +19,13 @@ export function LibraryShell({ onReadBook, onPresentable }: { onReadBook: (book:
   useEffect(() => {
     onPresentable();
     const idleId = window.requestIdleCallback(prewarmLibraryDialogDirectory, { timeout: 1800 });
-    return () => window.cancelIdleCallback(idleId);
+    const readerIdleId = window.requestIdleCallback(() => {
+      void import('./ReaderLayoutNext');
+    }, { timeout: 800 });
+    return () => {
+      window.cancelIdleCallback(idleId);
+      window.cancelIdleCallback(readerIdleId);
+    };
   }, [onPresentable]);
 
   const scanLibrary = async (changeRoot: boolean) => {
