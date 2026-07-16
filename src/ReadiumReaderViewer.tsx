@@ -445,7 +445,6 @@ export function ReadiumReaderViewer({
         };
         const loadingFallback = window.setTimeout(() => {
           recordBoundedPresentable(true);
-          resolveLoading(true);
         }, 1800);
         const navigatorLoadStartedAt = performance.now();
         navigator.load()
@@ -468,8 +467,9 @@ export function ReadiumReaderViewer({
             }
             await waitForNextPaint();
             if (cancelled) return;
-            await waitUntil(() => isReadiumNavigationReady(navigator), 500);
+            await waitUntil(() => isReadiumNavigationReady(navigator), 1800);
             if (cancelled) return;
+            if (!isReadiumNavigationReady(navigator)) throw new Error(`${book.type.toUpperCase()} 阅读页面未就绪`);
             revealReadiumFrames(container, navigator);
             appliedLayoutSettingsRef.current = settingsRef.current;
             layoutRestoringRef.current = false;
