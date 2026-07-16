@@ -37,6 +37,7 @@ export interface ReaderTocItem {
 export interface ReaderSeekRequest {
   progress: number;
   requestId: number;
+  phase: 'preview' | 'commit';
 }
 
 export interface AppSettings {

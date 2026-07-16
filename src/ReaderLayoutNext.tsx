@@ -34,6 +34,10 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
   const [tocTarget, setTocTarget] = useState<ReaderTocItem | null>(null);
   const [readingProgress, setReadingProgress] = useState(0);
   const [seekRequest, setSeekRequest] = useState<ReaderSeekRequest | null>(null);
+  const seekingRef = useRef(false);
+  const contentProgressRef = useRef(0);
+  const seekRequestIdRef = useRef(0);
+  const seekReleaseTimerRef = useRef<number | null>(null);
   const currentSeries = series.find((item) => item.bookIds.includes(book.id));
   const currentIndex = currentSeries ? currentSeries.bookIds.indexOf(book.id) : -1;
   const nextBook = currentSeries && currentIndex >= 0
@@ -74,10 +78,24 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
     setShowToc(false);
   };
 
-  const handleSeek = (value: number) => {
+  const handleProgressChange = (progress: number) => {
+    contentProgressRef.current = progress;
+    if (!seekingRef.current) setReadingProgress(progress);
+  };
+
+  const handleSeek = (value: number, phase: ReaderSeekRequest['phase']) => {
     const progress = Math.max(0, Math.min(1, value));
+    seekingRef.current = true;
     setReadingProgress(progress);
-    setSeekRequest({ progress, requestId: Date.now() });
+    setSeekRequest({ progress, phase, requestId: ++seekRequestIdRef.current });
+    if (phase === 'commit') {
+      if (seekReleaseTimerRef.current !== null) window.clearTimeout(seekReleaseTimerRef.current);
+      seekReleaseTimerRef.current = window.setTimeout(() => {
+        seekReleaseTimerRef.current = null;
+        seekingRef.current = false;
+        setReadingProgress(contentProgressRef.current);
+      }, 500);
+    }
   };
 
   return (
@@ -294,7 +312,7 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
             key={book.id}
             book={book}
             chromeVisible={chromeVisible}
-            onProgressChange={setReadingProgress}
+            onProgressChange={handleProgressChange}
             onToggleChrome={toggleChrome}
             onTocChange={setTocItems}
             tocTarget={tocTarget}
@@ -320,7 +338,13 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
               max={1000}
               step={1}
               value={Math.round(Math.max(0, Math.min(1, readingProgress)) * 1000)}
-              onChange={(event) => handleSeek(Number(event.target.value) / 1000)}
+              onChange={(event) => handleSeek(Number(event.target.value) / 1000, 'preview')}
+              onPointerUp={(event) => handleSeek(Number(event.currentTarget.value) / 1000, 'commit')}
+              onPointerCancel={(event) => handleSeek(Number(event.currentTarget.value) / 1000, 'commit')}
+              onKeyUp={(event) => handleSeek(Number(event.currentTarget.value) / 1000, 'commit')}
+              onBlur={(event) => {
+                if (seekingRef.current) handleSeek(Number(event.currentTarget.value) / 1000, 'commit');
+              }}
               className="reader-progress-range h-5 w-full"
               aria-label="阅读进度"
             />

@@ -38,6 +38,7 @@ export class ContinuousResourceStrip {
   private pendingWindowCenter: number | null = null;
   private windowTimer: number | null = null;
   private programmaticScroll = false;
+  private goGeneration = 0;
 
   constructor(
     private host: HTMLElement,
@@ -120,25 +121,28 @@ export class ContinuousResourceStrip {
   }
 
   async go(locator: ReadiumLocatorLike, smooth = false) {
-    if (this.destroyed || !locator?.href) return;
+    const generation = ++this.goGeneration;
+    if (this.destroyed || !locator?.href) return false;
     const index = this.indexForHref(locator.href);
-    if (index === undefined) return;
+    if (index === undefined) return false;
     const shouldSmooth = smooth && this.currentIndex === index;
     this.currentIndex = index;
     this.currentLocatorValue = locator;
     const current = this.records.get(index);
     if (current) await current.loadPromise.catch(() => {});
     else await this.createRecord(index).catch(() => {});
-    if (this.destroyed) return;
+    if (this.destroyed || generation !== this.goGeneration) return false;
     // WebView smooth scrolling can stop short when the virtual window is
     // rebalanced over a multi-resource distance. Cross-resource jumps are
     // therefore atomic; local fragment jumps can remain smoothly animated.
     this.programmaticScroll = shouldSmooth;
     await this.scrollToLocator(locator, shouldSmooth);
     if (shouldSmooth) await waitForScrollCompletion(this.scroller);
+    if (this.destroyed || generation !== this.goGeneration) return false;
     this.programmaticScroll = false;
     this.emitLocator(true);
     void this.ensureWindow(index, false);
+    return true;
   }
 
   turn(direction: -1 | 1) {
@@ -149,6 +153,7 @@ export class ContinuousResourceStrip {
 
   destroy() {
     this.destroyed = true;
+    this.goGeneration += 1;
     this.mutationGeneration += 1;
     if (this.scrollRaf !== null) cancelAnimationFrame(this.scrollRaf);
     if (this.locatorTimer !== null) window.clearTimeout(this.locatorTimer);

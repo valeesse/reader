@@ -9410,6 +9410,9 @@ class zn extends Pn {
   refreshPositions() {
     this.positions = this.pub.positions || this.positions, this.rebuildPositionsByHref();
   }
+  recoverNavigation() {
+    this._navigationEpoch = (this._navigationEpoch || 0) + 1, this._isNavigating = !1;
+  }
   async load() {
     if (!this.positions?.length)
       this.positions = await this.pub.positionsFromManifest(), this.rebuildPositionsByHref();
@@ -10078,12 +10081,13 @@ class zn extends Pn {
       i(!1);
       return;
     }
+    const r = this._navigationEpoch || 0;
     this._isNavigating = !0, this.currentLocation = this.positions.find((o) => o.href === s.href), this.apply().then(() => this.loadLocator(t, (o) => {
-      this._isNavigating = !1, i(o);
+      r === (this._navigationEpoch || 0) && (this._isNavigating = !1, i(o));
     })).then(() => {
       this.attachListener();
     }).catch((o) => {
-      this._isNavigating = !1, console.error("Failed to go to locator:", o), i(!1);
+      r === (this._navigationEpoch || 0) && (this._isNavigating = !1, console.error("Failed to go to locator:", o), i(!1));
     });
   }
   goLink(t, e, i) {

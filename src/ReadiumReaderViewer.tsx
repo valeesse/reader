@@ -117,6 +117,9 @@ export function ReadiumReaderViewer({
   const refinementIdleRef = useRef<number | null>(null);
   const refinementAbortRef = useRef<AbortController | null>(null);
   const positionsRefinedRef = useRef(false);
+  const absoluteNavigationPendingRef = useRef<{ locator: ReadiumLocatorLike; requestId: number } | null>(null);
+  const absoluteNavigationRunningRef = useRef(false);
+  const absoluteNavigationTimerRef = useRef<number | null>(null);
   const deferredHrefRef = useRef('');
   const deferredDirectionRef = useRef<-1 | 0 | 1>(0);
   const layoutCacheRef = useRef(new ReaderLayoutCache(3));
@@ -540,6 +543,12 @@ export function ReadiumReaderViewer({
         window.clearTimeout(navigationUnlockTimerRef.current);
         navigationUnlockTimerRef.current = null;
       }
+      if (absoluteNavigationTimerRef.current !== null) {
+        window.clearTimeout(absoluteNavigationTimerRef.current);
+        absoluteNavigationTimerRef.current = null;
+      }
+      absoluteNavigationPendingRef.current = null;
+      absoluteNavigationRunningRef.current = false;
       if (scrollBoundaryGestureTimerRef.current !== null) {
         window.clearTimeout(scrollBoundaryGestureTimerRef.current);
         scrollBoundaryGestureTimerRef.current = null;
@@ -1046,6 +1055,37 @@ export function ReadiumReaderViewer({
     refinementAbortRef.current = null;
   };
 
+  const drainAbsoluteNavigation = () => {
+    if (absoluteNavigationRunningRef.current || layoutRestoringRef.current) return;
+    const request = absoluteNavigationPendingRef.current;
+    const navigator = navigatorRef.current;
+    if (!request || !navigator) return;
+    absoluteNavigationPendingRef.current = null;
+    absoluteNavigationRunningRef.current = true;
+    const finish = (applied: boolean) => {
+      if (absoluteNavigationTimerRef.current !== null) window.clearTimeout(absoluteNavigationTimerRef.current);
+      absoluteNavigationTimerRef.current = null;
+      absoluteNavigationRunningRef.current = false;
+      if (!applied && !absoluteNavigationPendingRef.current) absoluteNavigationPendingRef.current = request;
+      window.setTimeout(drainAbsoluteNavigation, applied ? 0 : 32);
+    };
+    absoluteNavigationTimerRef.current = window.setTimeout(() => {
+      navigator.recoverNavigation();
+      finish(false);
+    }, 2500);
+    if (isContinuousScroll(settingsRef.current) && resourceStripRef.current) {
+      resourceStripRef.current.go(request.locator, false).then(finish).catch(() => finish(false));
+    } else {
+      navigator.go(request.locator as ReadiumLocator, false, finish);
+    }
+  };
+
+  const submitAbsoluteNavigation = (locator: ReadiumLocatorLike, requestId: number) => {
+    absoluteNavigationPendingRef.current = { locator, requestId };
+    pendingNavigationRef.current = 0;
+    drainAbsoluteNavigation();
+  };
+
   useEffect(() => {
     if (!tocTarget?.href) return;
     const publication = publicationRef.current;
@@ -1059,9 +1099,9 @@ export function ReadiumReaderViewer({
         ? link.locator.copyWithLocations({ fragments: [decodeURIComponent(fragment)] })
         : link.locator;
       if (isContinuousScroll(settingsRef.current) && resourceStripRef.current) {
-        void resourceStripRef.current.go(locator, true);
+        submitAbsoluteNavigation(locator, tocTarget.index ?? Date.now());
       } else {
-        navigator.go(locator, false, () => {});
+        submitAbsoluteNavigation(locator, tocTarget.index ?? Date.now());
       }
     }
   }, [tocTarget, loading]);
@@ -1073,11 +1113,7 @@ export function ReadiumReaderViewer({
     if (!publication || !navigator || publication.positions.length === 0) return;
     const target = locatorAtProgress(publication, seekRequest.progress);
     if (!target) return;
-    if (isContinuousScroll(settingsRef.current) && resourceStripRef.current) {
-      void resourceStripRef.current.go(target, false);
-    } else {
-      navigator.go(target, false, () => {});
-    }
+    submitAbsoluteNavigation(target, seekRequest.requestId);
   }, [seekRequest, loading]);
 
   useEffect(() => {
