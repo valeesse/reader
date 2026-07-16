@@ -60,6 +60,7 @@ export function ReadiumReaderViewer({
   const containerRef = useRef<HTMLDivElement>(null);
   const resourceStripHostRef = useRef<HTMLDivElement>(null);
   const resourceStripRef = useRef<ContinuousResourceStrip | null>(null);
+  const ensureResourceStripRef = useRef<((settings: AppSettings, locator: ReadiumLocatorLike) => Promise<ContinuousResourceStrip | null>) | null>(null);
   const navigatorRef = useRef<EpubNavigator | null>(null);
   const publicationRef = useRef<ReadiumPublicationLike | null>(null);
   const { settings } = useAppContext();
@@ -286,30 +287,36 @@ export function ReadiumReaderViewer({
           publication.prefetchAroundHref(publication.readingOrder.items[0]?.href || '', IMMEDIATE_PREFETCH_RADIUS).catch(() => {});
         }
         const stripHost = resourceStripHostRef.current;
-        const strip = stripHost ? new ContinuousResourceStrip(
-          stripHost,
-          publication,
-          settingsRef.current,
-          book.type,
-          {
-            onLocator: (locator) => {
-              if (resourceStripRef.current !== strip || !isContinuousScroll(settingsRef.current)) return;
-              const progress = progressionFromLocator(locator, publication);
+        const ensureResourceStrip = async (stripSettings: AppSettings, locator: ReadiumLocatorLike) => {
+          const existing = resourceStripRef.current;
+          if (existing) return existing;
+          if (!stripHost || cancelled || publicationRef.current !== publication) return null;
+          let created: ContinuousResourceStrip;
+          created = new ContinuousResourceStrip(stripHost, publication, stripSettings, book.type, {
+            onLocator: (nextLocator) => {
+              if (resourceStripRef.current !== created || !isContinuousScroll(settingsRef.current)) return;
+              const progress = progressionFromLocator(nextLocator, publication);
               lastEmittedProgressRef.current = progress;
               setPageLabel(formatProgressLabel(progress));
-              setPageCounter(formatResourceStripPageCounter(locator, publication));
+              setPageCounter(formatResourceStripPageCounter(nextLocator, publication));
               onProgressChangeRef.current(progress);
-              onCurrentTocChangeRef.current(currentTocItemId(locator, publication, strip?.currentDocument));
-              queueProgressSave(locator as ReadiumLocator);
-              scheduleDeferredWork(locator.href, 0, false);
+              onCurrentTocChangeRef.current(currentTocItemId(nextLocator, publication, created.currentDocument));
+              queueProgressSave(nextLocator as ReadiumLocator);
+              scheduleDeferredWork(nextLocator.href, 0, false);
             },
             onImage: openPreview,
             onToggleChrome: () => onToggleChromeRef.current(),
-          },
-        ) : null;
-        resourceStripRef.current = strip;
-        const stripMountPromise = strip?.mount(initialPosition || publication.readingOrder.items[0]?.locator);
-        strip?.setActive(isContinuousScroll(settingsRef.current));
+          });
+          resourceStripRef.current = created;
+          await created.mount(locator);
+          if (cancelled || resourceStripRef.current !== created) return null;
+          return created;
+        };
+        ensureResourceStripRef.current = ensureResourceStrip;
+        const initialStripLocator = initialPosition || publication.readingOrder.items[0]?.locator;
+        const stripMountPromise = isContinuousScroll(settingsRef.current) && initialStripLocator
+          ? ensureResourceStrip(settingsRef.current, initialStripLocator)
+          : Promise.resolve(null);
         container.classList.toggle('zenith-resource-strip-suspended', isContinuousScroll(settingsRef.current));
         // The paginated navigator remains a warm backing surface while the
         // resource strip is active, so switching modes does not rebuild the
@@ -448,20 +455,30 @@ export function ReadiumReaderViewer({
               detail: { performed: layoutChanged },
             });
             const layoutStartedAt = performance.now();
-            if (isContinuousScroll(settingsRef.current) && strip) {
-              await stripMountPromise;
+            if (isContinuousScroll(settingsRef.current)) {
+              const strip = await stripMountPromise;
               if (cancelled) return;
-              await strip.go(navigator.currentLocator as ReadiumLocatorLike, false);
+              if (strip) {
+                await strip.go(navigator.currentLocator as ReadiumLocatorLike, false);
+                strip.setActive(true);
+              }
             }
             await waitForNextPaint();
             if (cancelled) return;
+            revealReadiumFrames(container, navigator);
+            resolveLoading(false);
+            const readyStartedAt = performance.now();
             await waitUntil(() => isReadiumNavigationReady(navigator), 1800);
+            recordReaderMetric({
+              kind: 'load',
+              name: `${book.type}-frame-interactive`,
+              durationMs: performance.now() - readyStartedAt,
+            });
             if (cancelled) return;
             if (!isReadiumNavigationReady(navigator)) throw new Error(`${book.type.toUpperCase()} 阅读页面未就绪`);
             revealReadiumFrames(container, navigator);
             appliedLayoutSettingsRef.current = settingsRef.current;
             layoutRestoringRef.current = false;
-            resolveLoading(false);
             drainNavigationQueue();
             const assetsStartedAt = performance.now();
             void waitForCurrentFrameReadiness(navigator, book.type).then(() => {
@@ -584,6 +601,7 @@ export function ReadiumReaderViewer({
       navigatorRef.current = null;
       resourceStripRef.current?.destroy();
       resourceStripRef.current = null;
+      ensureResourceStripRef.current = null;
       navigator?.destroy?.();
       publicationRef.current?.close();
       publicationRef.current = null;
@@ -624,10 +642,13 @@ export function ReadiumReaderViewer({
         if (navigationLockedRef.current) await waitUntil(() => !navigationLockedRef.current, 350);
         if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
         try {
-          if (wantsContinuous && strip) {
-            const updated = await strip.updateSettings(settings, anchor || strip.snapshotLocator());
-            if (!updated || revision !== settingsRevisionRef.current || resourceStripRef.current !== strip) return;
-            strip.setActive(true);
+          if (wantsContinuous) {
+            const target = anchor || snapshotLocator(navigator.currentLocator);
+            const activeStrip = target ? await ensureResourceStripRef.current?.(settings, target) : null;
+            if (!activeStrip || revision !== settingsRevisionRef.current || resourceStripRef.current !== activeStrip) return;
+            const updated = await activeStrip.updateSettings(settings, target || activeStrip.snapshotLocator());
+            if (!updated || revision !== settingsRevisionRef.current || resourceStripRef.current !== activeStrip) return;
+            activeStrip.setActive(true);
             containerRef.current?.classList.add('zenith-resource-strip-suspended');
             appliedLayoutSettingsRef.current = settings;
             return;

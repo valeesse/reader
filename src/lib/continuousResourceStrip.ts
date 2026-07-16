@@ -38,6 +38,7 @@ export class ContinuousResourceStrip {
   private windowMutation: Promise<void> = Promise.resolve();
   private pendingWindowCenter: number | null = null;
   private windowTimer: number | null = null;
+  private windowIdle: number | null = null;
   private programmaticScroll = false;
   private layoutGeneration = 0;
 
@@ -125,13 +126,20 @@ export class ContinuousResourceStrip {
     if (this.destroyed) return;
     await this.scrollToLocator(this.currentLocatorValue, false);
     this.emitLocator(true);
-    void this.ensureWindow(index, false);
   }
 
   setActive(active: boolean) {
     this.active = active;
     this.host.classList.toggle('zenith-resource-strip-active', active);
     this.host.setAttribute('aria-hidden', active ? 'false' : 'true');
+    if (this.windowIdle !== null) window.cancelIdleCallback(this.windowIdle);
+    this.windowIdle = null;
+    if (active) {
+      this.windowIdle = window.requestIdleCallback(() => {
+        this.windowIdle = null;
+        if (this.active && !this.destroyed) void this.ensureWindow(this.currentIndex, false);
+      }, { timeout: 800 });
+    }
   }
 
   async updateSettings(settings: AppSettings, anchor = this.snapshotLocator()) {
@@ -173,7 +181,6 @@ export class ContinuousResourceStrip {
     if (this.destroyed || generation !== this.layoutGeneration) return false;
     this.programmaticScroll = false;
     this.emitLocator(true);
-    void this.ensureWindow(index, false);
     return true;
   }
 
@@ -190,6 +197,7 @@ export class ContinuousResourceStrip {
     if (this.scrollRaf !== null) cancelAnimationFrame(this.scrollRaf);
     if (this.locatorTimer !== null) window.clearTimeout(this.locatorTimer);
     if (this.windowTimer !== null) window.clearTimeout(this.windowTimer);
+    if (this.windowIdle !== null) window.cancelIdleCallback(this.windowIdle);
     this.scroller.removeEventListener('scroll', this.handleScroll);
     this.scroller.removeEventListener('click', this.handleBackgroundClick);
     for (const record of this.records.values()) record.resizeObserver?.disconnect();

@@ -30,10 +30,10 @@ export function applyReaderDocumentProperties(doc: Document, settings: AppSettin
   root.style.setProperty('--USER__backgroundColor', colors.background);
   root.style.setProperty('--USER__textColor', colors.text);
   root.style.setProperty('--USER__fontFamily', settings.fontFamily);
-  root.style.setProperty('--USER__fontSize', String(readiumFontScale(settings.fontSize, bookType, settings.fontFamily)));
+  root.style.setProperty('--USER__fontSize', `${readiumFontScale(settings.fontSize, bookType, settings.fontFamily) * 100}%`);
   root.style.setProperty('--USER__lineHeight', String(settings.lineHeight));
-  root.style.setProperty('--USER__paraSpacing', `${settings.paragraphSpacing}em`);
-  root.style.setProperty('--USER__letterSpacing', `${settings.letterSpacing}em`);
+  root.style.setProperty('--USER__paraSpacing', `${settings.paragraphSpacing}rem`);
+  root.style.setProperty('--USER__letterSpacing', `${settings.letterSpacing}rem`);
   root.style.setProperty('--ZENITH__paragraphTextShadow', paragraphTextShadow(settings.theme));
   void installBundledReaderFont(doc, settings.fontFamily);
 }
