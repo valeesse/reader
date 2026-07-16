@@ -33,7 +33,7 @@ export async function applyContinuousReaderDocumentStyles(doc: Document, setting
   applyReaderDocumentProperties(doc, settings, bookType);
   const root = doc.documentElement;
   const colors = readerThemeColors(settings.theme);
-  root.style.setProperty('--USER__lineLength', '68ch');
+  root.style.removeProperty('--USER__lineLength');
   root.style.setProperty('--RS__scrollPaddingTop', '0px');
   root.style.setProperty('--RS__scrollPaddingRight', '0px');
   root.style.setProperty('--RS__scrollPaddingBottom', '0px');

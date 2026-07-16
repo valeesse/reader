@@ -84,7 +84,6 @@ export function ReadiumReaderViewer({
   const resizeTimerRef = useRef<number | null>(null);
   const pageCounterRefreshRef = useRef<(locator?: ReadiumLocator, delay?: number) => void>(() => {});
   const settingsRevisionRef = useRef(0);
-  const settingsAnchorRef = useRef<ReturnType<typeof snapshotLocator>>(undefined);
   const resizeAnchorRef = useRef<ReturnType<typeof snapshotLocator>>(undefined);
   const stableViewportAnchorRef = useRef<ReturnType<typeof snapshotLocator>>(undefined);
   const anchorCaptureRafRef = useRef<number | null>(null);
@@ -583,7 +582,6 @@ export function ReadiumReaderViewer({
       layoutCacheRef.current.invalidate();
       prepareGenerationRef.current += 1;
       preparedTargetRef.current = null;
-      settingsAnchorRef.current = undefined;
       resizeAnchorRef.current = undefined;
       stableViewportAnchorRef.current = undefined;
       if (anchorCaptureRafRef.current !== null) window.cancelAnimationFrame(anchorCaptureRafRef.current);
@@ -607,36 +605,13 @@ export function ReadiumReaderViewer({
     const navigator = navigatorRef.current;
     if (!navigator) return;
     const strip = resourceStripRef.current;
-    const stripSettingsUpdate = strip ? strip.updateSettings(settings) : Promise.resolve();
-    const wasContinuous = isContinuousScroll(appliedLayoutSettingsRef.current);
     const wantsContinuous = isContinuousScroll(settings);
     const layoutFingerprint = createReaderSettingsLayoutFingerprint(settings, book.type);
     const layoutChanged = settingsLayoutFingerprintRef.current !== layoutFingerprint;
     settingsLayoutFingerprintRef.current = layoutFingerprint;
-    if (wantsContinuous && strip) {
-      const revision = ++settingsRevisionRef.current;
-      const anchor = wasContinuous
-        ? strip.currentLocator
-        : snapshotVisibleTextLocator(navigator, appliedLayoutSettingsRef.current) || snapshotLocator(navigator.currentLocator);
-      layoutRestoringRef.current = true;
-      void stripSettingsUpdate.then(() => strip.go((anchor || navigator.currentLocator) as ReadiumLocatorLike, false)).then(() => {
-        if (revision !== settingsRevisionRef.current || resourceStripRef.current !== strip) return;
-        strip.setActive(true);
-        containerRef.current?.classList.add('zenith-resource-strip-suspended');
-        appliedLayoutSettingsRef.current = settings;
-        layoutRestoringRef.current = false;
-        settingsAnchorRef.current = undefined;
-      });
-      return;
-    }
-    void stripSettingsUpdate;
-    if (wasContinuous && strip) {
-      settingsAnchorRef.current = snapshotLocator(strip.currentLocator as ReadiumLocator);
-      strip.setActive(false);
-      containerRef.current?.classList.remove('zenith-resource-strip-suspended');
-    }
     if (!layoutChanged) {
       applyReadiumFrameSettingsToNavigator(navigator, settings, book.type);
+      appliedLayoutSettingsRef.current = settings;
       return;
     }
     cancelDeferredWork(true);
@@ -647,60 +622,51 @@ export function ReadiumReaderViewer({
     navigator.releasePrepared?.();
     publicationRef.current?.advancePrefetchGeneration();
     const revision = ++settingsRevisionRef.current;
-    const preferences = createReadiumPreferences(settings, book.type);
-    settingsAnchorRef.current ||= snapshotVisibleTextLocator(navigator, appliedLayoutSettingsRef.current);
-    // Lock as soon as the setting changes, including the debounce window. Page
-    // turns requested during reflow stay in the bounded queue and are drained
-    // against the new geometry instead of moving in the old layout and then
-    // being overwritten by its stale anchor.
+    const sourceIsContinuous = isContinuousScroll(appliedLayoutSettingsRef.current);
+    const anchor = sourceIsContinuous && strip
+      ? strip.snapshotLocator()
+      : snapshotVisibleTextLocator(navigator, appliedLayoutSettingsRef.current) || snapshotLocator(navigator.currentLocator);
     layoutRestoringRef.current = true;
     if (settingsApplyTimerRef.current !== null) window.clearTimeout(settingsApplyTimerRef.current);
     settingsApplyTimerRef.current = window.setTimeout(() => {
       settingsApplyTimerRef.current = null;
       enqueueLayout(async () => {
         if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
-        const navigationWasActive = navigationLockedRef.current;
-        if (navigationWasActive) {
-          await waitUntil(() => !navigationLockedRef.current, 350);
-        }
+        if (navigationLockedRef.current) await waitUntil(() => !navigationLockedRef.current, 350);
         if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
-        // A turn which began before the setting click is authoritative. Refresh
-        // the anchor after it settles; turns clicked after the setting change
-        // are queued because layoutRestoringRef is already true.
-        const before = navigationWasActive
-          ? snapshotVisibleTextLocator(navigator, appliedLayoutSettingsRef.current) || snapshotLocator(navigator.currentLocator)
-          : settingsAnchorRef.current || snapshotLocator(navigator.currentLocator);
         try {
+          if (wantsContinuous && strip) {
+            const updated = await strip.updateSettings(settings, anchor || strip.snapshotLocator());
+            if (!updated || revision !== settingsRevisionRef.current || resourceStripRef.current !== strip) return;
+            strip.setActive(true);
+            containerRef.current?.classList.add('zenith-resource-strip-suspended');
+            appliedLayoutSettingsRef.current = settings;
+            return;
+          }
+
           suppressResizeUntilRef.current = performance.now() + 500;
-          await navigator.submitPreferences(new EpubPreferences(preferences));
-          if (navigator.layout !== 'fixed'
-            && isContinuousScroll(appliedLayoutSettingsRef.current) !== isContinuousScroll(settings)) {
-            // Rapid mixed switches can update Readium's internal layout enum
-            // before its current iframe has actually been replaced. Force one
-            // authoritative pool rebuild at the scroll/paged boundary so the
-            // visible frame and navigator state cannot diverge.
-            await navigator.setLayout(isContinuousScroll(settings) ? 'scrolled' : 'reflowable', true);
-          }
+          await navigator.submitPreferences(new EpubPreferences(createReadiumPreferences(settings, book.type)));
+          if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
+          if (navigator.layout !== 'fixed' && navigator.layout !== 'reflowable') await navigator.setLayout('reflowable');
+          if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
           await navigator.resizeHandler?.();
+          if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
           await waitForLayoutFrames();
-          if (navigatorRef.current !== navigator) return;
-          const isLatest = revision === settingsRevisionRef.current;
-           applyReadiumFrameSettingsToNavigator(navigator, isLatest ? settings : settingsRef.current, book.type);
-           if (before) await navigateToLocator(navigator, retargetLocatorViewport(before, isLatest ? settings : settingsRef.current));
-           revealReadiumFrames(containerRef.current, navigator);
-           if (isLatest) {
-             appliedLayoutSettingsRef.current = settings;
-             settingsAnchorRef.current = undefined;
-            scheduleDeferredWork(navigator.currentLocator?.href || before?.href || '', 0, true);
-          }
+          if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
+          applyReadiumFrameSettingsToNavigator(navigator, settings, book.type);
+          if (anchor) await navigateToLocator(navigator, retargetLocatorViewport(anchor, settings));
+          if (revision !== settingsRevisionRef.current || navigatorRef.current !== navigator) return;
+          revealReadiumFrames(containerRef.current, navigator);
+          strip?.setActive(false);
+          containerRef.current?.classList.remove('zenith-resource-strip-suspended');
+          appliedLayoutSettingsRef.current = settings;
+          scheduleDeferredWork(navigator.currentLocator?.href || anchor?.href || '', 0, true);
         } finally {
-          // An older queued revision must not unlock navigation while a newer
-          // layout revision is still waiting or applying.
-           if (revision === settingsRevisionRef.current) {
-             layoutRestoringRef.current = false;
-             scheduleStableAnchorCapture(navigator, 2);
-             drainNavigationQueue();
-           }
+          if (revision === settingsRevisionRef.current) {
+            layoutRestoringRef.current = false;
+            scheduleStableAnchorCapture(navigator, 2);
+            drainNavigationQueue();
+          }
         }
       });
     }, 120);
@@ -1677,18 +1643,10 @@ function createReadiumPreferences(settings: ReturnType<typeof useAppContext>['se
 }
 
 function readiumLineLengths(pageMode: AppSettings['pageMode']) {
-  if (pageMode === 'double') {
-    return {
-      optimalLineLength: 38,
-      minimalLineLength: 24,
-      maximalLineLength: null,
-    };
-  }
-
   return {
-    optimalLineLength: 68,
-    minimalLineLength: 35,
-    maximalLineLength: 95,
+    optimalLineLength: null,
+    minimalLineLength: null,
+    maximalLineLength: null,
   };
 }
 

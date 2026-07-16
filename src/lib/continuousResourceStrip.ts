@@ -39,8 +39,7 @@ export class ContinuousResourceStrip {
   private pendingWindowCenter: number | null = null;
   private windowTimer: number | null = null;
   private programmaticScroll = false;
-  private goGeneration = 0;
-  private settingsGeneration = 0;
+  private layoutGeneration = 0;
 
   constructor(
     private host: HTMLElement,
@@ -77,6 +76,27 @@ export class ContinuousResourceStrip {
     return this.records.get(this.currentIndex)?.iframe.contentDocument || undefined;
   }
 
+  snapshotLocator() {
+    const focus = this.scroller.scrollTop + this.scroller.clientHeight * 0.5;
+    const record = this.sortedRecords().find((item) => item.wrapper.offsetTop + item.wrapper.offsetHeight > focus)
+      || this.records.get(this.currentIndex);
+    const link = record && this.publication.readingOrder.items[record.index];
+    const doc = record?.iframe.contentDocument;
+    if (!record || !link || !doc?.body) return this.currentLocatorValue;
+    const localFocus = focus - record.wrapper.offsetTop;
+    const element = Array.from(doc.body.querySelectorAll<HTMLElement>('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre'))
+      .filter((item) => item.textContent?.trim())
+      .sort((a, b) => distanceToElement(a, localFocus) - distanceToElement(b, localFocus))[0];
+    const progression = clamp(localFocus / Math.max(1, record.height), 0, 1);
+    const locator = this.locatorForProgression(link.href, progression);
+    return locator.copyWithLocations({
+      ...locator.locations,
+      progression,
+      cssSelector: element ? cssSelector(element) : undefined,
+      zenithViewportY: 0.5,
+    });
+  }
+
   updatePositions() {
     this.positionRanges.clear();
     for (const position of this.publication.positions) {
@@ -111,9 +131,8 @@ export class ContinuousResourceStrip {
     this.host.setAttribute('aria-hidden', active ? 'false' : 'true');
   }
 
-  async updateSettings(settings: AppSettings) {
-    const generation = ++this.settingsGeneration;
-    const anchor = this.captureAnchor();
+  async updateSettings(settings: AppSettings, anchor = this.snapshotLocator()) {
+    const generation = ++this.layoutGeneration;
     this.settings = settings;
     this.applyHostTheme();
     await Promise.all(Array.from(this.records.values(), async (record) => {
@@ -123,12 +142,15 @@ export class ContinuousResourceStrip {
       this.measureRecord(record);
     }));
     await nextPaint(2);
-    if (this.destroyed || generation !== this.settingsGeneration) return;
-    if (anchor) this.restoreAnchor(anchor);
+    if (this.destroyed || generation !== this.layoutGeneration) return false;
+    await this.scrollToLocator(anchor, false);
+    if (this.destroyed || generation !== this.layoutGeneration) return false;
+    this.currentLocatorValue = anchor;
+    return true;
   }
 
   async go(locator: ReadiumLocatorLike, smooth = false) {
-    const generation = ++this.goGeneration;
+    const generation = ++this.layoutGeneration;
     if (this.destroyed || !locator?.href) return false;
     const index = this.indexForHref(locator.href);
     if (index === undefined) return false;
@@ -138,14 +160,14 @@ export class ContinuousResourceStrip {
     const current = this.records.get(index);
     if (current) await current.loadPromise.catch(() => {});
     else await this.createRecord(index).catch(() => {});
-    if (this.destroyed || generation !== this.goGeneration) return false;
+    if (this.destroyed || generation !== this.layoutGeneration) return false;
     // WebView smooth scrolling can stop short when the virtual window is
     // rebalanced over a multi-resource distance. Cross-resource jumps are
     // therefore atomic; local fragment jumps can remain smoothly animated.
     this.programmaticScroll = shouldSmooth;
     await this.scrollToLocator(locator, shouldSmooth);
     if (shouldSmooth) await waitForScrollCompletion(this.scroller);
-    if (this.destroyed || generation !== this.goGeneration) return false;
+    if (this.destroyed || generation !== this.layoutGeneration) return false;
     this.programmaticScroll = false;
     this.emitLocator(true);
     void this.ensureWindow(index, false);
@@ -160,7 +182,7 @@ export class ContinuousResourceStrip {
 
   destroy() {
     this.destroyed = true;
-    this.goGeneration += 1;
+    this.layoutGeneration += 1;
     this.mutationGeneration += 1;
     if (this.scrollRaf !== null) cancelAnimationFrame(this.scrollRaf);
     if (this.locatorTimer !== null) window.clearTimeout(this.locatorTimer);
@@ -186,7 +208,7 @@ export class ContinuousResourceStrip {
 
   private updateCurrentFromScroll() {
     if (this.destroyed || this.records.size === 0) return;
-    const focus = this.scroller.scrollTop + this.scroller.clientHeight * 0.42;
+    const focus = this.scroller.scrollTop + this.scroller.clientHeight * 0.5;
     let selected = this.sortedRecords()[0];
     for (const record of this.sortedRecords()) {
       if (record.wrapper.offsetTop <= focus) selected = record;
@@ -206,8 +228,8 @@ export class ContinuousResourceStrip {
     const record = this.records.get(this.currentIndex);
     const link = this.publication.readingOrder.items[this.currentIndex];
     if (!record || !link) return;
-    const localTop = Math.max(0, this.scroller.scrollTop - record.wrapper.offsetTop);
-    const progression = clamp(localTop / Math.max(1, record.height - this.scroller.clientHeight), 0, 1);
+    const localFocus = Math.max(0, this.scroller.scrollTop + this.scroller.clientHeight * 0.5 - record.wrapper.offsetTop);
+    const progression = clamp(localFocus / Math.max(1, record.height), 0, 1);
     this.currentLocatorValue = this.locatorForProgression(link.href, progression);
     if (this.locatorTimer !== null) window.clearTimeout(this.locatorTimer);
     if (immediate) {
@@ -434,19 +456,8 @@ export class ContinuousResourceStrip {
     const viewportY = typeof locations.zenithViewportY === 'number' ? locations.zenithViewportY : 0;
     const local = element
       ? element.getBoundingClientRect().top - viewportY * this.scroller.clientHeight
-      : progression * Math.max(0, record.height - this.scroller.clientHeight);
+      : progression * record.height - viewportY * this.scroller.clientHeight;
     this.scroller.scrollTo({ top: Math.max(0, record.wrapper.offsetTop + local), behavior: smooth ? 'smooth' : 'auto' });
-  }
-
-  private captureAnchor() {
-    const record = this.records.get(this.currentIndex);
-    if (!record) return undefined;
-    return { index: record.index, offset: this.scroller.scrollTop - record.wrapper.offsetTop };
-  }
-
-  private restoreAnchor(anchor: { index: number; offset: number }) {
-    const record = this.records.get(anchor.index);
-    if (record) this.scroller.scrollTop = Math.max(0, record.wrapper.offsetTop + anchor.offset);
   }
 
   private indexForHref(href?: string) {
@@ -528,6 +539,24 @@ function normalizeResourcePath(href: string) {
     .replace(/^\.\//, '')
     .replace(/^\//, '')
     .toLowerCase();
+}
+
+function distanceToElement(element: HTMLElement, y: number) {
+  const rect = element.getBoundingClientRect();
+  return Math.abs((rect.top + rect.bottom) * 0.5 - y);
+}
+
+function cssSelector(element: HTMLElement) {
+  if (element.id) return `#${CSS.escape(element.id)}`;
+  const parts: string[] = [];
+  let current: HTMLElement | null = element;
+  while (current?.parentElement && current !== current.ownerDocument.body) {
+    const siblings = Array.from(current.parentElement.children).filter((item) => item.tagName === current!.tagName);
+    const suffix = siblings.length > 1 ? `:nth-of-type(${siblings.indexOf(current) + 1})` : '';
+    parts.unshift(`${current.tagName.toLowerCase()}${suffix}`);
+    current = current.parentElement;
+  }
+  return parts.length > 0 ? `body > ${parts.join(' > ')}` : 'body';
 }
 
 function nextPaint(frames = 1): Promise<void> {
