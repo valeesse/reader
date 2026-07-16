@@ -26,7 +26,7 @@ import { ReaderLoadError, ReaderLoading, ReaderPageCounter, ReaderViewerProps } 
 import { createReaderLayoutKey, createReaderSettingsLayoutFingerprint, ReaderLayoutCache } from './lib/readerLayoutCache';
 import { recordReaderMetric } from './lib/readerPerformance';
 import { ContinuousResourceStrip } from './lib/continuousResourceStrip';
-import { applyReaderDocumentStyles, readerThemeColors, readiumFontScale } from './lib/readerDocumentStyles';
+import { applyReaderDocumentProperties, readerThemeColors, readiumFontScale } from './lib/readerDocumentStyles';
 
 const DOUBLE_PAGE_CENTER_GAP = 56;
 const IMMEDIATE_PREFETCH_RADIUS = 1;
@@ -2216,7 +2216,7 @@ function applyReadiumFrameSettingsToNavigator(navigator: EpubNavigator, settings
 function applyReadiumFrameSettings(doc: Document, settings: AppSettings, bookType: 'epub' | 'txt') {
   const root = doc.documentElement;
   const before = frameLayoutFingerprint(root);
-  applyReaderDocumentStyles(doc, settings, bookType, isContinuousScroll(settings) ? 'continuous' : 'paged');
+  applyReaderDocumentProperties(doc, settings, bookType);
   if (isContinuousScroll(settings)) {
     root.style.removeProperty('--USER__colCount');
     root.style.removeProperty('--RS__colCount');

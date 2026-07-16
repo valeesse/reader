@@ -1,6 +1,6 @@
 import { AppSettings, BookType } from '../types';
 import { ReadiumLocatorLike, ReadiumPublicationLike } from './readiumPublication';
-import { applyReaderDocumentStyles, readerThemeColors } from './readerDocumentStyles';
+import { applyContinuousReaderDocumentStyles, readerThemeColors } from './readerDocumentStyles';
 
 const RESOURCE_RADIUS = 3;
 const MAX_RESOURCES = RESOURCE_RADIUS * 2 + 1;
@@ -116,13 +116,12 @@ export class ContinuousResourceStrip {
     const anchor = this.captureAnchor();
     this.settings = settings;
     this.applyHostTheme();
-    for (const record of this.records.values()) {
+    await Promise.all(Array.from(this.records.values(), async (record) => {
       const doc = record.iframe.contentDocument;
-      if (doc) {
-        this.applyDocumentSettings(doc);
-        this.measureRecord(record);
-      }
-    }
+      if (!doc) return;
+      await this.applyDocumentSettings(doc);
+      this.measureRecord(record);
+    }));
     await nextPaint(2);
     if (this.destroyed || generation !== this.settingsGeneration) return;
     if (anchor) this.restoreAnchor(anchor);
@@ -327,7 +326,7 @@ export class ContinuousResourceStrip {
     if (this.destroyed || this.records.get(record.index) !== record) return;
     const doc = record.iframe.contentDocument;
     if (!doc) return;
-    this.applyDocumentSettings(doc);
+    await this.applyDocumentSettings(doc);
     this.installDocumentInteractions(record, doc);
     record.loaded = true;
     this.measureRecord(record);
@@ -379,7 +378,7 @@ export class ContinuousResourceStrip {
   }
 
   private applyDocumentSettings(doc: Document) {
-    applyReaderDocumentStyles(doc, this.settings, this.bookType, 'continuous');
+    return applyContinuousReaderDocumentStyles(doc, this.settings, this.bookType);
   }
 
   private measureRecord(record: StripRecord) {
