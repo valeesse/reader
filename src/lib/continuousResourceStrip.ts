@@ -1,5 +1,6 @@
 import { AppSettings, BookType } from '../types';
 import { ReadiumLocatorLike, ReadiumPublicationLike } from './readiumPublication';
+import { applyReaderDocumentStyles, readerThemeColors } from './readerDocumentStyles';
 
 const RESOURCE_RADIUS = 3;
 const MAX_RESOURCES = RESOURCE_RADIUS * 2 + 1;
@@ -378,45 +379,7 @@ export class ContinuousResourceStrip {
   }
 
   private applyDocumentSettings(doc: Document) {
-    let style = doc.getElementById('zenith-resource-strip-style') as HTMLStyleElement | null;
-    if (!style) {
-      style = doc.createElement('style');
-      style.id = 'zenith-resource-strip-style';
-      (doc.head || doc.documentElement).appendChild(style);
-    }
-    const colors = stripTheme(this.settings.theme);
-    const fontSize = this.bookType === 'txt' ? this.settings.fontSize * 0.875 : this.settings.fontSize;
-    style.textContent = `
-      :root, html, body {
-        background: ${colors.background} !important;
-        color: ${colors.text} !important;
-        height: auto !important;
-        min-height: 0 !important;
-        overflow: hidden !important;
-        max-width: none !important;
-      }
-      html { font-size: ${fontSize}px !important; }
-      body {
-        box-sizing: border-box !important;
-        font-size: 1rem !important;
-        letter-spacing: ${this.settings.letterSpacing}em !important;
-        line-height: ${this.settings.lineHeight} !important;
-        margin: 0 !important;
-        padding: 0 0 ${Math.max(24, this.settings.paragraphSpacing * fontSize)}px !important;
-        text-rendering: optimizeLegibility;
-      }
-      body, p, div, span, li, blockquote, h1, h2, h3, h4, h5, h6,
-      table, th, td, caption, pre, code, ruby, rt, rp, a, em, strong {
-        font-family: ${this.settings.fontFamily} !important;
-      }
-      p { margin-block: 0 ${this.settings.paragraphSpacing}em !important; }
-      img, picture, svg, video, canvas, object, embed {
-        box-sizing: border-box !important;
-        height: auto !important;
-        max-width: 100% !important;
-      }
-      img { cursor: zoom-in !important; }
-    `;
+    applyReaderDocumentStyles(doc, this.settings, this.bookType, 'continuous');
   }
 
   private measureRecord(record: StripRecord) {
@@ -540,16 +503,10 @@ export class ContinuousResourceStrip {
   }
 
   private applyHostTheme() {
-    const colors = stripTheme(this.settings.theme);
+    const colors = readerThemeColors(this.settings.theme);
     this.host.style.background = colors.background;
     this.scroller.style.background = colors.background;
   }
-}
-
-function stripTheme(theme: AppSettings['theme']) {
-  if (theme === 'dark') return { background: '#121212', text: '#e5e7eb' };
-  if (theme === 'sepia') return { background: '#FDFCF8', text: '#5b4636' };
-  return { background: '#ffffff', text: '#111827' };
 }
 
 function clamp(value: number, minimum: number, maximum: number) {

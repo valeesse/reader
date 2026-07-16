@@ -26,16 +26,13 @@ import { ReaderLoadError, ReaderLoading, ReaderPageCounter, ReaderViewerProps } 
 import { createReaderLayoutKey, createReaderSettingsLayoutFingerprint, ReaderLayoutCache } from './lib/readerLayoutCache';
 import { recordReaderMetric } from './lib/readerPerformance';
 import { ContinuousResourceStrip } from './lib/continuousResourceStrip';
+import { applyReaderDocumentStyles, readerThemeColors, readiumFontScale } from './lib/readerDocumentStyles';
 
 const DOUBLE_PAGE_CENTER_GAP = 56;
 const IMMEDIATE_PREFETCH_RADIUS = 1;
 const STABLE_PREFETCH_RADIUS = 3;
 const WHEEL_PAGE_THRESHOLD = 80;
 const WHEEL_GESTURE_RESET_MS = 180;
-// Readium's CJK stylesheet renders generated Chinese TXT at a 14px base,
-// while typical EPUB content here renders at 16px with our 18px scale base.
-// 15.75 keeps the same setting perceptually equal across both formats.
-const TXT_FONT_SCALE_BASE = 15.75;
 type ReadiumPageGeometry = {
   viewportWidth: number;
   viewportHeight: number;
@@ -1538,7 +1535,7 @@ export function ReadiumReaderViewer({
             <div
               className="h-full overflow-hidden whitespace-pre-wrap"
               style={{
-                color: themeColors(settings.theme).text,
+                color: readerThemeColors(settings.theme).text,
                 fontFamily: settings.fontFamily,
                 fontSize: `${settings.fontSize}px`,
                 letterSpacing: `${settings.letterSpacing}em`,
@@ -1662,8 +1659,8 @@ function createReadiumPreferences(settings: ReturnType<typeof useAppContext>['se
   const columns = isContinuousScroll(settings) ? null : settings.pageMode === 'double' ? 2 : 1;
   const lineLengths = readiumLineLengths(isContinuousScroll(settings) ? 'single' : settings.pageMode);
   return {
-    backgroundColor: themeColors(settings.theme).background,
-    textColor: themeColors(settings.theme).text,
+    backgroundColor: readerThemeColors(settings.theme).background,
+    textColor: readerThemeColors(settings.theme).text,
     fontFamily: settings.fontFamily,
     fontSize: readiumFontScale(settings.fontSize, bookType),
     lineHeight: settings.lineHeight,
@@ -2197,12 +2194,6 @@ function yieldForReaderPreparation() {
   return new Promise<void>((resolve) => window.requestIdleCallback(() => resolve(), { timeout: 120 }));
 }
 
-function themeColors(theme: 'light' | 'dark' | 'sepia') {
-  if (theme === 'dark') return { background: '#121212', text: '#e5e7eb' };
-  if (theme === 'sepia') return { background: '#FDFCF8', text: '#5b4636' };
-  return { background: '#ffffff', text: '#111827' };
-}
-
 function createProgressPayload(bookId: string, location: string) {
   return {
     bookId,
@@ -2225,15 +2216,8 @@ function applyReadiumFrameSettingsToNavigator(navigator: EpubNavigator, settings
 
 function applyReadiumFrameSettings(doc: Document, settings: AppSettings, bookType: 'epub' | 'txt') {
   const root = doc.documentElement;
-  const colors = themeColors(settings.theme);
   const before = frameLayoutFingerprint(root);
-  root.style.setProperty('--USER__backgroundColor', colors.background);
-  root.style.setProperty('--USER__textColor', colors.text);
-  root.style.setProperty('--USER__fontFamily', settings.fontFamily);
-  root.style.setProperty('--USER__fontSize', String(readiumFontScale(settings.fontSize, bookType)));
-  root.style.setProperty('--USER__lineHeight', String(settings.lineHeight));
-  root.style.setProperty('--USER__paraSpacing', `${settings.paragraphSpacing}em`);
-  root.style.setProperty('--USER__letterSpacing', `${settings.letterSpacing}em`);
+  applyReaderDocumentStyles(doc, settings, bookType, isContinuousScroll(settings) ? 'continuous' : 'paged');
   if (isContinuousScroll(settings)) {
     root.style.removeProperty('--USER__colCount');
     root.style.removeProperty('--RS__colCount');
@@ -2285,10 +2269,6 @@ function normalizeWheelDelta(event: WheelEvent, container: HTMLElement | null) {
     return dominantDelta * Math.max(1, container?.clientHeight || window.innerHeight);
   }
   return dominantDelta;
-}
-
-function readiumFontScale(fontSize: number, bookType: 'epub' | 'txt') {
-  return fontSize / (bookType === 'txt' ? TXT_FONT_SCALE_BASE : 18);
 }
 
 function readiumCenterGap(settings: AppSettings) {
