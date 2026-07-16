@@ -39,6 +39,7 @@ export class ContinuousResourceStrip {
   private windowTimer: number | null = null;
   private programmaticScroll = false;
   private goGeneration = 0;
+  private settingsGeneration = 0;
 
   constructor(
     private host: HTMLElement,
@@ -110,6 +111,7 @@ export class ContinuousResourceStrip {
   }
 
   async updateSettings(settings: AppSettings) {
+    const generation = ++this.settingsGeneration;
     const anchor = this.captureAnchor();
     this.settings = settings;
     this.applyHostTheme();
@@ -121,6 +123,7 @@ export class ContinuousResourceStrip {
       }
     }
     await nextPaint(2);
+    if (this.destroyed || generation !== this.settingsGeneration) return;
     if (anchor) this.restoreAnchor(anchor);
   }
 
@@ -379,7 +382,7 @@ export class ContinuousResourceStrip {
     if (!style) {
       style = doc.createElement('style');
       style.id = 'zenith-resource-strip-style';
-      doc.head?.appendChild(style);
+      (doc.head || doc.documentElement).appendChild(style);
     }
     const colors = stripTheme(this.settings.theme);
     const fontSize = this.bookType === 'txt' ? this.settings.fontSize * 0.875 : this.settings.fontSize;
@@ -395,13 +398,16 @@ export class ContinuousResourceStrip {
       html { font-size: ${fontSize}px !important; }
       body {
         box-sizing: border-box !important;
-        font-family: ${this.settings.fontFamily} !important;
         font-size: 1rem !important;
         letter-spacing: ${this.settings.letterSpacing}em !important;
         line-height: ${this.settings.lineHeight} !important;
         margin: 0 !important;
         padding: 0 0 ${Math.max(24, this.settings.paragraphSpacing * fontSize)}px !important;
         text-rendering: optimizeLegibility;
+      }
+      body, p, div, span, li, blockquote, h1, h2, h3, h4, h5, h6,
+      table, th, td, caption, pre, code, ruby, rt, rp, a, em, strong {
+        font-family: ${this.settings.fontFamily} !important;
       }
       p { margin-block: 0 ${this.settings.paragraphSpacing}em !important; }
       img, picture, svg, video, canvas, object, embed {

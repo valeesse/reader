@@ -1488,8 +1488,10 @@ export function ReadiumReaderViewer({
           paddingBottom: `min(${settings.pageMargins.bottom}px, 30vh)`,
         }}
       >
-        <div ref={containerRef} className={`readium-container h-full w-full ${loading ? 'readium-initializing' : ''}`} />
-        <div ref={resourceStripHostRef} className={`zenith-resource-strip-host ${loading ? 'zenith-resource-strip-initializing' : ''}`} aria-hidden="true" />
+        <div className="relative h-full w-full min-h-0 min-w-0">
+          <div ref={containerRef} className={`readium-container h-full w-full ${loading ? 'readium-initializing' : ''}`} />
+          <div ref={resourceStripHostRef} className={`zenith-resource-strip-host ${loading ? 'zenith-resource-strip-initializing' : ''}`} aria-hidden="true" />
+        </div>
       </div>
 
       <div className="pointer-events-none absolute left-3 top-1/2 z-40 -translate-y-1/2">
