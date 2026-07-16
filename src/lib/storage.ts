@@ -1,5 +1,12 @@
 import { get, keys, set } from 'idb-keyval';
-import { getWebState, isDesktopRuntime, listBooks, putWebStateSection } from './backend';
+import {
+  getWebProgress,
+  getWebState,
+  isDesktopRuntime,
+  listBooks,
+  putWebReadingState,
+  putWebStateSection,
+} from './backend';
 import { AppSettings, Book, defaultSettings, ReadingProgress, Series, SyncSnapshot } from '../types';
 
 export interface StartupSnapshot {
@@ -81,7 +88,13 @@ export async function getSeries(): Promise<Series[]> {
   return (await get<Series[]>(KEYS.SERIES)) || [];
 }
 
-export function saveProgress(progress: ReadingProgress) {
+export function saveProgress(progress: ReadingProgress, options?: { urgent?: boolean }) {
+  if (options?.urgent && !isDesktopRuntime) {
+    void putWebReadingState({
+      progress,
+      lastRead: { bookId: progress.bookId, updatedAt: progress.updatedAt },
+    }, true).catch((error) => console.warn('Failed to urgently persist Web reading progress', error));
+  }
   const write = progressWriteQueue.catch(() => {}).then(() => saveProgressInOrder(progress));
   progressWriteQueue = write;
   return write;
@@ -102,10 +115,10 @@ async function saveProgressInOrder(progress: ReadingProgress) {
     updateStartupSnapshot({ lastReadBookId: progress.bookId });
   }
   if (!isDesktopRuntime) {
-    await putWebStateSection('progress', { [progress.bookId]: progress });
-    if (becomesLastRead) {
-      await putWebStateSection('lastRead', { bookId: progress.bookId, updatedAt: progress.updatedAt });
-    }
+    await putWebReadingState({
+      progress,
+      lastRead: becomesLastRead ? { bookId: progress.bookId, updatedAt: progress.updatedAt } : undefined,
+    });
   }
   window.dispatchEvent(new CustomEvent('zenith:progress-saved', {
     detail: { progress, lastReadBookId: becomesLastRead ? progress.bookId : undefined } satisfies ProgressSavedDetail,
@@ -114,9 +127,21 @@ async function saveProgressInOrder(progress: ReadingProgress) {
 
 export async function getProgress(bookId: string): Promise<ReadingProgress | undefined> {
   if (!isDesktopRuntime) {
-    const progress = (await loadWebState()).progress?.[bookId];
-    if (progress) await set(`${KEYS.PROGRESS}${bookId}`, progress);
-    return progress;
+    const local = await get<ReadingProgress>(`${KEYS.PROGRESS}${bookId}`);
+    const remotePromise = getWebProgress<ReadingProgress | null>(bookId)
+      .then(async (remote) => {
+        if (!remote || (local && local.updatedAt >= remote.updatedAt)) return local;
+        await set(`${KEYS.PROGRESS}${bookId}`, remote);
+        window.dispatchEvent(new CustomEvent('zenith:progress-saved', {
+          detail: { progress: remote } satisfies ProgressSavedDetail,
+        }));
+        return remote;
+      });
+    if (local) {
+      void remotePromise.catch((error) => console.warn('Failed to reconcile Web reading progress', error));
+      return local;
+    }
+    return (await remotePromise.catch(() => undefined)) || undefined;
   }
   return get<ReadingProgress>(`${KEYS.PROGRESS}${bookId}`);
 }
@@ -213,7 +238,11 @@ export async function applySyncSnapshot(snapshot: SyncSnapshot) {
   })).filter((item) => item.bookIds.length > 0);
   const settings = normalizeSettings(snapshot.settings);
   await Promise.all([saveSeries(series), saveSettings(settings)]);
-  await Promise.all((snapshot.progress || []).filter((item) => available.has(item.bookId)).map(saveProgress));
+  await Promise.all(
+    (snapshot.progress || [])
+      .filter((item) => available.has(item.bookId))
+      .map((item) => saveProgress(item)),
+  );
 }
 
 function loadWebState() {

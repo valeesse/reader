@@ -48,6 +48,7 @@ pub fn run() {
             open_epub_book,
             read_epub_resource,
             prefetch_epub_resources,
+            epub_position_counts,
             close_epub_book,
             reader_cache_stats,
             clear_reader_cache,

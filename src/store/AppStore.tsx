@@ -1,6 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import { Book, Series, AppSettings, ReadingProgress, defaultSettings } from '../types';
-import { inferBookSeries, sortBooksInSeries } from '../lib/series';
+import {
+  AutoCreateSeriesResult,
+  createMetadataSeries,
+} from '../lib/metadataSeries';
+export type { AutoCreateSeriesResult } from '../lib/metadataSeries';
 import {
   getAllProgress,
   getBooks,
@@ -15,6 +19,7 @@ import {
   ProgressSavedDetail,
 } from '../lib/storage';
 import { normalizeSettings } from '../lib/readingSettings';
+import { cancelReaderIdle, scheduleReaderIdle } from '../lib/readerScheduler';
 
 interface AppContextType {
   books: Book[];
@@ -37,12 +42,6 @@ interface AppContextType {
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
-
-export interface AutoCreateSeriesResult {
-  createdCount: number;
-  updatedCount: number;
-  eligibleGroups: number;
-}
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [startupSnapshot] = useState(() => getStartupSnapshotSync());
@@ -98,8 +97,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       void reloadState();
       return;
     }
-    const idleId = window.requestIdleCallback(() => void reloadState(), { timeout: 1500 });
-    return () => window.cancelIdleCallback(idleId);
+    const idleId = scheduleReaderIdle(() => void reloadState(), { timeout: 1500 });
+    return () => cancelReaderIdle(idleId);
   }, []);
 
   useEffect(() => {
@@ -124,11 +123,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     };
 
-    if ('requestIdleCallback' in window) {
-      window.requestIdleCallback(load, { timeout: 1200 });
-    } else {
-      globalThis.setTimeout(load, 80);
-    }
+    scheduleReaderIdle(load, { timeout: 1200 });
   };
 
   useEffect(() => {
@@ -274,107 +269,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       {children}
     </AppContext.Provider>
   );
-}
-
-function createMetadataSeries(books: Book[], existingSeries: Series[]) {
-  const grouped = new Map<string, Array<{ book: Book; seriesName: string; seriesIndex?: number; inferred: boolean }>>();
-
-  for (const book of books) {
-    const inferredSeries = inferBookSeries(book);
-    const metadataSeriesName = book.seriesName?.trim();
-    const seriesName = inferredSeries?.name || metadataSeriesName;
-    if (!seriesName) continue;
-    const key = seriesName.toLocaleLowerCase();
-    grouped.set(key, [
-      ...(grouped.get(key) || []),
-      {
-        book,
-        seriesName,
-        seriesIndex: inferredSeries?.index ?? book.seriesIndex,
-        inferred: Boolean(inferredSeries),
-      },
-    ]);
-  }
-
-  if (grouped.size === 0) {
-    return { books, series: existingSeries, stats: emptyAutoCreateSeriesResult() };
-  }
-
-  const groupedBookIds = new Set(
-    Array.from(grouped.values()).flatMap((items) => items.map(({ book }) => book.id)),
-  );
-  const availableBookIds = new Set(books.map((book) => book.id));
-  const nextSeries = existingSeries
-    .map((item) => ({
-      ...item,
-      bookIds: item.bookIds.filter((bookId) => availableBookIds.has(bookId) && !groupedBookIds.has(bookId)),
-    }))
-    .filter((item) => item.bookIds.length > 0);
-  const seriesByName = new Map(nextSeries.map((item) => [item.name.trim().toLocaleLowerCase(), { ...item }]));
-  const bookSeriesMap = new Map<string, string>();
-  let createdCount = 0;
-  let updatedCount = 0;
-  let eligibleGroups = 0;
-
-  for (const [key, groupedBooks] of grouped) {
-    const onlyInferred = groupedBooks.every((item) => item.inferred);
-    if (onlyInferred && groupedBooks.length < 2) continue;
-    eligibleGroups += 1;
-
-    const displayName = groupedBooks[0].seriesName;
-    const orderedIds = sortBooksInSeries(groupedBooks.map(({ book, seriesIndex }) => ({
-      ...book,
-      seriesIndex: seriesIndex ?? book.seriesIndex,
-    }))).map((book) => book.id);
-
-    const existing = seriesByName.get(key);
-    if (existing) {
-      const mergedIds = Array.from(new Set([...existing.bookIds, ...orderedIds]));
-      const changed = mergedIds.length !== existing.bookIds.length
-        || mergedIds.some((bookId, index) => bookId !== existing.bookIds[index]);
-      existing.bookIds = mergedIds;
-      const targetIndex = nextSeries.findIndex((item) => item.id === existing.id);
-      if (targetIndex >= 0) nextSeries[targetIndex] = existing;
-      for (const bookId of mergedIds) bookSeriesMap.set(bookId, existing.id);
-      if (changed) updatedCount += 1;
-      continue;
-    }
-
-    const created: Series = {
-      id: `series-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: displayName,
-      bookIds: orderedIds,
-    };
-    nextSeries.push(created);
-    seriesByName.set(key, created);
-    createdCount += 1;
-    for (const bookId of orderedIds) bookSeriesMap.set(bookId, created.id);
-  }
-
-  return {
-    books: books.map((book) => {
-      const seriesId = bookSeriesMap.get(book.id);
-      if (seriesId) return { ...book, seriesId };
-      if (groupedBookIds.has(book.id) && book.seriesId) {
-        return { ...book, seriesId: undefined };
-      }
-      return book;
-    }),
-    series: nextSeries,
-    stats: {
-      createdCount,
-      updatedCount,
-      eligibleGroups,
-    },
-  };
-}
-
-function emptyAutoCreateSeriesResult(): AutoCreateSeriesResult {
-  return {
-    createdCount: 0,
-    updatedCount: 0,
-    eligibleGroups: 0,
-  };
 }
 
 export function useAppContext() {

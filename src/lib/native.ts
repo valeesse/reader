@@ -1,9 +1,21 @@
-import { convertFileSrc, invoke } from '@tauri-apps/api/core';
-import { open, save } from '@tauri-apps/plugin-dialog';
-import { getCurrentWindow } from '@tauri-apps/api/window';
-import { homeDir } from '@tauri-apps/api/path';
-import { AppSettings, WebDavBook } from '../types';
-import { clearCache, epubCommand, getCacheStats, isDesktopRuntime, ReaderCacheStats, txtCommand } from './backend';
+import {
+  clearCache,
+  desktopFileSrc,
+  desktopInvoke,
+  epubCommand,
+  getCacheStats,
+  isDesktopRuntime,
+  ReaderCacheStats,
+  txtCommand,
+} from './backend';
+export { saveImageFromSource } from './nativeImage';
+export {
+  cacheWebDavBook,
+  downloadWebDavBook,
+  downloadWebDavSnapshot,
+  listWebDavBooks,
+  uploadWebDavSnapshot,
+} from './nativeWebDav';
 
 let fallbackDialogDirectoryPromise: Promise<string> | undefined;
 
@@ -56,6 +68,12 @@ export interface NativeEpubOpenResult {
   sessionId: string;
   cacheKey: string;
   book: NativeEpubBookInfo;
+  positionCounts: NativeEpubPositionCount[];
+}
+
+export interface NativeEpubPositionCount {
+  href: string;
+  count: number;
 }
 
 export interface NativeEpubResource {
@@ -75,9 +93,10 @@ export function isTauriApp() {
 export async function showMainWindow() {
   if (!isTauriApp()) return;
   try {
-    await invoke('startup_shell_ready');
+    await desktopInvoke('startup_shell_ready');
   } catch (error) {
     try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
       await getCurrentWindow().show();
     } catch (fallbackError) {
       console.warn('Failed to show main window', error, fallbackError);
@@ -88,11 +107,12 @@ export async function showMainWindow() {
 export async function selectLibraryDirectory(): Promise<string | undefined> {
   const defaultPath = await libraryDialogDirectory();
   try {
-    const selected = await invoke<string | null>('pick_library_directory_fast');
+    const selected = await desktopInvoke<string | null>('pick_library_directory_fast');
     return selected || undefined;
   } catch (error) {
     console.info('Fast directory picker unavailable; using Tauri dialog', error);
   }
+  const { open } = await import('@tauri-apps/plugin-dialog');
   const selected = await open({
     directory: true,
     multiple: false,
@@ -109,7 +129,9 @@ export function prewarmLibraryDialogDirectory() {
 }
 
 async function libraryDialogDirectory() {
-  fallbackDialogDirectoryPromise ||= homeDir().catch(() => '');
+  fallbackDialogDirectoryPromise ||= import('@tauri-apps/api/path')
+    .then(({ homeDir }) => homeDir())
+    .catch(() => '');
   return fallbackDialogDirectoryPromise;
 }
 
@@ -121,8 +143,14 @@ export async function readTxtPreview(resourceId: string, maxChars = 12000): Prom
   return txtCommand('preview', 'read_txt_preview', { resourceId, maxChars });
 }
 
-export async function readTxtWindow(resourceId: string, sessionId: string, start: number, end: number): Promise<NativeTxtWindow> {
-  return txtCommand('read', 'read_txt_window', { resourceId, sessionId, start, end });
+export async function readTxtWindow(
+  resourceId: string,
+  sessionId: string,
+  start: number,
+  end: number,
+  signal?: AbortSignal,
+): Promise<NativeTxtWindow> {
+  return txtCommand('read', 'read_txt_window', { resourceId, sessionId, start, end }, signal);
 }
 
 export async function closeTxtBook(resourceId: string, sessionId: string) {
@@ -133,13 +161,36 @@ export async function openEpubBook(resourceId: string, fallbackTitle: string): P
   return epubCommand('open', 'open_epub_book', { resourceId, fallbackTitle });
 }
 
-export async function readEpubResource(resourceId: string, sessionId: string, href: string): Promise<NativeEpubResource> {
-  return epubCommand('read', 'read_epub_resource', { resourceId, sessionId, href });
+export async function readEpubResource(
+  resourceId: string,
+  sessionId: string,
+  href: string,
+  signal?: AbortSignal,
+): Promise<NativeEpubResource> {
+  return epubCommand('read', 'read_epub_resource', { resourceId, sessionId, href }, signal);
 }
 
-export async function prefetchEpubResources(resourceId: string, sessionId: string, hrefs: string[]) {
+export async function prefetchEpubResources(
+  resourceId: string,
+  sessionId: string,
+  hrefs: string[],
+  signal?: AbortSignal,
+) {
   if (hrefs.length === 0) return;
-  await epubCommand('prefetch', 'prefetch_epub_resources', { resourceId, sessionId, hrefs });
+  await epubCommand('prefetch', 'prefetch_epub_resources', { resourceId, sessionId, hrefs }, signal);
+}
+
+export async function getEpubPositionCounts(
+  resourceId: string,
+  sessionId: string,
+  signal?: AbortSignal,
+) {
+  return epubCommand<NativeEpubPositionCount[]>(
+    'positions',
+    'epub_position_counts',
+    { resourceId, sessionId },
+    signal,
+  );
 }
 
 export async function closeEpubBook(resourceId: string, sessionId: string) {
@@ -147,7 +198,7 @@ export async function closeEpubBook(resourceId: string, sessionId: string) {
 }
 
 export function toLocalAssetUrl(path: string) {
-  return convertFileSrc(path);
+  return desktopFileSrc(path);
 }
 
 export async function getReaderCacheStats() {
@@ -156,103 +207,4 @@ export async function getReaderCacheStats() {
 
 export async function clearReaderCache() {
   await clearCache();
-}
-
-export async function saveImageFromSource(src: string, suggestedName = 'image') {
-  const response = await fetch(src);
-  if (!response.ok) {
-    throw new Error('图片读取失败');
-  }
-
-  const blob = await response.blob();
-  const extension = extensionFromMime(blob.type) || extensionFromUrl(src) || 'png';
-  const fileName = `${sanitizeFileName(suggestedName)}.${extension}`;
-
-  if (!isTauriApp()) {
-    const objectUrl = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = objectUrl;
-    anchor.download = fileName;
-    anchor.click();
-    URL.revokeObjectURL(objectUrl);
-    return;
-  }
-
-  const targetPath = await save({
-    title: '保存图片',
-    defaultPath: fileName,
-    filters: [{ name: 'Image', extensions: [extension] }],
-  });
-  if (!targetPath) return;
-
-  const base64 = await blobToBase64(blob);
-  await invoke('authorize_export_path', { path: targetPath, kind: 'image' });
-  await invoke('write_binary_file', { path: targetPath, base64Data: base64 });
-}
-
-function sanitizeFileName(value: string) {
-  return value.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'image';
-}
-
-function extensionFromMime(mime: string) {
-  if (mime === 'image/jpeg') return 'jpg';
-  if (mime === 'image/png') return 'png';
-  if (mime === 'image/gif') return 'gif';
-  if (mime === 'image/webp') return 'webp';
-  if (mime === 'image/svg+xml') return 'svg';
-  return undefined;
-}
-
-function extensionFromUrl(url: string) {
-  const cleanUrl = url.split(/[?#]/)[0];
-  const match = cleanUrl.match(/\.([a-zA-Z0-9]+)$/);
-  return match?.[1]?.toLowerCase();
-}
-
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error);
-    reader.onload = () => {
-      const result = String(reader.result || '');
-      resolve(result.includes(',') ? result.split(',')[1] : result);
-    };
-    reader.readAsDataURL(blob);
-  });
-}
-
-export async function uploadWebDavSnapshot(
-  config: AppSettings['webDavConfig'],
-  snapshot: string,
-) {
-  await invoke('webdav_upload_snapshot', { config, snapshot });
-}
-
-export async function downloadWebDavSnapshot(config: AppSettings['webDavConfig']) {
-  return invoke<string | null>('webdav_download_snapshot', { config });
-}
-
-export async function listWebDavBooks(config: AppSettings['webDavConfig']) {
-  return invoke<WebDavBook[]>('webdav_list_books', { config });
-}
-
-export async function cacheWebDavBook(
-  config: AppSettings['webDavConfig'],
-  remotePath: string,
-) {
-  return invoke<{ resourceId: string }>('webdav_cache_book', { config, remotePath });
-}
-
-export async function downloadWebDavBook(
-  config: AppSettings['webDavConfig'],
-  remotePath: string,
-  suggestedName: string,
-) {
-  const targetPath = await save({
-    title: '下载 WebDAV 图书',
-    defaultPath: suggestedName,
-  });
-  if (!targetPath) return;
-  await invoke('authorize_export_path', { path: targetPath, kind: 'book' });
-  await invoke('webdav_download_book_to_path', { config, remotePath, targetPath });
 }

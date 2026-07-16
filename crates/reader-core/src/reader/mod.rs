@@ -160,6 +160,14 @@ impl ReaderService {
         let _maintenance = self.maintenance.read().map_err(|_| ReaderError::Busy)?;
         epub::prefetch(self, resource_id, session_id, hrefs)
     }
+    pub fn epub_position_counts(
+        &self,
+        resource_id: &str,
+        session_id: &str,
+    ) -> Result<Vec<EpubPositionCount>, ReaderError> {
+        let _maintenance = self.maintenance.read().map_err(|_| ReaderError::Busy)?;
+        epub::position_counts(self, resource_id, session_id)
+    }
     pub fn close_epub(&self, resource_id: &str, session_id: &str) -> Result<(), ReaderError> {
         let _maintenance = self.maintenance.read().map_err(|_| ReaderError::Busy)?;
         epub::close(self, resource_id, session_id)

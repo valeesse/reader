@@ -4,6 +4,7 @@ import { Book } from './types';
 import { BookOpen, GitMerge, Layers, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { BookCover } from './components/BookCover';
 import { sortBooksInSeries } from './lib/series';
+import { prewarmWebReaderOnIntent } from './lib/readerWarmup';
 
 export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void }) {
   const { series, books, createSeries, updateSeries, deleteSeries, autoCreateMetadataSeries, mergeSeries } = useAppContext();
@@ -195,6 +196,8 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
                     {seriesBooks.map((book, index) => (
                       <button
                         key={book.id}
+                        onPointerDown={() => prewarmWebReaderOnIntent(book)}
+                        onFocus={() => prewarmWebReaderOnIntent(book)}
                         onClick={() => onReadBook(book)}
                         className="text-left flex items-center gap-3 rounded-[5px] bg-white/70 dark:bg-white/10 hover:bg-white dark:hover:bg-white/15 p-3 transition-colors"
                       >

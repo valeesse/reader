@@ -296,3 +296,67 @@ Production builds keep the normal Vite dependency graph and use Tauri's
   stall. One subsequent cross-book wheel run coalesced 24 events into 23 turns,
   while all keyboard requests remained one-for-one. Wheel coalescing remains a
   variability signal, not a relaxed keyboard/L1 acceptance target.
+
+## Desktop/Web convergence and Web performance hardening (2026-07-16)
+
+The desktop and Web readers now share the same publication, locator, layout,
+navigation, animation, progress, and cache-coordination path. Runtime-specific
+code is limited to the transport and resource URL boundary:
+
+- Desktop commands dynamically load Tauri APIs and use `invoke`/asset URLs.
+- Web commands use abortable same-origin HTTP requests and session-bound binary
+  URLs. Tauri modules are no longer part of the Web startup execution path.
+- Readium private frame-pool access is isolated in one navigator adapter.
+  Animation, idle/background scheduling, and serialized layout transactions
+  are shared helpers rather than viewer-local duplicates.
+
+Desktop performance policy remains unchanged: the existing three-resource
+content/continuous warm radius and concurrent frame creation behavior are
+preserved. Web applies an adaptive policy derived from save-data, connection
+latency, and reported device memory:
+
+- constrained Web clients keep one adjacent resource and prepare one frame at a
+  time;
+- normal Web clients keep two adjacent resources and prepare at most two frames
+  at a time;
+- direction changes and page hiding abort obsolete speculative requests.
+
+The interaction pipeline is bounded for high-frequency input:
+
+- rapid page turns retain the three-turn queue but suppress redundant entry and
+  exit animations while work remains queued;
+- progress dragging updates the thumb immediately, prefetches the target, and
+  submits at most one preview navigation every 80 ms; release commits the final
+  locator immediately;
+- layout-affecting settings and viewport resize operations share a serialized
+  transaction queue and restore a semantic locator after relayout;
+- pointer-down/focus on a Web book tile begins a single-publication warm open,
+  with previous speculative sessions closed.
+
+Web persistence and delivery remove avoidable round trips:
+
+- startup reads per-book progress from IndexedDB immediately and reconciles the
+  dedicated server endpoint in the background;
+- progress and last-read state are written atomically in one request, guarded
+  by monotonic `updatedAt` checks; page hiding also starts a `keepalive` write;
+- EPUB position weights are generated lazily in `reader-core`, persisted with
+  the metadata cache, and returned through both Tauri and Web APIs. Browser
+  worker generation remains a compatibility fallback;
+- hashed assets and fonts are immutable for one year, HTML revalidates, and
+  static responses support Brotli/Gzip compression.
+
+### Verification
+
+- `pnpm build` passes; Tauri-only APIs appear as separate dynamic chunks.
+- `cargo test --workspace` passes (24 executed tests, 2 real-book probes
+  intentionally ignored).
+- `cargo check --manifest-path src-tauri/Cargo.toml` passes.
+- `cargo clippy --workspace --all-targets -- -D warnings` passes.
+- Server regression tests verify atomic/stale reading-state behavior,
+  per-book progress, immutable static caching, Gzip delivery, and the Web EPUB
+  positions endpoint.
+
+Packaged desktop latency was not re-benchmarked in this change because the
+desktop scheduling radii, animation timings for non-queued turns, and frame
+creation behavior were deliberately retained. The existing packaged desktop
+measurements above remain the performance baseline.

@@ -2,6 +2,7 @@ import React, { Suspense, lazy, startTransition, useCallback, useEffect, useRef,
 import { AppProvider, useAppContext } from './store/AppStore';
 import { Book } from './types';
 import { markLastReadBook } from './lib/storage';
+import { cancelReaderIdle, ReaderIdleHandle, scheduleReaderIdle } from './lib/readerScheduler';
 import './reader-overrides.css';
 
 let readerLayoutModulePromise: Promise<typeof import('./ReaderLayoutNext')> | undefined;
@@ -20,7 +21,7 @@ function MainLayout() {
   const startupResumePendingRef = useRef(true);
   const startedWithResumeRef = useRef(Boolean(initialReadingBook));
   const libraryWarmupStartedRef = useRef(false);
-  const libraryWarmupIdleRef = useRef<number | null>(null);
+  const libraryWarmupIdleRef = useRef<ReaderIdleHandle | null>(null);
 
   const presentApplication = useCallback(() => {
     const startup = (window as Window & { __ZENITH_STARTUP__?: { hideOverlay?: () => void } }).__ZENITH_STARTUP__;
@@ -31,7 +32,7 @@ function MainLayout() {
     presentApplication();
     if (!startedWithResumeRef.current || libraryWarmupStartedRef.current) return;
     libraryWarmupStartedRef.current = true;
-    libraryWarmupIdleRef.current = window.requestIdleCallback(() => {
+    libraryWarmupIdleRef.current = scheduleReaderIdle(() => {
       libraryWarmupIdleRef.current = null;
       startTransition(() => setKeepLibraryMounted(true));
     }, { timeout: 1200 });
@@ -39,7 +40,7 @@ function MainLayout() {
 
   useEffect(() => () => {
     if (libraryWarmupIdleRef.current !== null) {
-      window.cancelIdleCallback(libraryWarmupIdleRef.current);
+      cancelReaderIdle(libraryWarmupIdleRef.current);
     }
   }, []);
 
@@ -75,10 +76,10 @@ function MainLayout() {
 
   useEffect(() => {
     if (readingBook) return;
-    const idleId = window.requestIdleCallback(() => {
+    const idleId = scheduleReaderIdle(() => {
       void loadReaderLayout();
     }, { timeout: 300 });
-    return () => window.cancelIdleCallback(idleId);
+    return () => cancelReaderIdle(idleId);
   }, [readingBook]);
 
   const closeReader = () => {

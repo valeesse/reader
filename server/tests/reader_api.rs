@@ -162,6 +162,16 @@ async fn epub_open_toc_and_resources_use_the_shared_reader() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert!(resource["text"].as_str().unwrap().contains("Hello EPUB"));
+    let (status, positions) = request(
+        &app,
+        "POST",
+        "/api/epub/positions",
+        json!({"resourceId": id, "sessionId": session}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(positions[0]["href"], "OEBPS/chapter.xhtml");
+    assert_eq!(positions[0]["count"], 1);
     let (status, binary) = request(
         &app,
         "POST",

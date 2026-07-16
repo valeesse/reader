@@ -9,6 +9,7 @@ import { WebDavLibrary } from './components/WebDavLibrary';
 import { SeriesView } from './SeriesViewNext';
 import { prewarmLibraryDialogDirectory } from './lib/native';
 import { getLibraryRoot, onScanProgress, pickLibraryRoot, rescanBooks, runtimeCapabilities, setLibraryRoot } from './lib/backend';
+import { cancelReaderIdle, scheduleReaderIdle } from './lib/readerScheduler';
 
 export function LibraryShell({ onReadBook, onPresentable }: { onReadBook: (book: Book) => void; onPresentable: () => void }) {
   const { addBooks } = useAppContext();
@@ -18,8 +19,8 @@ export function LibraryShell({ onReadBook, onPresentable }: { onReadBook: (book:
 
   useEffect(() => {
     onPresentable();
-    const idleId = window.requestIdleCallback(prewarmLibraryDialogDirectory, { timeout: 1800 });
-    return () => window.cancelIdleCallback(idleId);
+    const idleId = scheduleReaderIdle(prewarmLibraryDialogDirectory, { timeout: 1800 });
+    return () => cancelReaderIdle(idleId);
   }, [onPresentable]);
 
   const scanLibrary = async (changeRoot: boolean) => {

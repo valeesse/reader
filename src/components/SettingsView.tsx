@@ -1,12 +1,17 @@
-import React, { useEffect, useState } from 'react';
-import { useAppContext } from '../store/AppStore';
-import { Cloud, Check, Database, DownloadCloud, LoaderCircle, Moon, Sun, Monitor, Folder, Trash2, UploadCloud } from 'lucide-react';
-import { motion } from 'motion/react';
-import { applySyncSnapshot, createSyncSnapshot } from '../lib/storage';
-import { clearReaderCache, downloadWebDavSnapshot, getReaderCacheStats, ReaderCacheStats, uploadWebDavSnapshot } from '../lib/native';
-import { SyncSnapshot } from '../types';
-import { READER_FONT_OPTIONS, READING_SETTING_LIMITS } from '../lib/readingSettings';
+import { useEffect, useState } from 'react';
 import { runtimeCapabilities } from '../lib/backend';
+import { clearReaderCache, downloadWebDavSnapshot, getReaderCacheStats, ReaderCacheStats, uploadWebDavSnapshot } from '../lib/native';
+import { cancelReaderIdle, ReaderIdleHandle, scheduleReaderIdle } from '../lib/readerScheduler';
+import { applySyncSnapshot, createSyncSnapshot } from '../lib/storage';
+import { useAppContext } from '../store/AppStore';
+import { SyncSnapshot } from '../types';
+import {
+  AppearanceSettingsSection,
+  CacheSettingsSection,
+  LibrarySettingsSection,
+  ReadingDefaultsSection,
+} from './settings/SettingsSections';
+import { WebDavSettingsSection } from './settings/WebDavSettingsSection';
 
 export function SettingsView({
   onRescan,
@@ -14,10 +19,10 @@ export function SettingsView({
   scanMessage,
   isScanning,
 }: {
-  onRescan: () => Promise<void>,
-  onChangeLibraryRoot: () => Promise<void>,
-  scanMessage?: string,
-  isScanning?: boolean,
+  onRescan: () => Promise<void>;
+  onChangeLibraryRoot: () => Promise<void>;
+  scanMessage?: string;
+  isScanning?: boolean;
 }) {
   const { settings, updateSettings, reloadState } = useAppContext();
   const [syncStatus, setSyncStatus] = useState('');
@@ -26,47 +31,37 @@ export function SettingsView({
   const [clearingCache, setClearingCache] = useState(false);
 
   useEffect(() => {
-    let idleId: number | undefined;
+    let idleId: ReaderIdleHandle | undefined;
     const timerId = window.setTimeout(() => {
-      idleId = window.requestIdleCallback(() => {
-        getReaderCacheStats().then(setCacheStats).catch(() => {});
-      }, { timeout: 1500 });
+      idleId = scheduleReaderIdle(() => getReaderCacheStats().then(setCacheStats).catch(() => {}), { timeout: 1500 });
     }, 4000);
     return () => {
       window.clearTimeout(timerId);
-      if (idleId !== undefined) window.cancelIdleCallback(idleId);
+      cancelReaderIdle(idleId);
     };
   }, []);
-
-  const canSync = settings.webDavConfig.enabled && settings.webDavConfig.url.trim() && settings.webDavConfig.username.trim();
 
   const pushSync = async () => {
     try {
       setSyncStatus('正在上传同步快照...');
-      const snapshot = await createSyncSnapshot();
-      await uploadWebDavSnapshot(settings.webDavConfig, JSON.stringify(snapshot));
+      await uploadWebDavSnapshot(settings.webDavConfig, JSON.stringify(await createSyncSnapshot()));
       setSyncStatus('已上传阅读进度、系列和偏好设置。');
     } catch (error) {
       setSyncStatus(error instanceof Error ? error.message : '上传失败。');
     }
   };
-
   const pullSync = async () => {
     try {
       setSyncStatus('正在下载同步快照...');
-      const remoteSnapshot = await downloadWebDavSnapshot(settings.webDavConfig);
-      if (!remoteSnapshot) {
-        setSyncStatus('远端还没有同步数据。');
-        return;
-      }
-      await applySyncSnapshot(JSON.parse(remoteSnapshot) as SyncSnapshot);
+      const remote = await downloadWebDavSnapshot(settings.webDavConfig);
+      if (!remote) return setSyncStatus('远端还没有同步数据。');
+      await applySyncSnapshot(JSON.parse(remote) as SyncSnapshot);
       await reloadState();
       setSyncStatus('已从 WebDAV 恢复同步数据。');
     } catch (error) {
       setSyncStatus(error instanceof Error ? error.message : '下载失败。');
     }
   };
-
   const clearCache = async () => {
     setClearingCache(true);
     setCacheStatus('');
@@ -80,369 +75,30 @@ export function SettingsView({
       setClearingCache(false);
     }
   };
+  const canSync = Boolean(settings.webDavConfig.enabled && settings.webDavConfig.url.trim() && settings.webDavConfig.username.trim());
 
   return (
     <div className="flex-1 flex flex-col relative bg-white/70 dark:bg-[#121212]/70">
-      <header className="h-14 border-b border-black/5 dark:border-white/5 flex items-center justify-between px-8 bg-white/80 dark:bg-[#121212]/80 backdrop-blur-md sticky top-0 z-10">
+      <header className="h-14 border-b border-black/5 dark:border-white/5 flex items-center px-8 bg-white/80 dark:bg-[#121212]/80 backdrop-blur-md sticky top-0 z-10">
         <h1 className="text-lg font-bold text-[#1C1C1E] dark:text-white">偏好设置</h1>
       </header>
-
       <div className="flex-1 overflow-y-auto p-8 max-w-2xl mx-auto w-full space-y-8">
-        
-        {/* Library Section */}
-        <section className="space-y-3">
-          <h3 className="text-[11px] font-semibold text-black/40 dark:text-white/40 uppercase tracking-wider pl-1">内容库</h3>
-          <div className="bg-[#F2F2F7] dark:bg-[#1C1C1E] border border-black/5 dark:border-white/5 rounded-2xl p-5 shadow-sm relative overflow-hidden">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-[#007AFF]/10 rounded-lg text-[#007AFF]">
-                  <Folder className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="font-medium text-sm text-[#1C1C1E] dark:text-white">{runtimeCapabilities.libraryRootMutable ? '本地书库' : '服务器书库'}</h4>
-                  <p className="text-xs text-black/50 dark:text-white/50">{runtimeCapabilities.libraryRootMutable ? '选择书库目录并重新建立索引' : '目录由服务器固定配置，可重新建立索引'}</p>
-                </div>
-              </div>
-              <div className="flex shrink-0 gap-2">
-                {runtimeCapabilities.libraryRootMutable && (
-                  <button
-                    onClick={onChangeLibraryRoot}
-                    disabled={isScanning}
-                    className="flex items-center justify-center gap-2 bg-black/5 dark:bg-white/10 disabled:opacity-60 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                  >
-                    <Folder className="w-4 h-4" />
-                    更改目录
-                  </button>
-                )}
-                <button
-                  onClick={onRescan}
-                  disabled={isScanning}
-                  className="flex items-center justify-center gap-2 bg-black/5 dark:bg-white/10 disabled:opacity-60 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                >
-                  {isScanning ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Folder className="w-4 h-4" />}
-                  重新扫描
-                </button>
-              </div>
-            </div>
-            {scanMessage && (
-              <p className="mt-4 text-xs text-black/50 dark:text-white/50">{scanMessage}</p>
-            )}
-          </div>
-        </section>
-
-        <section className="space-y-3">
-          <h3 className="text-[11px] font-semibold text-black/40 dark:text-white/40 uppercase tracking-wider pl-1">阅读缓存</h3>
-          <div className="bg-[#F2F2F7] dark:bg-[#1C1C1E] border border-black/5 dark:border-white/5 rounded-2xl p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="p-2 bg-[#007AFF]/10 rounded-lg text-[#007AFF]">
-                  <Database className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="font-medium text-sm text-[#1C1C1E] dark:text-white">本地派生缓存</h4>
-                  <p className="text-xs text-black/50 dark:text-white/50">
-                    {cacheStats ? `${formatBytes(cacheStats.bytes)} · ${cacheStats.files} 个文件 · 上限 ${formatBytes(cacheStats.maxBytes)}` : '正在统计缓存…'}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={clearCache}
-                disabled={clearingCache}
-                className="flex items-center justify-center gap-2 bg-red-500/10 text-red-600 dark:text-red-400 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-500/15 disabled:opacity-50"
-              >
-                {clearingCache ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                清理
-              </button>
-            </div>
-            {cacheStatus && <p className="mt-3 text-xs text-black/50 dark:text-white/50">{cacheStatus}</p>}
-          </div>
-        </section>
-
-        {/* Appearance Section */}
-        <section className="space-y-3">
-          <h3 className="text-[11px] font-semibold text-black/40 dark:text-white/40 uppercase tracking-wider pl-1">外观</h3>
-          <div className="bg-[#F2F2F7] dark:bg-[#1C1C1E] border border-black/5 dark:border-white/5 rounded-2xl p-1 overflow-hidden shadow-sm">
-            <div className="flex p-1">
-              {[
-                { value: 'light', label: '浅色', icon: Sun },
-                { value: 'sepia', label: '护眼', icon: Monitor },
-                { value: 'dark', label: '深色', icon: Moon }
-              ].map((t) => (
-                <button
-                  key={t.value}
-                  onClick={() => updateSettings({ theme: t.value as any })}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-medium transition-all ${
-                    settings.theme === t.value 
-                      ? 'bg-white dark:bg-[#2C2C2E] text-[#1C1C1E] dark:text-white'
-                      : 'text-black/50 dark:text-white/50 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'
-                  }`}
-                >
-                  <t.icon className="w-4 h-4" />
-                  <span className="capitalize">{t.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Typography Section */}
-        <section className="space-y-3">
-          <h3 className="text-[11px] font-semibold text-black/40 dark:text-white/40 uppercase tracking-wider pl-1">排版与字体</h3>
-          <div className="bg-[#F2F2F7] dark:bg-[#1C1C1E] border border-black/5 dark:border-white/5 rounded-2xl p-5 space-y-6 shadow-sm">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <div className="text-sm font-medium text-[#1C1C1E] dark:text-white">分页版式</div>
-                <div className="flex rounded-lg bg-black/5 p-1 dark:bg-white/5">
-                  {(['single', 'double'] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      onClick={() => updateSettings({ pageMode: mode })}
-                      disabled={settings.pageTurnAnimation === 'scroll' && mode === 'double'}
-                      className={`flex-1 rounded-md py-1.5 text-xs disabled:opacity-35 ${settings.pageMode === mode ? 'bg-white dark:bg-[#3A3A3C]' : 'text-black/50 dark:text-white/50'}`}
-                    >
-                      {mode === 'single' ? '单页' : '双页'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <div className="text-sm font-medium text-[#1C1C1E] dark:text-white">翻页动画</div>
-                <div className="grid grid-cols-2 rounded-lg bg-black/5 p-1 dark:bg-white/5">
-                  {([
-                    ['scroll', '连续滚动'],
-                    ['minimal', '极简切换'],
-                    ['slide-horizontal', '左右滑动'],
-                    ['slide-vertical', '上下滑动'],
-                  ] as const).map(([animation, label]) => (
-                    <button
-                      key={animation}
-                      onClick={() => updateSettings(animation === 'scroll'
-                        ? { pageTurnAnimation: animation, pageMode: 'single' }
-                        : { pageTurnAnimation: animation })}
-                      className={`rounded-md py-1.5 text-xs ${settings.pageTurnAnimation === animation ? 'bg-white dark:bg-[#3A3A3C]' : 'text-black/50 dark:text-white/50'}`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-            
-            <div className="space-y-3">
-              <div className="flex justify-between items-center text-sm">
-                <span className="font-medium text-[#1C1C1E] dark:text-white">字体选择</span>
-                <span className="text-gray-500 text-xs">{settings.fontFamily.split(',')[0]}</span>
-              </div>
-              <select 
-                value={settings.fontFamily}
-                onChange={(e) => updateSettings({ fontFamily: e.target.value })}
-                className="w-full bg-black/5 dark:bg-white/5 border border-transparent rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#007AFF] outline-none"
-                style={{ fontFamily: settings.fontFamily }}
-              >
-                {READER_FONT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value} style={{ fontFamily: option.value }}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex justify-between items-center text-sm">
-                <span className="font-medium text-[#1C1C1E] dark:text-white">字体大小</span>
-                <span className="text-gray-500 text-xs">{settings.fontSize}px</span>
-              </div>
-              <input 
-                type="range" {...READING_SETTING_LIMITS.fontSize}
-                value={settings.fontSize}
-                onChange={(e) => updateSettings({ fontSize: parseInt(e.target.value) })}
-                className="w-full accent-[#007AFF]"
-              />
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex justify-between items-center text-sm">
-                <span className="font-medium text-[#1C1C1E] dark:text-white">行间距</span>
-                <span className="text-gray-500 text-xs">{settings.lineHeight}</span>
-              </div>
-              <input 
-                type="range" {...READING_SETTING_LIMITS.lineHeight}
-                value={settings.lineHeight}
-                onChange={(e) => updateSettings({ lineHeight: parseFloat(e.target.value) })}
-                className="w-full accent-[#007AFF]"
-              />
-            </div>
-            
-            <div className="space-y-3">
-              <div className="flex justify-between items-center text-sm">
-                <span className="font-medium text-[#1C1C1E] dark:text-white">段间距</span>
-                <span className="text-gray-500 text-xs">{settings.paragraphSpacing}em</span>
-              </div>
-              <input 
-                type="range" {...READING_SETTING_LIMITS.paragraphSpacing}
-                value={settings.paragraphSpacing}
-                onChange={(e) => updateSettings({ paragraphSpacing: parseFloat(e.target.value) })}
-                className="w-full accent-[#007AFF]"
-              />
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex justify-between items-center text-sm">
-                <span className="font-medium text-[#1C1C1E] dark:text-white">字间距</span>
-                <span className="text-gray-500 text-xs">{settings.letterSpacing}em</span>
-              </div>
-              <input
-                type="range" {...READING_SETTING_LIMITS.letterSpacing}
-                value={settings.letterSpacing}
-                onChange={(e) => updateSettings({ letterSpacing: parseFloat(e.target.value) })}
-                className="w-full accent-[#007AFF]"
-              />
-            </div>
-
-            <div className="space-y-3">
-              <div className="text-sm font-medium text-[#1C1C1E] dark:text-white">页面空白</div>
-              <div className="grid grid-cols-2 gap-3">
-                <PageMarginInput
-                  label="水平"
-                  value={settings.pageMargins.left}
-                  limits={READING_SETTING_LIMITS.horizontalMargin}
-                  onChange={(horizontal) => updateSettings({ pageMargins: { ...settings.pageMargins, left: horizontal, right: horizontal } })}
-                />
-                <PageMarginInput label="顶部" value={settings.pageMargins.top} onChange={(top) => updateSettings({ pageMargins: { ...settings.pageMargins, top } })} />
-                <PageMarginInput label="底部" value={settings.pageMargins.bottom} onChange={(bottom) => updateSettings({ pageMargins: { ...settings.pageMargins, bottom } })} />
-              </div>
-              <p className="text-xs text-black/40 dark:text-white/40">水平留白同时作为双页模式的中缝宽度。</p>
-            </div>
-
-          </div>
-        </section>
-
-        {/* Sync Section */}
-        {runtimeCapabilities.webDav && <section className="space-y-3">
-          <h3 className="text-[11px] font-semibold text-black/40 dark:text-white/40 uppercase tracking-wider pl-1">WebDAV 同步</h3>
-          <div className="bg-[#F2F2F7] dark:bg-[#1C1C1E] border border-black/5 dark:border-white/5 rounded-2xl p-5 space-y-4 shadow-sm relative overflow-hidden">
-            
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-[#007AFF]/10 rounded-lg text-[#007AFF]">
-                  <Cloud className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="font-medium text-sm text-[#1C1C1E] dark:text-white">进度同步</h4>
-                  <p className="text-xs text-black/50 dark:text-white/50">跨设备同步阅读进度</p>
-                </div>
-              </div>
-              
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  className="sr-only peer"
-                  checked={settings.webDavConfig.enabled}
-                  onChange={(e) => updateSettings({ webDavConfig: { ...settings.webDavConfig, enabled: e.target.checked }})}
-                />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-[#007AFF]"></div>
-              </label>
-            </div>
-
-            <motion.div 
-              initial={false}
-              animate={{ height: settings.webDavConfig.enabled ? 'auto' : 0, opacity: settings.webDavConfig.enabled ? 1 : 0 }}
-              className="overflow-hidden"
-            >
-              <div className="pt-4 space-y-4 border-t border-gray-100 dark:border-gray-700">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">服务器地址 URL</label>
-                  <input 
-                    type="url" 
-                    placeholder="https://webdav.example.com"
-                    value={settings.webDavConfig.url}
-                    onChange={(e) => updateSettings({ webDavConfig: { ...settings.webDavConfig, url: e.target.value }})}
-                    className="w-full bg-black/5 dark:bg-white/5 border border-transparent rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#007AFF] outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">用户名</label>
-                  <input 
-                    type="text" 
-                    value={settings.webDavConfig.username}
-                    onChange={(e) => updateSettings({ webDavConfig: { ...settings.webDavConfig, username: e.target.value }})}
-                    className="w-full bg-black/5 dark:bg-white/5 border border-transparent rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#007AFF] outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">密码 / 授权码</label>
-                  <input 
-                    type="password" 
-                    value={settings.webDavConfig.password || ''}
-                    onChange={(e) => updateSettings({ webDavConfig: { ...settings.webDavConfig, password: e.target.value }})}
-                    className="w-full bg-black/5 dark:bg-white/5 border border-transparent rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#007AFF] outline-none"
-                  />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    disabled={!canSync}
-                    onClick={pushSync}
-                    className="flex items-center justify-center gap-2 w-full py-2 bg-[#007AFF] text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-40 disabled:hover:bg-[#007AFF] transition-colors mt-2 shadow-sm"
-                  >
-                    <UploadCloud className="w-4 h-4" /> 上传
-                  </button>
-                  <button
-                    disabled={!canSync}
-                    onClick={pullSync}
-                    className="flex items-center justify-center gap-2 w-full py-2 bg-black/5 dark:bg-white/10 text-[#1C1C1E] dark:text-white rounded-lg text-sm font-medium hover:bg-black/10 dark:hover:bg-white/15 disabled:opacity-40 transition-colors mt-2"
-                  >
-                    <DownloadCloud className="w-4 h-4" /> 下载
-                  </button>
-                </div>
-                <button
-                  onClick={() => setSyncStatus('配置已保存在本机。')}
-                  className="flex items-center justify-center gap-2 w-full py-2 bg-black/5 dark:bg-white/10 text-[#1C1C1E] dark:text-white rounded-lg text-sm font-medium hover:bg-black/10 dark:hover:bg-white/15 transition-colors shadow-sm"
-                >
-                  <Check className="w-4 h-4" /> 保存配置
-                </button>
-                {syncStatus && (
-                  <p className="text-xs text-black/50 dark:text-white/50">{syncStatus}</p>
-                )}
-              </div>
-            </motion.div>
-
-          </div>
-        </section>}
-
+        <LibrarySettingsSection {...{ onRescan, onChangeLibraryRoot, scanMessage, isScanning }} />
+        <CacheSettingsSection stats={cacheStats} status={cacheStatus} clearing={clearingCache} onClear={clearCache} />
+        <AppearanceSettingsSection settings={settings} updateSettings={updateSettings} />
+        <ReadingDefaultsSection settings={settings} updateSettings={updateSettings} />
+        {runtimeCapabilities.webDav && (
+          <WebDavSettingsSection
+            settings={settings}
+            updateSettings={updateSettings}
+            canSync={canSync}
+            syncStatus={syncStatus}
+            onPush={pushSync}
+            onPull={pullSync}
+            onSave={() => setSyncStatus('配置已保存在本机。')}
+          />
+        )}
       </div>
     </div>
   );
-}
-
-function PageMarginInput({
-  label,
-  value,
-  limits = READING_SETTING_LIMITS.pageMargin,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  limits?: { min: number; max: number; step: number };
-  onChange: (value: number) => void;
-}) {
-  return (
-    <label className="flex items-center gap-2 text-xs text-black/55 dark:text-white/55">
-      <span className="w-8">{label}</span>
-      <input
-        type="number"
-        {...limits}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="min-w-0 flex-1 rounded-lg bg-black/5 px-2 py-1.5 text-right outline-none dark:bg-white/5"
-      />
-    </label>
-  );
-}
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }

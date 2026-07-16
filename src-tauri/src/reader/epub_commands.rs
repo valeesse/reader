@@ -44,6 +44,21 @@ async fn prefetch_epub_resources(
 }
 
 #[tauri::command]
+async fn epub_position_counts(
+    state: tauri::State<'_, ReaderState>,
+    resource_id: String,
+    session_id: String,
+) -> Result<Vec<reader_core::EpubPositionCount>, String> {
+    let reader = reader_service(&state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        reader.epub_position_counts(&resource_id, &session_id)
+    })
+    .await
+    .map_err(|error| format!("EPUB 位置生成任务中断: {error}"))?
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn close_epub_book(
     state: tauri::State<'_, ReaderState>,
     resource_id: String,

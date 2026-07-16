@@ -118,6 +118,7 @@ pub(super) struct EpubBookCache {
     pub resource_order: VecDeque<String>,
     pub resource_bytes: usize,
     pub archive: Arc<Mutex<ZipArchive<File>>>,
+    pub position_counts: Vec<EpubPositionCount>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct FileSignature {
@@ -150,6 +151,13 @@ pub struct EpubOpenResult {
     pub session_id: String,
     pub cache_key: String,
     pub book: EpubBookInfo,
+    pub position_counts: Vec<EpubPositionCount>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EpubPositionCount {
+    pub href: String,
+    pub count: usize,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -221,6 +229,8 @@ pub(super) struct PersistentEpubBookCache {
     pub signature: FileSignature,
     pub info: EpubBookInfo,
     pub manifest_items: Vec<EpubManifestItem>,
+    #[serde(default)]
+    pub position_counts: Vec<EpubPositionCount>,
 }
 
 pub(super) fn io_error(error: std::io::Error) -> ReaderError {
