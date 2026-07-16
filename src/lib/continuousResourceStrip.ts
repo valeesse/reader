@@ -71,6 +71,10 @@ export class ContinuousResourceStrip {
     return this.currentLocatorValue;
   }
 
+  get currentDocument() {
+    return this.records.get(this.currentIndex)?.iframe.contentDocument || undefined;
+  }
+
   updatePositions() {
     this.positionRanges.clear();
     for (const position of this.publication.positions) {

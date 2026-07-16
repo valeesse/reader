@@ -322,7 +322,7 @@ export function ReadiumReaderViewer({
               setPageLabel(formatProgressLabel(progress));
               setPageCounter(formatResourceStripPageCounter(locator, publication));
               onProgressChangeRef.current(progress);
-              onCurrentTocChangeRef.current(currentTocItemId(locator, publication));
+              onCurrentTocChangeRef.current(currentTocItemId(locator, publication, strip?.currentDocument));
               queueProgressSave(locator as ReadiumLocator);
               scheduleDeferredWork(locator.href, 0, false);
             },
@@ -391,7 +391,11 @@ export function ReadiumReaderViewer({
                 navigator.markPreparedReady(locator, visibleLayoutKey);
               }
               const progress = progressionFromLocator(locator, publication);
-              onCurrentTocChangeRef.current(currentTocItemId(locator, publication));
+              onCurrentTocChangeRef.current(currentTocItemId(
+                locator,
+                publication,
+                getLiveReadiumIframe(currentReadiumFrame(navigator))?.contentDocument || undefined,
+              ));
               const previousProgress = lastEmittedProgressRef.current;
               const direction: -1 | 0 | 1 = previousProgress < 0 ? 0 : progress > previousProgress ? 1 : progress < previousProgress ? -1 : 0;
               // Initial loads and TOC jumps have no meaningful turn direction.
@@ -1632,7 +1636,11 @@ function toTocItems(publication: ReadiumPublicationLike): ReaderTocItem[] {
   }));
 }
 
-function currentTocItemId(locator: Pick<ReadiumLocatorLike, 'href'>, publication: ReadiumPublicationLike) {
+function currentTocItemId(
+  locator: { href: string; locations?: { progression?: number } },
+  publication: ReadiumPublicationLike,
+  document?: Document,
+) {
   const items = toTocItems(publication);
   if (items.length === 0) return null;
   const href = publication.readingOrder.findWithHref(locator.href)?.href || locator.href.split('#')[0];
@@ -1643,9 +1651,33 @@ function currentTocItemId(locator: Pick<ReadiumLocatorLike, 'href'>, publication
     const itemHref = publication.readingOrder.findWithHref(item.href)?.href || item.href.split('#')[0];
     const itemResourceIndex = publication.readingOrder.findIndexWithHref(itemHref);
     if (itemResourceIndex > resourceIndex) break;
+    if (itemResourceIndex === resourceIndex && document) {
+      const fragment = item.href.split('#')[1];
+      const element = fragment ? document.getElementById(safeDecodeFragment(fragment)) : undefined;
+      const progression = element ? elementProgression(element, document) : 0;
+      if (progression > (locator.locations?.progression ?? 0) + 0.02) continue;
+    }
     current = item;
   }
   return current.id;
+}
+
+function safeDecodeFragment(fragment: string) {
+  try {
+    return decodeURIComponent(fragment);
+  } catch {
+    return fragment;
+  }
+}
+
+function elementProgression(element: HTMLElement, document: Document) {
+  const scroller = document.scrollingElement;
+  const rect = element.getBoundingClientRect();
+  if (!scroller) return 0;
+  if (scroller.scrollWidth > document.defaultView!.innerWidth * 1.25) {
+    return Math.max(0, Math.min(1, (Math.abs(scroller.scrollLeft) + rect.left) / Math.max(1, scroller.scrollWidth)));
+  }
+  return Math.max(0, Math.min(1, (scroller.scrollTop + rect.top) / Math.max(1, scroller.scrollHeight)));
 }
 
 function createReadiumPreferences(settings: ReturnType<typeof useAppContext>['settings'], bookType: 'epub' | 'txt') {
