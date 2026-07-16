@@ -275,7 +275,6 @@ export function ReadiumReaderViewer({
           readTxtPreview(book.resourceId, 12_000).then((preview) => {
             if (!cancelled && !loadingResolvedRef.current) {
               setTxtPreview(preview.text);
-              onPresentableRef.current?.();
             }
           }).catch(() => {});
         }
@@ -481,6 +480,11 @@ export function ReadiumReaderViewer({
             if (isContinuousScroll(settingsRef.current)) await stripMountPromise;
             if (cancelled) return;
             await replayStartupSnapshotTurns(navigator);
+            if (cancelled) return;
+            if (isContinuousScroll(settingsRef.current) && strip) {
+              await strip.go(navigator.currentLocator as ReadiumLocatorLike, false);
+            }
+            await waitForLayoutFrames();
             if (cancelled) return;
             const currentLocator = navigator.currentLocator;
             const currentLink = publication.readingOrder.findWithHref(currentLocator.href);
@@ -914,7 +918,6 @@ export function ReadiumReaderViewer({
       stablePrefetchTimerRef.current = null;
       publication.prefetchAroundHref(href, STABLE_PREFETCH_RADIUS, direction).catch(() => {});
       publication.prepareContentAroundHref(href, STABLE_PREFETCH_RADIUS, direction).catch(() => {});
-      void preparePagedResourceBand(href);
     }, 320);
 
     if (restartRefinement || resourceChanged) cancelPositionRefinement();
@@ -1021,35 +1024,6 @@ export function ReadiumReaderViewer({
       framePreparation,
       publication.prepareContentAroundHref(href, 1, effectiveDirection).catch(() => {}),
     ]);
-  };
-
-  const preparePagedResourceBand = async (href: string) => {
-    const publication = publicationRef.current;
-    const navigator = navigatorRef.current;
-    const container = containerRef.current;
-    if (!publication || !navigator || !container || isContinuousScroll(settingsRef.current)) return;
-    const currentIndex = publication.readingOrder.findIndexWithHref(href);
-    if (currentIndex < 0) return;
-    const viewport = {
-      width: container.clientWidth,
-      height: container.clientHeight,
-      devicePixelRatio: window.devicePixelRatio || 1,
-    };
-    const targets = publication.readingOrder.items
-      .slice(Math.max(0, currentIndex - STABLE_PREFETCH_RADIUS), currentIndex + STABLE_PREFETCH_RADIUS + 1)
-      .filter((link) => link.href !== publication.readingOrder.items[currentIndex]?.href);
-    await Promise.allSettled(targets.map(async (link) => {
-      if (publicationRef.current !== publication || navigatorRef.current !== navigator || isContinuousScroll(settingsRef.current)) return;
-      const layoutKey = `${createReaderLayoutKey(publication.contentKey, settingsRef.current, viewport, book.type)}:${link.href}`;
-      if (navigator.isPreparedReady(link.locator, layoutKey)) return;
-      const frames = await navigator.prepare(link.locator);
-      await Promise.all(frames.map(async (frameWindow) => {
-        applyReadiumFrameSettings(frameWindow.document, settingsRef.current, book.type);
-        await waitForFrameReadiness(frameWindow.document, book.type);
-      }));
-      if (publicationRef.current !== publication || navigatorRef.current !== navigator) return;
-      navigator.markPreparedReady(link.locator, layoutKey, frames[0]);
-    }));
   };
 
   const cancelPositionRefinement = () => {
