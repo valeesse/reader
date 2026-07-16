@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, startTransition, useCallback, useEffect, useRef, useState } from 'react';
 import { AppProvider, useAppContext } from './store/AppStore';
 import { Book } from './types';
 import { markLastReadBook } from './lib/storage';
@@ -18,16 +18,36 @@ function MainLayout() {
   const [keepLibraryMounted, setKeepLibraryMounted] = useState(false);
   const [startupResolved, setStartupResolved] = useState(() => Boolean(initialReadingBook));
   const startupResumePendingRef = useRef(true);
+  const startedWithResumeRef = useRef(Boolean(initialReadingBook));
+  const libraryWarmupStartedRef = useRef(false);
+  const libraryWarmupIdleRef = useRef<number | null>(null);
 
   const presentApplication = useCallback(() => {
     const startup = (window as Window & { __ZENITH_STARTUP__?: { hideOverlay?: () => void } }).__ZENITH_STARTUP__;
     startup?.hideOverlay?.();
   }, []);
 
+  const presentReader = useCallback(() => {
+    presentApplication();
+    if (!startedWithResumeRef.current || libraryWarmupStartedRef.current) return;
+    libraryWarmupStartedRef.current = true;
+    libraryWarmupIdleRef.current = window.requestIdleCallback(() => {
+      libraryWarmupIdleRef.current = null;
+      startTransition(() => setKeepLibraryMounted(true));
+    }, { timeout: 1200 });
+  }, [presentApplication]);
+
+  useEffect(() => () => {
+    if (libraryWarmupIdleRef.current !== null) {
+      window.cancelIdleCallback(libraryWarmupIdleRef.current);
+    }
+  }, []);
+
   useEffect(() => {
     if (isLoading || !startupResumePendingRef.current) return;
     const book = lastReadBookId ? books.find((item) => item.id === lastReadBookId) : undefined;
     if (book) {
+      startedWithResumeRef.current = true;
       setReadingBook(book);
       setStartupResolved(true);
       startupResumePendingRef.current = false;
@@ -88,7 +108,7 @@ function MainLayout() {
             book={readingBook}
             onClose={closeReader}
             onOpenBook={setReadingBook}
-            onPresentable={presentApplication}
+            onPresentable={presentReader}
           />
         </Suspense>
       )}

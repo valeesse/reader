@@ -1,5 +1,4 @@
 import React from 'react';
-import LoaderCircle from 'lucide-react/dist/esm/icons/loader-circle.mjs';
 import { Book, ReaderSeekRequest, ReaderTocItem } from '../../types';
 
 export interface ReaderViewerProps {
@@ -11,14 +10,6 @@ export interface ReaderViewerProps {
   tocTarget: ReaderTocItem | null;
   seekRequest: ReaderSeekRequest | null;
   onPresentable?: () => void;
-}
-
-export function ReaderLoading({ overlay = false }: { overlay?: boolean }) {
-  return (
-    <div className={`${overlay ? 'absolute inset-0 bg-inherit' : 'h-full w-full'} flex items-center justify-center`}>
-      <LoaderCircle className="h-7 w-7 animate-spin text-[#007AFF]" />
-    </div>
-  );
 }
 
 export function ReaderLoadError({ message, onRetry }: { message: string; onRetry: () => void }) {

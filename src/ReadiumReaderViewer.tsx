@@ -22,7 +22,7 @@ import {
 } from './lib/readiumPublication';
 import { createReaderPublication } from './lib/readerPublication';
 import { saveImageFromSource } from './lib/native';
-import { ReaderLoadError, ReaderLoading, ReaderPageCounter, ReaderViewerProps } from './components/reader/ReaderShared';
+import { ReaderLoadError, ReaderPageCounter, ReaderViewerProps } from './components/reader/ReaderShared';
 import { createReaderLayoutKey, createReaderSettingsLayoutFingerprint, ReaderLayoutCache } from './lib/readerLayoutCache';
 import { recordReaderMetric } from './lib/readerPerformance';
 import { ContinuousResourceStrip } from './lib/continuousResourceStrip';
@@ -1482,10 +1482,6 @@ export function ReadiumReaderViewer({
       )}
 
       <ReaderPageCounter value={pageCounter} />
-
-      {loading && (
-        <ReaderLoading overlay />
-      )}
 
       <AnimatePresence>
         {previewImage && (
