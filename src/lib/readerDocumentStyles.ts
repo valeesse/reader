@@ -4,12 +4,13 @@ const CONTINUOUS_STYLE_ID = 'zenith-reader-continuous-style';
 const READIUM_BEFORE_STYLE_ID = 'zenith-reader-readium-before';
 const READIUM_DEFAULT_STYLE_ID = 'zenith-reader-readium-default';
 const READIUM_AFTER_STYLE_ID = 'zenith-reader-readium-after';
+const TEXT_FINISH_STYLE_ID = 'zenith-reader-text-finish';
 const TXT_FONT_SCALE_BASE = 15.75;
 
 export function readerThemeColors(theme: AppSettings['theme']) {
   if (theme === 'dark') return { background: '#121212', text: '#e5e7eb' };
   if (theme === 'sepia') return { background: '#FDFCF8', text: '#5b4636' };
-  return { background: '#ffffff', text: '#111827' };
+  return { background: '#fbfaf7', text: '#111827' };
 }
 
 export function readiumFontScale(fontSize: number, bookType: BookType) {
@@ -19,6 +20,7 @@ export function readiumFontScale(fontSize: number, bookType: BookType) {
 export function applyReaderDocumentProperties(doc: Document, settings: AppSettings, bookType: BookType) {
   const root = doc.documentElement;
   const colors = readerThemeColors(settings.theme);
+  installReaderTextFinish(doc);
   root.style.setProperty('--USER__backgroundColor', colors.background);
   root.style.setProperty('--USER__textColor', colors.text);
   root.style.setProperty('--USER__fontFamily', settings.fontFamily);
@@ -26,6 +28,7 @@ export function applyReaderDocumentProperties(doc: Document, settings: AppSettin
   root.style.setProperty('--USER__lineHeight', String(settings.lineHeight));
   root.style.setProperty('--USER__paraSpacing', `${settings.paragraphSpacing}em`);
   root.style.setProperty('--USER__letterSpacing', `${settings.letterSpacing}em`);
+  root.style.setProperty('--ZENITH__paragraphTextShadow', paragraphTextShadow(settings.theme));
 }
 
 export async function applyContinuousReaderDocumentStyles(doc: Document, settings: AppSettings, bookType: BookType) {
@@ -100,6 +103,28 @@ function createStyle(doc: Document, id: string, css: string) {
   style.id = id;
   style.textContent = css;
   return style;
+}
+
+function installReaderTextFinish(doc: Document) {
+  if (doc.getElementById(TEXT_FINISH_STYLE_ID)) return;
+  const style = createStyle(doc, TEXT_FINISH_STYLE_ID, `
+    p {
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      text-shadow: var(--ZENITH__paragraphTextShadow) !important;
+    }
+  `);
+  (doc.head || doc.documentElement).appendChild(style);
+}
+
+function paragraphTextShadow(theme: AppSettings['theme']) {
+  if (theme === 'dark') {
+    return '0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.28)';
+  }
+  if (theme === 'sepia') {
+    return '0 1px 0 rgba(255, 255, 255, 0.48), 0 1px 2px rgba(75, 50, 30, 0.10)';
+  }
+  return '0 1px 0 rgba(255, 255, 255, 0.55), 0 1px 2px rgba(30, 50, 70, 0.10)';
 }
 
 function documentProfile(doc: Document) {

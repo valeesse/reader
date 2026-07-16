@@ -16,8 +16,8 @@ export function Sidebar({ currentView, onChangeView }: SidebarProps) {
     <aside className="w-16 min-[760px]:w-48 min-[1100px]:w-56 h-full shrink-0 rounded-2xl glass-surface flex flex-col pt-5 pb-2 transition-[width,background-color] duration-300 overflow-hidden">
 
       <div className="px-3 min-[760px]:px-5 pb-7">
-        <h1 className="h-9 text-lg font-semibold tracking-[0.08em] text-[#30352f] dark:text-[#f0f0eb] flex items-center justify-center min-[760px]:justify-start gap-2.5">
-          <BookOpen className="w-5 h-5 shrink-0 text-[#718273]" strokeWidth={1.7} />
+        <h1 className="h-9 text-lg font-semibold tracking-[0.08em] text-[#1C1C1E] dark:text-[#f0f0eb] flex items-center justify-center min-[760px]:justify-start gap-2.5">
+          <BookOpen className="w-5 h-5 shrink-0 text-[#007AFF]" strokeWidth={1.7} />
           <span className="hidden min-[760px]:block truncate">Zenith</span>
         </h1>
       </div>
@@ -31,7 +31,7 @@ export function Sidebar({ currentView, onChangeView }: SidebarProps) {
           className={cn(
             "w-full h-10 flex items-center justify-center min-[760px]:justify-start gap-3 px-3 text-sm rounded-lg font-medium transition-colors",
             currentView === 'library' 
-              ? "bg-[#718273] text-white shadow-sm"
+              ? "bg-[#007AFF] text-white shadow-sm"
               : "text-black/60 dark:text-white/65 hover:bg-black/[0.045] dark:hover:bg-white/[0.06]"
           )}
           title="所有书籍"
@@ -49,7 +49,7 @@ export function Sidebar({ currentView, onChangeView }: SidebarProps) {
           className={cn(
             "w-full h-10 flex items-center justify-center min-[760px]:justify-start gap-3 px-3 text-sm rounded-lg font-medium transition-colors",
             currentView === 'webdav'
-              ? "bg-[#718273] text-white shadow-sm"
+              ? "bg-[#007AFF] text-white shadow-sm"
               : "text-black/60 dark:text-white/65 hover:bg-black/[0.045] dark:hover:bg-white/[0.06]"
           )}
           title="WebDAV"
@@ -63,7 +63,7 @@ export function Sidebar({ currentView, onChangeView }: SidebarProps) {
           className={cn(
             "w-full h-10 flex items-center justify-center min-[760px]:justify-start gap-3 px-3 text-sm rounded-lg font-medium transition-colors",
             currentView === 'series' 
-              ? "bg-[#718273] text-white shadow-sm"
+              ? "bg-[#007AFF] text-white shadow-sm"
               : "text-black/60 dark:text-white/65 hover:bg-black/[0.045] dark:hover:bg-white/[0.06]"
           )}
           title="系列"
@@ -83,7 +83,7 @@ export function Sidebar({ currentView, onChangeView }: SidebarProps) {
           className={cn(
             "w-10 h-10 rounded-xl transition-colors flex items-center justify-center",
             currentView === 'settings' 
-              ? "bg-[#718273]/15 text-[#536456] dark:bg-white/10 dark:text-white shadow-sm"
+              ? "bg-[#007AFF]/12 text-[#007AFF] dark:bg-white/10 dark:text-white shadow-sm"
               : "text-black/40 dark:text-white/40 hover:bg-black/5 dark:hover:bg-white/5 hover:text-black dark:hover:text-white"
           )}
           title="设置"

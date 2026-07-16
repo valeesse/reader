@@ -148,7 +148,7 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
 
   if (books.length === 0) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center text-[#6d746b] dark:text-gray-400 bg-[#f7f7f3]/80 dark:bg-[#171916]/80">
+      <div className="flex-1 flex flex-col items-center justify-center text-black/45 dark:text-gray-400 bg-[#FBFAF7]/80 dark:bg-[#171916]/80">
         <BookOpen className="w-14 h-14 mb-5 opacity-25" strokeWidth={1.3} />
         <h2 className="text-xl font-medium text-gray-900 dark:text-gray-100 mb-2">暂无书籍</h2>
         <p className="text-sm">请前往设置中添加本地文件夹以扫描 EPUB 和 TXT 文件。</p>
@@ -158,9 +158,9 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
 
   return (
     <div className="flex-1 flex relative overflow-hidden">
-      <div className="flex-1 flex flex-col relative bg-[#f7f7f3]/80 dark:bg-[#171916]/80">
-        <header className="h-16 border-b border-black/[0.045] dark:border-white/5 flex items-center justify-between px-5 sm:px-8 bg-[#f7f7f3]/85 dark:bg-[#171916]/85 backdrop-blur-md sticky top-0 z-10">
-          <h1 className="text-lg font-semibold tracking-[0.06em] text-[#30352f] dark:text-white">所有书籍</h1>
+      <div className="flex-1 flex flex-col relative bg-[#FBFAF7]/80 dark:bg-[#171916]/80">
+        <header className="h-16 border-b border-black/[0.045] dark:border-white/5 flex items-center justify-between px-5 sm:px-8 bg-[#FBFAF7]/85 dark:bg-[#171916]/85 backdrop-blur-md sticky top-0 z-10">
+          <h1 className="text-lg font-semibold tracking-[0.06em] text-[#1C1C1E] dark:text-white">所有书籍</h1>
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-7" onScroll={handleLibraryScroll}>
@@ -174,7 +174,7 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
                 <BookCover book={recentBook} className="w-full h-full object-cover" compact />
               </div>
               <div className="min-w-0">
-                <div className="flex items-center gap-2 text-xs font-medium text-[#718273]">
+                <div className="flex items-center gap-2 text-xs font-medium text-[#007AFF]">
                   <Clock3 className="w-4 h-4" />
                   最近阅读
                 </div>
@@ -192,7 +192,7 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="搜索书名、作者、文件名或系列名"
-              className="w-full h-10 rounded-xl bg-black/[0.035] dark:bg-white/10 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-[#718273]/45"
+              className="w-full h-10 rounded-xl bg-black/[0.035] dark:bg-white/10 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-[#007AFF]/35"
             />
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -210,7 +210,7 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
             <select
               value={sortKey}
               onChange={(event) => setSortKey(event.target.value as SortKey)}
-              className="h-10 rounded-xl bg-black/[0.035] dark:bg-white/10 px-3 text-sm outline-none focus:ring-2 focus:ring-[#718273]/45"
+              className="h-10 rounded-xl bg-black/[0.035] dark:bg-white/10 px-3 text-sm outline-none focus:ring-2 focus:ring-[#007AFF]/35"
             >
               <option value="recent">最近阅读</option>
               <option value="fileName">文件名</option>

@@ -83,7 +83,7 @@ export function BookCover({
 
   return (
     <div ref={hostRef} className={fallbackClassName || className}>
-      <div className={`w-full h-full flex flex-col justify-end relative bg-[#dfe2da] dark:bg-[#30352f] ${compact ? 'p-1.5' : 'p-4'}`}>
+      <div className={`w-full h-full flex flex-col justify-end relative bg-[#E9E7E1] dark:bg-[#30352f] ${compact ? 'p-1.5' : 'p-4'}`}>
         <p className={`text-[#3e493f] dark:text-[#edf0e9] font-semibold leading-tight ${compact ? 'text-[10px] line-clamp-3' : 'line-clamp-3'}`}>{book.title}</p>
         {showMeta && <p className="text-[#3e493f]/60 dark:text-white/55 text-xs mt-1 line-clamp-1">{book.author}</p>}
       </div>

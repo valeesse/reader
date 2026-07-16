@@ -100,3 +100,51 @@
 .dark .reader-progress-range::-moz-range-track {
   background: rgba(255, 255, 255, 0.14);
 }
+
+.reader-settings-panel {
+  border-radius: 18px !important;
+  scrollbar-width: none;
+}
+
+.reader-settings-card {
+  border-radius: 14px !important;
+}
+
+.reader-settings-segmented,
+.reader-settings-select,
+.reader-settings-input {
+  border-radius: 10px !important;
+}
+
+.reader-settings-option,
+.reader-settings-option-active {
+  border-radius: 8px !important;
+}
+
+.reader-settings-input input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.reader-settings-input input[type="number"]::-webkit-inner-spin-button,
+.reader-settings-input input[type="number"]::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.reader-settings-panel::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.zenith-resource-strip-scroller {
+  scrollbar-width: none;
+}
+
+.zenith-resource-strip-scroller::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
