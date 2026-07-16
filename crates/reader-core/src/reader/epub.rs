@@ -18,7 +18,9 @@ use std::{
 
 pub(super) use metadata::{cover, scan_epub_metadata};
 pub(super) use package::load_book;
-pub(super) use resources::{binary_resource, prefetch, read_resource, touch, trim_resource_cache};
+pub(super) use resources::{binary_resource, prefetch, read_resource};
+#[cfg(test)]
+pub(super) use resources::{touch, trim_resource_cache};
 
 pub(super) fn open(
     s: &ReaderService,
