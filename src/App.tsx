@@ -15,6 +15,7 @@ function MainLayout() {
     ? books.find((item) => item.id === lastReadBookId) || null
     : null;
   const [readingBook, setReadingBook] = useState<Book | null>(() => initialReadingBook);
+  const [keepLibraryMounted, setKeepLibraryMounted] = useState(false);
   const [startupResolved, setStartupResolved] = useState(() => Boolean(initialReadingBook));
   const startupResumePendingRef = useRef(true);
 
@@ -57,14 +58,21 @@ function MainLayout() {
     setReadingBook(null);
   };
 
+  const openBookFromLibrary = (book: Book) => {
+    setKeepLibraryMounted(true);
+    setReadingBook(book);
+  };
+
   if (isLoading || !startupResolved) return <StartupSplash theme={settings.theme} />;
 
   return (
     <div className="h-screen w-full flex gap-2 overflow-hidden bg-[#F2F2F7] dark:bg-[#000000] text-[#1C1C1E] dark:text-[#F2F2F7] selection:bg-[#007AFF]/30 font-sans transition-colors duration-500 p-2">
-      {!readingBook && (
-        <Suspense fallback={<StartupSplash theme={settings.theme} />}>
-          <LibraryShell onReadBook={setReadingBook} onPresentable={presentApplication} />
-        </Suspense>
+      {(!readingBook || keepLibraryMounted) && (
+        <div className={readingBook ? 'hidden' : 'contents'}>
+          <Suspense fallback={<StartupSplash theme={settings.theme} />}>
+            <LibraryShell onReadBook={openBookFromLibrary} onPresentable={presentApplication} />
+          </Suspense>
+        </div>
       )}
       {readingBook && (
         <Suspense fallback={null}>
