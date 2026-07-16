@@ -447,13 +447,6 @@ export function ReadiumReaderViewer({
           recordBoundedPresentable(true);
           resolveLoading(true);
         }, 1800);
-        if (isContinuousScroll(settingsRef.current) && stripMountPromise) {
-          void stripMountPromise.then(async () => {
-            if (cancelled) return;
-            await waitForNextPaint();
-            resolveLoading(false);
-          }).catch(() => {});
-        }
         const navigatorLoadStartedAt = performance.now();
         navigator.load()
           .then(async () => {
@@ -475,7 +468,13 @@ export function ReadiumReaderViewer({
             }
             await waitForNextPaint();
             if (cancelled) return;
+            await waitUntil(() => isReadiumNavigationReady(navigator), 500);
+            if (cancelled) return;
+            revealReadiumFrames(container, navigator);
+            appliedLayoutSettingsRef.current = settingsRef.current;
+            layoutRestoringRef.current = false;
             resolveLoading(false);
+            drainNavigationQueue();
             const assetsStartedAt = performance.now();
             void waitForCurrentFrameReadiness(navigator, book.type).then(() => {
               recordReaderMetric({
@@ -518,7 +517,7 @@ export function ReadiumReaderViewer({
           })
           .catch((error) => {
             console.error('Readium navigator failed to load', error);
-            if (!cancelled && (!loadingResolvedRef.current || !isContinuousScroll(settingsRef.current))) {
+            if (!cancelled && !loadingResolvedRef.current) {
               setLoadError(error instanceof Error ? error.message : `${book.type.toUpperCase()} 渲染失败`);
             }
             resolveLoading(true);

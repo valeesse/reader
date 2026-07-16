@@ -80,11 +80,6 @@ button {
   pointer-events: auto;
 }
 
-.zenith-resource-strip-host.zenith-resource-strip-initializing {
-  visibility: hidden !important;
-  pointer-events: none !important;
-}
-
 .zenith-resource-strip-scroller {
   width: 100%;
   height: 100%;

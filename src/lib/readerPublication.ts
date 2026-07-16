@@ -3,7 +3,6 @@ import { createReadiumPublication, ReadiumPublicationLike } from './readiumPubli
 import { createTxtReadiumPublication } from './txtReadiumPublication';
 
 const PREWARM_TTL_MS = 30_000;
-const MAX_PREWARMED_PUBLICATIONS = 2;
 const prewarmedPublications = new Map<string, {
   promise: Promise<ReadiumPublicationLike>;
   timer: number;
@@ -33,23 +32,7 @@ export function prewarmReaderPublication(book: Book) {
     opening.then((publication) => publication.close()).catch(() => {});
   }, PREWARM_TTL_MS);
   prewarmedPublications.set(book.resourceId, { promise: opening, timer });
-  trimPrewarmedPublications(book.resourceId);
   return opening;
-}
-
-export function warmReaderPublication(book: Book) {
-  void prewarmReaderPublication(book).catch(() => {});
-}
-
-function trimPrewarmedPublications(activeResourceId: string) {
-  while (prewarmedPublications.size > MAX_PREWARMED_PUBLICATIONS) {
-    const candidate = Array.from(prewarmedPublications).find(([resourceId]) => resourceId !== activeResourceId);
-    if (!candidate) return;
-    const [resourceId, entry] = candidate;
-    prewarmedPublications.delete(resourceId);
-    window.clearTimeout(entry.timer);
-    entry.promise.then((publication) => publication.close()).catch(() => {});
-  }
 }
 
 function openReaderPublication(book: Book): Promise<ReadiumPublicationLike> {
