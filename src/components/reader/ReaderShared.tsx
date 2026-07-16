@@ -7,6 +7,7 @@ export interface ReaderViewerProps {
   onProgressChange: (progress: number) => void;
   onToggleChrome: () => void;
   onTocChange: (items: ReaderTocItem[]) => void;
+  onCurrentTocChange: (itemId: string | null) => void;
   tocTarget: ReaderTocItem | null;
   seekRequest: ReaderSeekRequest | null;
   onPresentable?: () => void;

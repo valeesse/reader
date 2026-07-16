@@ -55,6 +55,7 @@ export function ReadiumReaderViewer({
   onProgressChange,
   onToggleChrome,
   onTocChange,
+  onCurrentTocChange,
   tocTarget,
   seekRequest,
   onPresentable,
@@ -81,6 +82,7 @@ export function ReadiumReaderViewer({
   const onProgressChangeRef = useRef(onProgressChange);
   const onToggleChromeRef = useRef(onToggleChrome);
   const onPresentableRef = useRef(onPresentable);
+  const onCurrentTocChangeRef = useRef(onCurrentTocChange);
   const loadingResolvedRef = useRef(false);
   const settingsApplyTimerRef = useRef<number | null>(null);
   const resizeTimerRef = useRef<number | null>(null);
@@ -163,6 +165,10 @@ export function ReadiumReaderViewer({
   useEffect(() => {
     onPresentableRef.current = onPresentable;
   }, [onPresentable]);
+
+  useEffect(() => {
+    onCurrentTocChangeRef.current = onCurrentTocChange;
+  }, [onCurrentTocChange]);
 
   useEffect(() => {
     previewImageRef.current = previewImage;
@@ -317,6 +323,7 @@ export function ReadiumReaderViewer({
               setPageLabel(formatProgressLabel(progress));
               setPageCounter(formatResourceStripPageCounter(locator, publication));
               onProgressChangeRef.current(progress);
+              onCurrentTocChangeRef.current(currentTocItemId(locator, publication));
               queueProgressSave(locator as ReadiumLocator);
               scheduleDeferredWork(locator.href, 0, false);
             },
@@ -385,6 +392,7 @@ export function ReadiumReaderViewer({
                 navigator.markPreparedReady(locator, visibleLayoutKey);
               }
               const progress = progressionFromLocator(locator, publication);
+              onCurrentTocChangeRef.current(currentTocItemId(locator, publication));
               const previousProgress = lastEmittedProgressRef.current;
               const direction: -1 | 0 | 1 = previousProgress < 0 ? 0 : progress > previousProgress ? 1 : progress < previousProgress ? -1 : 0;
               // Initial loads and TOC jumps have no meaningful turn direction.
@@ -1648,6 +1656,22 @@ function toTocItems(publication: ReadiumPublicationLike): ReaderTocItem[] {
     href: link.href,
     index,
   }));
+}
+
+function currentTocItemId(locator: Pick<ReadiumLocatorLike, 'href'>, publication: ReadiumPublicationLike) {
+  const items = toTocItems(publication);
+  if (items.length === 0) return null;
+  const href = publication.readingOrder.findWithHref(locator.href)?.href || locator.href.split('#')[0];
+  const resourceIndex = publication.readingOrder.findIndexWithHref(href);
+  let current = items[0];
+  for (const item of items) {
+    if (!item.href) continue;
+    const itemHref = publication.readingOrder.findWithHref(item.href)?.href || item.href.split('#')[0];
+    const itemResourceIndex = publication.readingOrder.findIndexWithHref(itemHref);
+    if (itemResourceIndex > resourceIndex) break;
+    current = item;
+  }
+  return current.id;
 }
 
 function createReadiumPreferences(settings: ReturnType<typeof useAppContext>['settings'], bookType: 'epub' | 'txt') {

@@ -31,6 +31,7 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
   const [showSettings, setShowSettings] = useState(false);
   const [showToc, setShowToc] = useState(false);
   const [tocItems, setTocItems] = useState<ReaderTocItem[]>([]);
+  const [currentTocId, setCurrentTocId] = useState<string | null>(null);
   const [tocTarget, setTocTarget] = useState<ReaderTocItem | null>(null);
   const [readingProgress, setReadingProgress] = useState(0);
   const [seekRequest, setSeekRequest] = useState<ReaderSeekRequest | null>(null);
@@ -38,6 +39,7 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
   const contentProgressRef = useRef(0);
   const seekRequestIdRef = useRef(0);
   const seekReleaseTimerRef = useRef<number | null>(null);
+  const tocItemRefs = useRef(new Map<string, HTMLButtonElement>());
   const currentSeries = series.find((item) => item.bookIds.includes(book.id));
   const currentIndex = currentSeries ? currentSeries.bookIds.indexOf(book.id) : -1;
   const nextBook = currentSeries && currentIndex >= 0
@@ -49,10 +51,16 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
     setShowSettings(false);
     setShowToc(false);
     setTocItems([]);
+    setCurrentTocId(null);
     setTocTarget(null);
     setReadingProgress(0);
     setSeekRequest(null);
   }, [book.id]);
+
+  useEffect(() => {
+    if (!showToc || !currentTocId) return;
+    requestAnimationFrame(() => tocItemRefs.current.get(currentTocId)?.scrollIntoView({ block: 'center' }));
+  }, [showToc, currentTocId]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -180,8 +188,15 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
                 tocItems.map((item) => (
                   <button
                     key={item.id}
+                    ref={(element) => {
+                      if (element) tocItemRefs.current.set(item.id, element);
+                      else tocItemRefs.current.delete(item.id);
+                    }}
                     onClick={() => openTocItem(item)}
-                    className="block w-full truncate rounded-[5px] px-3 py-2.5 text-left text-sm text-black/70 transition-colors hover:bg-black/5 dark:text-white/70 dark:hover:bg-white/10"
+                    aria-current={item.id === currentTocId ? 'location' : undefined}
+                    className={`block w-full truncate rounded-[5px] px-3 py-2.5 text-left text-sm transition-colors ${item.id === currentTocId
+                      ? 'bg-[#007AFF]/12 font-semibold text-[#007AFF] dark:bg-[#0A84FF]/18 dark:text-[#64AFFF]'
+                      : 'text-black/70 hover:bg-black/5 dark:text-white/70 dark:hover:bg-white/10'}`}
                     title={item.title}
                   >
                     {item.title}
@@ -315,6 +330,7 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
             onProgressChange={handleProgressChange}
             onToggleChrome={toggleChrome}
             onTocChange={setTocItems}
+            onCurrentTocChange={setCurrentTocId}
             tocTarget={tocTarget}
             seekRequest={seekRequest}
             onPresentable={onPresentable}
