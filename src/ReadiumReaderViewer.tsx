@@ -450,6 +450,13 @@ export function ReadiumReaderViewer({
           recordBoundedPresentable(true);
           resolveLoading(true);
         }, 1800);
+        if (isContinuousScroll(settingsRef.current) && stripMountPromise) {
+          void stripMountPromise.then(async () => {
+            if (cancelled) return;
+            await waitForNextPaint();
+            resolveLoading(false);
+          }).catch(() => {});
+        }
         const navigatorLoadStartedAt = performance.now();
         navigator.load()
           .then(async () => {
@@ -463,13 +470,6 @@ export function ReadiumReaderViewer({
               durationMs: performance.now() - resizeStartedAt,
               detail: { performed: layoutChanged },
             });
-            const assetsStartedAt = performance.now();
-            await waitForCurrentFrameReadiness(navigator, book.type);
-            recordReaderMetric({
-              kind: 'load',
-              name: `${book.type}-frame-assets-ready`,
-              durationMs: performance.now() - assetsStartedAt,
-            });
             const layoutStartedAt = performance.now();
             if (isContinuousScroll(settingsRef.current) && strip) {
               await stripMountPromise;
@@ -478,6 +478,15 @@ export function ReadiumReaderViewer({
             }
             await waitForNextPaint();
             if (cancelled) return;
+            resolveLoading(false);
+            const assetsStartedAt = performance.now();
+            void waitForCurrentFrameReadiness(navigator, book.type).then(() => {
+              recordReaderMetric({
+                kind: 'load',
+                name: `${book.type}-frame-assets-ready`,
+                durationMs: performance.now() - assetsStartedAt,
+              });
+            });
             const currentLocator = navigator.currentLocator;
             const currentLink = publication.readingOrder.findWithHref(currentLocator.href);
             if (currentLink) {
@@ -506,14 +515,13 @@ export function ReadiumReaderViewer({
               durationMs: presentableDurationMs,
             });
             recordBoundedPresentable(false);
-            resolveLoading(false);
             scheduleStableAnchorCapture(navigator);
             scheduleToc(publication);
             scheduleDeferredWork(initialPosition?.href || publication.readingOrder.items[0]?.href || '', 0, true);
           })
           .catch((error) => {
             console.error('Readium navigator failed to load', error);
-            if (!cancelled && !loadingResolvedRef.current) {
+            if (!cancelled && (!loadingResolvedRef.current || !isContinuousScroll(settingsRef.current))) {
               setLoadError(error instanceof Error ? error.message : `${book.type.toUpperCase()} 渲染失败`);
             }
             resolveLoading(true);
@@ -1481,7 +1489,7 @@ export function ReadiumReaderViewer({
         }}
       >
         <div ref={containerRef} className={`readium-container h-full w-full ${loading ? 'readium-initializing' : ''}`} />
-        <div ref={resourceStripHostRef} className="zenith-resource-strip-host" aria-hidden="true" />
+        <div ref={resourceStripHostRef} className={`zenith-resource-strip-host ${loading ? 'zenith-resource-strip-initializing' : ''}`} aria-hidden="true" />
       </div>
 
       <div className="pointer-events-none absolute left-3 top-1/2 z-40 -translate-y-1/2">
