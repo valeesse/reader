@@ -299,19 +299,16 @@ export function SettingsView({
             <div className="space-y-3">
               <div className="text-sm font-medium text-[#1C1C1E] dark:text-white">页面空白</div>
               <div className="grid grid-cols-2 gap-3">
-                {(['left', 'right', 'top', 'bottom'] as const).map((side) => (
-                  <label key={side} className="flex items-center gap-2 text-xs text-black/55 dark:text-white/55">
-                    <span className="w-8">{{ left: '左侧', right: '右侧', top: '顶部', bottom: '底部' }[side]}</span>
-                    <input
-                      type="number"
-                      {...READING_SETTING_LIMITS.pageMargin}
-                      value={settings.pageMargins[side]}
-                      onChange={(event) => updateSettings({ pageMargins: { ...settings.pageMargins, [side]: Number(event.target.value) } })}
-                      className="min-w-0 flex-1 rounded-lg bg-black/5 px-2 py-1.5 text-right outline-none dark:bg-white/5"
-                    />
-                  </label>
-                ))}
+                <PageMarginInput
+                  label="水平"
+                  value={settings.pageMargins.left}
+                  limits={READING_SETTING_LIMITS.horizontalMargin}
+                  onChange={(horizontal) => updateSettings({ pageMargins: { ...settings.pageMargins, left: horizontal, right: horizontal } })}
+                />
+                <PageMarginInput label="顶部" value={settings.pageMargins.top} onChange={(top) => updateSettings({ pageMargins: { ...settings.pageMargins, top } })} />
+                <PageMarginInput label="底部" value={settings.pageMargins.bottom} onChange={(bottom) => updateSettings({ pageMargins: { ...settings.pageMargins, bottom } })} />
               </div>
+              <p className="text-xs text-black/40 dark:text-white/40">水平留白同时作为双页模式的中缝宽度。</p>
             </div>
 
           </div>
@@ -412,6 +409,31 @@ export function SettingsView({
 
       </div>
     </div>
+  );
+}
+
+function PageMarginInput({
+  label,
+  value,
+  limits = READING_SETTING_LIMITS.pageMargin,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  limits?: { min: number; max: number; step: number };
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-xs text-black/55 dark:text-white/55">
+      <span className="w-8">{label}</span>
+      <input
+        type="number"
+        {...limits}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="min-w-0 flex-1 rounded-lg bg-black/5 px-2 py-1.5 text-right outline-none dark:bg-white/5"
+      />
+    </label>
   );
 }
 

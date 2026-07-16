@@ -310,11 +310,16 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
               <div className="space-y-3">
                 <PanelLabel>页面空白</PanelLabel>
                 <div className="grid grid-cols-2 gap-2">
-                  <MarginInput label="左边" value={settings.pageMargins.left} onChange={(left) => updateSettings({ pageMargins: { ...settings.pageMargins, left } })} />
-                  <MarginInput label="右边" value={settings.pageMargins.right} onChange={(right) => updateSettings({ pageMargins: { ...settings.pageMargins, right } })} />
+                  <MarginInput
+                    label="水平"
+                    value={settings.pageMargins.left}
+                    limits={READING_SETTING_LIMITS.horizontalMargin}
+                    onChange={(horizontal) => updateSettings({ pageMargins: { ...settings.pageMargins, left: horizontal, right: horizontal } })}
+                  />
                   <MarginInput label="上边" value={settings.pageMargins.top} onChange={(top) => updateSettings({ pageMargins: { ...settings.pageMargins, top } })} />
                   <MarginInput label="下边" value={settings.pageMargins.bottom} onChange={(bottom) => updateSettings({ pageMargins: { ...settings.pageMargins, bottom } })} />
                 </div>
+                <p className="text-[11px] text-black/35 dark:text-white/35">水平留白同时作为双页模式的中缝宽度。</p>
               </div>
             </div>
           </motion.div>
@@ -492,10 +497,12 @@ function SliderRow({
 function MarginInput({
   label,
   value,
+  limits = READING_SETTING_LIMITS.pageMargin,
   onChange,
 }: {
   label: string,
   value: number,
+  limits?: { min: number, max: number, step: number },
   onChange: (value: number) => void,
 }) {
   const [draft, setDraft] = useState(String(value));
@@ -512,9 +519,9 @@ function MarginInput({
       <span className="w-9 text-xs font-medium text-black/55 dark:text-white/55">{label}</span>
       <input
         type="number"
-        min={READING_SETTING_LIMITS.pageMargin.min}
-        max={READING_SETTING_LIMITS.pageMargin.max}
-        step={READING_SETTING_LIMITS.pageMargin.step}
+        min={limits.min}
+        max={limits.max}
+        step={limits.step}
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}

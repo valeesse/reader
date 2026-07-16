@@ -8,6 +8,7 @@ export const READING_SETTING_LIMITS = {
   paragraphSpacing: { min: 0, max: 3.5, step: 0.1 },
   letterSpacing: { min: 0, max: 0.25, step: 0.01 },
   pageMargin: { min: 0, max: 160, step: 2 },
+  horizontalMargin: { min: 8, max: 160, step: 2 },
 } as const;
 
 export const READER_FONT_OPTIONS = [
@@ -21,6 +22,7 @@ export function normalizeSettings(settings: AppSettings): AppSettings {
   const legacy = settings as AppSettings & { txtReadingFlow?: 'paged' | 'scroll' };
   const pageTurnAnimation = settings.pageTurnAnimation
     || (legacy.txtReadingFlow === 'scroll' ? 'scroll' : defaultSettings.pageTurnAnimation);
+  const horizontalMargin = normalizeHorizontalMargin(settings.pageMargins);
   return {
     ...settings,
     // Continuous scrolling has one physical reading column. Keep the persisted
@@ -33,12 +35,26 @@ export function normalizeSettings(settings: AppSettings): AppSettings {
     paragraphSpacing: clampFinite(settings.paragraphSpacing, READING_SETTING_LIMITS.paragraphSpacing.min, READING_SETTING_LIMITS.paragraphSpacing.max, defaultSettings.paragraphSpacing),
     letterSpacing: clampFinite(settings.letterSpacing, READING_SETTING_LIMITS.letterSpacing.min, READING_SETTING_LIMITS.letterSpacing.max, defaultSettings.letterSpacing),
     pageMargins: {
-      left: normalizeMargin(settings.pageMargins?.left, defaultSettings.pageMargins.left),
-      right: normalizeMargin(settings.pageMargins?.right, defaultSettings.pageMargins.right),
+      left: horizontalMargin,
+      right: horizontalMargin,
       top: normalizeMargin(settings.pageMargins?.top, defaultSettings.pageMargins.top),
       bottom: normalizeMargin(settings.pageMargins?.bottom, defaultSettings.pageMargins.bottom),
     },
   };
+}
+
+function normalizeHorizontalMargin(margins: AppSettings['pageMargins'] | undefined) {
+  const fallback = defaultSettings.pageMargins.left;
+  const storedLeft = margins?.left;
+  const storedRight = margins?.right;
+  const left = typeof storedLeft === 'number' && Number.isFinite(storedLeft) ? storedLeft : fallback;
+  const right = typeof storedRight === 'number' && Number.isFinite(storedRight) ? storedRight : left;
+  return clampFinite(
+    (left + right) / 2,
+    READING_SETTING_LIMITS.horizontalMargin.min,
+    READING_SETTING_LIMITS.horizontalMargin.max,
+    fallback,
+  );
 }
 
 export function pageModeForViewport(

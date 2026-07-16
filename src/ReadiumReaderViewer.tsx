@@ -28,7 +28,6 @@ import { recordReaderMetric } from './lib/readerPerformance';
 import { ContinuousResourceStrip } from './lib/continuousResourceStrip';
 import { applyReaderDocumentProperties, readerThemeColors, readiumFontScale } from './lib/readerDocumentStyles';
 
-const DOUBLE_PAGE_CENTER_GAP = 56;
 const IMMEDIATE_PREFETCH_RADIUS = 1;
 const STABLE_PREFETCH_RADIUS = 3;
 const WHEEL_PAGE_THRESHOLD = 80;
@@ -1342,7 +1341,14 @@ export function ReadiumReaderViewer({
     const navigate = () => {
       dispatchedAt = performance.now();
       navigationId = ++navigationIdRef.current;
-      navigationUnlockTimerRef.current = window.setTimeout(() => finishNavigation(), 2500);
+      navigationUnlockTimerRef.current = window.setTimeout(() => {
+        // A lost iframe reply leaves Readium's private navigation guard set
+        // even after our own timeout unlocks. Every later wheel turn is then
+        // rejected immediately, making the reader appear permanently stuck.
+        // Release both guards and let the bounded retry queue replay this turn.
+        releaseReadiumNavigationGuard(navigator);
+        finishNavigation(false);
+      }, 2500);
       const onNavigationFinished = (ok: boolean, transport?: 'direct' | 'postMessage', turnRequestId?: number) => {
         if (turnRequestId !== undefined) {
           navigationByTurnRequestRef.current.set(turnRequestId, navigationId);
@@ -1357,7 +1363,8 @@ export function ReadiumReaderViewer({
       if (isContinuousScroll(settingsRef.current)) navigate();
       else animatePageExit(containerRef.current, settingsRef.current.pageTurnAnimation, direction, pageTransitionRef, navigate);
     } catch (error) {
-      unlock();
+      releaseReadiumNavigationGuard(navigator);
+      unlock(false);
       console.warn('Readium page turn failed', error);
     }
   };
@@ -1444,8 +1451,8 @@ export function ReadiumReaderViewer({
       <div
         className="absolute inset-0 box-border"
         style={{
-          paddingLeft: `min(${settings.pageMargins.left}px, 35vw)`,
-          paddingRight: `min(${settings.pageMargins.right}px, 35vw)`,
+          paddingLeft: `min(${settings.pageMargins.left}px, 18vw)`,
+          paddingRight: `min(${settings.pageMargins.right}px, 18vw)`,
           paddingTop: `min(${settings.pageMargins.top}px, 30vh)`,
           paddingBottom: `min(${settings.pageMargins.bottom}px, 30vh)`,
         }}
@@ -1491,8 +1498,8 @@ export function ReadiumReaderViewer({
           <div
             className="pointer-events-none absolute inset-0 z-20 overflow-hidden bg-inherit"
             style={{
-              paddingLeft: `min(${settings.pageMargins.left}px, 35vw)`,
-              paddingRight: `min(${settings.pageMargins.right}px, 35vw)`,
+              paddingLeft: `min(${settings.pageMargins.left}px, 18vw)`,
+              paddingRight: `min(${settings.pageMargins.right}px, 18vw)`,
               paddingTop: `min(${settings.pageMargins.top}px, 30vh)`,
               paddingBottom: `min(${settings.pageMargins.bottom}px, 30vh)`,
             }}
@@ -1906,6 +1913,10 @@ function readiumNavigationInFlight(navigator: EpubNavigator) {
   return Boolean((navigator as EpubNavigator & { _isNavigating?: boolean })._isNavigating);
 }
 
+function releaseReadiumNavigationGuard(navigator: EpubNavigator) {
+  (navigator as EpubNavigator & { _isNavigating?: boolean })._isNavigating = false;
+}
+
 function waitUntil(predicate: () => boolean, timeoutMs: number) {
   return new Promise<void>((resolve) => {
     const startedAt = performance.now();
@@ -2183,7 +2194,7 @@ function applyReadiumFrameSettings(doc: Document, settings: AppSettings, bookTyp
     const columns = settings.pageMode === 'double' ? 2 : 1;
     root.style.setProperty('--USER__colCount', String(columns));
     root.style.setProperty('--RS__colCount', String(columns));
-    root.style.setProperty('--RS__colGap', `${readiumCenterGap(settings)}px`);
+    root.style.setProperty('--RS__colGap', `${readiumCenterGap(settings, doc.defaultView?.innerWidth)}px`);
   }
   root.style.removeProperty('--RS__colWidth');
   root.style.setProperty('--RS__pageGutter', '0px');
@@ -2228,8 +2239,12 @@ function normalizeWheelDelta(event: WheelEvent, container: HTMLElement | null) {
   return dominantDelta;
 }
 
-function readiumCenterGap(settings: AppSettings) {
-  return !isContinuousScroll(settings) && settings.pageMode === 'double' ? DOUBLE_PAGE_CENTER_GAP : 0;
+function readiumCenterGap(settings: AppSettings, viewportWidth?: number) {
+  if (isContinuousScroll(settings) || settings.pageMode !== 'double') return 0;
+  const maximumGap = typeof viewportWidth === 'number' && Number.isFinite(viewportWidth)
+    ? viewportWidth * 0.18
+    : settings.pageMargins.left;
+  return Math.min(settings.pageMargins.left, maximumGap);
 }
 
 function animatePageExit(
