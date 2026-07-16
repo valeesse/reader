@@ -7408,7 +7408,10 @@ class Mn {
     return this.loader;
   }
 }
-const Wi = 3;
+// Keep the current resource plus a symmetric three-resource L1 layout band.
+// Scrolled mode uses the same seven-resource window in the host strip, while
+// paginated modes retain these prepared frames for boundary turns/reversals.
+const Wi = 7;
 class to {
   constructor(t, e, i, n, s, o) {
     this.pool = /* @__PURE__ */ new Map(), this.blobs = /* @__PURE__ */ new Map(), this.inprogress = /* @__PURE__ */ new Map(), this.constructing = /* @__PURE__ */ new Map(), this.pendingUpdates = /* @__PURE__ */ new Map(), this.injector = null, this.reservedHref = void 0, this.reservationGeneration = 0, this.currentHref = void 0, this.container = t, this.positions = e, this.currentCssProperties = i, this.injector = n ?? null, this.contentProtectionConfig = s || {}, this.keyboardPeripheralsConfig = o || [];

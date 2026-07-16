@@ -59,11 +59,92 @@ button {
   background: transparent;
 }
 
+.readium-container.zenith-resource-strip-suspended {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.zenith-resource-strip-host {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  display: block;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.zenith-resource-strip-host.zenith-resource-strip-active {
+  z-index: 4;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.zenith-resource-strip-scroller {
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  contain: layout paint style;
+  overflow-anchor: none;
+}
+
+.zenith-resource-strip-content {
+  position: relative;
+  width: 100%;
+  min-height: 100%;
+  overflow-anchor: none;
+}
+
+.zenith-resource-strip-item {
+  position: relative;
+  width: 100%;
+  contain: layout style;
+  overflow-anchor: none;
+}
+
+.zenith-resource-strip-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
 .readium-container iframe {
   width: 100%;
   height: 100%;
   border: 0;
   background: transparent;
+}
+
+.readium-container iframe.zenith-scroll-transition-outgoing {
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: none !important;
+  z-index: 2 !important;
+}
+
+.readium-container iframe.zenith-scroll-transition-incoming {
+  visibility: visible !important;
+  opacity: 1 !important;
+  z-index: 1 !important;
+}
+
+iframe.zenith-scroll-transition-snapshot {
+  position: fixed !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: none !important;
+  z-index: 3 !important;
+}
+
+/* During a cross-resource scroll gesture, route inertial wheel events to the
+   parent reader until the new iframe has its own listeners and stable layout. */
+.readium-container.zenith-scroll-gesture-locked iframe {
+  pointer-events: none !important;
 }
 
 .readium-container img,

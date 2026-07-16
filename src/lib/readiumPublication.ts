@@ -504,6 +504,18 @@ class EpubResourceManager {
     const doc = parseXml(html, 'application/xhtml+xml');
     if (doc.querySelector('parsererror')) return html;
 
+    // Publication scripts cannot run in the deliberately scriptless reader
+    // sandbox. Removing them before srcdoc assignment avoids one CSP/security
+    // error per warm L1 frame and keeps untrusted EPUB code out of every mode.
+    doc.querySelectorAll('script').forEach((script) => script.remove());
+    doc.querySelectorAll('*').forEach((element) => {
+      for (const attribute of Array.from(element.attributes)) {
+        if (attribute.name.toLowerCase().startsWith('on')) element.removeAttribute(attribute.name);
+      }
+    });
+    doc.querySelectorAll('a[href]').forEach((anchor) => {
+      if (/^\s*javascript:/i.test(anchor.getAttribute('href') || '')) anchor.setAttribute('href', '#');
+    });
     const baseDir = dirname(href);
     await rewriteUrlAttributes(doc, baseDir, (resourceHref) => this.blobUrlFor(resourceHref));
     doc.querySelectorAll('img, picture, figure, svg image').forEach((element) => {
