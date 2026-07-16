@@ -86,7 +86,7 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
   };
 
   return (
-    <div className="flex-1 flex flex-col relative bg-white/70 dark:bg-[#121212]/70">
+    <div className="glass-surface flex-1 flex flex-col relative">
       <header className="h-14 border-b border-black/5 dark:border-white/5 flex items-center justify-between px-8 bg-white/80 dark:bg-[#121212]/80 backdrop-blur-md sticky top-0 z-10">
         <h1 className="text-lg font-bold text-[#1C1C1E] dark:text-white">系列</h1>
         <div className="flex items-center gap-3">
@@ -198,7 +198,7 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
                         onClick={() => onReadBook(book)}
                         className="text-left flex items-center gap-3 rounded-[5px] bg-white/70 dark:bg-white/10 hover:bg-white dark:hover:bg-white/15 p-3 transition-colors"
                       >
-                        <div className="w-8 h-10 rounded-[5px] bg-gradient-to-br from-[#007AFF] to-[#AF52DE] shrink-0 overflow-hidden">
+                        <div className="w-8 h-10 rounded-[5px] bg-[#e4e5df] dark:bg-[#30332f] shrink-0 overflow-hidden">
                           <BookCover book={book} className="w-full h-full object-cover" compact />
                         </div>
                         <div className="min-w-0">

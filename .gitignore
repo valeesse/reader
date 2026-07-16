@@ -9,6 +9,7 @@ target/
 .turbo/
 .DS_Store
 Thumbs.db
+.idea/
 *.log
 .env*
 !.env.example

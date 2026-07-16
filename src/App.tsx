@@ -53,6 +53,14 @@ function MainLayout() {
     if (settings.theme !== 'sepia') document.documentElement.classList.remove('sepia');
   }, [settings.theme]);
 
+  useEffect(() => {
+    if (readingBook) return;
+    const idleId = window.requestIdleCallback(() => {
+      void loadReaderLayout();
+    }, { timeout: 300 });
+    return () => window.cancelIdleCallback(idleId);
+  }, [readingBook]);
+
   const closeReader = () => {
     startupResumePendingRef.current = false;
     setReadingBook(null);
@@ -66,9 +74,9 @@ function MainLayout() {
   if (isLoading || !startupResolved) return <StartupSplash theme={settings.theme} />;
 
   return (
-    <div className="h-screen w-full flex gap-2 overflow-hidden bg-[#F2F2F7] dark:bg-[#000000] text-[#1C1C1E] dark:text-[#F2F2F7] selection:bg-[#007AFF]/30 font-sans transition-colors duration-500 p-2">
+    <div className="h-screen w-full flex gap-2 overflow-hidden bg-[#eeeee9] dark:bg-[#111210] text-[#242722] dark:text-[#ecece7] selection:bg-[#718273]/25 font-sans transition-colors duration-500 p-2">
       {(!readingBook || keepLibraryMounted) && (
-        <div className={readingBook ? 'hidden' : 'contents'}>
+        <div className="contents">
           <Suspense fallback={<StartupSplash theme={settings.theme} />}>
             <LibraryShell onReadBook={openBookFromLibrary} onPresentable={presentApplication} />
           </Suspense>

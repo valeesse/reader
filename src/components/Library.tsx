@@ -148,42 +148,33 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
 
   if (books.length === 0) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center text-gray-500 dark:text-gray-400 bg-white/70 dark:bg-[#121212]/70">
-        <BookOpen className="w-16 h-16 mb-4 opacity-20" />
+      <div className="flex-1 flex flex-col items-center justify-center text-[#6d746b] dark:text-gray-400 bg-[#f7f7f3]/80 dark:bg-[#171916]/80">
+        <BookOpen className="w-14 h-14 mb-5 opacity-25" strokeWidth={1.3} />
         <h2 className="text-xl font-medium text-gray-900 dark:text-gray-100 mb-2">暂无书籍</h2>
         <p className="text-sm">请前往设置中添加本地文件夹以扫描 EPUB 和 TXT 文件。</p>
       </div>
     );
   }
 
-  if (selectedSeriesEntry) {
-    return (
-      <SeriesDetailView
-        entry={selectedSeriesEntry}
-        onBack={() => setSelectedSeriesId(null)}
-        onReadBook={onReadBook}
-      />
-    );
-  }
-
   return (
-    <div className="flex-1 flex flex-col relative bg-white/70 dark:bg-[#121212]/70">
-      <header className="h-14 border-b border-black/5 dark:border-white/5 flex items-center justify-between px-8 bg-white/80 dark:bg-[#121212]/80 backdrop-blur-md sticky top-0 z-10">
-        <h1 className="text-lg font-bold text-[#1C1C1E] dark:text-white">所有书籍</h1>
-      </header>
+    <div className="flex-1 flex relative overflow-hidden">
+      <div className="flex-1 flex flex-col relative bg-[#f7f7f3]/80 dark:bg-[#171916]/80">
+        <header className="h-16 border-b border-black/[0.045] dark:border-white/5 flex items-center justify-between px-5 sm:px-8 bg-[#f7f7f3]/85 dark:bg-[#171916]/85 backdrop-blur-md sticky top-0 z-10">
+          <h1 className="text-lg font-semibold tracking-[0.06em] text-[#30352f] dark:text-white">所有书籍</h1>
+        </header>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-6" onScroll={handleLibraryScroll}>
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-7" onScroll={handleLibraryScroll}>
         {recentBook && (
           <button
             onClick={() => onReadBook(recentBook)}
-            className="w-full text-left rounded-2xl border border-black/5 dark:border-white/10 bg-white/75 dark:bg-white/10 p-4 shadow-sm hover:bg-white dark:hover:bg-white/15 transition-colors"
+            className="w-full text-left rounded-2xl border border-black/[0.055] dark:border-white/10 bg-white/55 dark:bg-white/[0.07] p-4 hover:bg-white/85 dark:hover:bg-white/10 transition-colors"
           >
             <div className="flex items-center gap-4">
-              <div className="w-14 h-[74px] rounded-xl overflow-hidden bg-gradient-to-br from-[#007AFF] to-[#AF52DE] shrink-0 shadow-md">
+              <div className="w-14 h-[74px] rounded-xl overflow-hidden bg-[#e4e5df] dark:bg-[#30332f] shrink-0 shadow-[0_6px_18px_rgba(35,40,33,0.12)]">
                 <BookCover book={recentBook} className="w-full h-full object-cover" compact />
               </div>
               <div className="min-w-0">
-                <div className="flex items-center gap-2 text-xs font-medium text-[#007AFF]">
+                <div className="flex items-center gap-2 text-xs font-medium text-[#718273]">
                   <Clock3 className="w-4 h-4" />
                   最近阅读
                 </div>
@@ -194,14 +185,14 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
           </button>
         )}
 
-        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 rounded-2xl border border-black/5 dark:border-white/10 bg-white/65 dark:bg-white/10 p-3">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 rounded-2xl border border-black/[0.05] dark:border-white/10 bg-white/45 dark:bg-white/[0.06] p-3">
           <div className="relative min-w-0 xl:w-80">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-black/35 dark:text-white/35" />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="搜索书名、作者、文件名或系列名"
-              className="w-full h-10 rounded-xl bg-black/5 dark:bg-white/10 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-[#007AFF]"
+              className="w-full h-10 rounded-xl bg-black/[0.035] dark:bg-white/10 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-[#718273]/45"
             />
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -219,7 +210,7 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
             <select
               value={sortKey}
               onChange={(event) => setSortKey(event.target.value as SortKey)}
-              className="h-10 rounded-xl bg-black/5 dark:bg-white/10 px-3 text-sm outline-none focus:ring-2 focus:ring-[#007AFF]"
+              className="h-10 rounded-xl bg-black/[0.035] dark:bg-white/10 px-3 text-sm outline-none focus:ring-2 focus:ring-[#718273]/45"
             >
               <option value="recent">最近阅读</option>
               <option value="fileName">文件名</option>
@@ -235,7 +226,7 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-7 content-start">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-x-6 gap-y-8 content-start">
           {visibleEntries.map((entry) => (
             entry.kind === 'series' ? (
               <SeriesTile key={entry.id} entry={entry} onOpenSeries={() => setSelectedSeriesId(entry.id)} />
@@ -253,7 +244,15 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
             加载更多
           </button>
         )}
+        </div>
       </div>
+      {selectedSeriesEntry && (
+        <SeriesDetailView
+          entry={selectedSeriesEntry}
+          onBack={() => setSelectedSeriesId(null)}
+          onReadBook={onReadBook}
+        />
+      )}
     </div>
   );
 }
@@ -272,7 +271,7 @@ function SeriesTile({
       onClick={onOpenSeries}
       className="flex flex-col gap-3 cursor-pointer group text-left"
     >
-      <div className="aspect-[3/4] rounded-xl shadow-xl border border-black/5 dark:border-white/10 group-hover:shadow-2xl transition-all duration-300 bg-gradient-to-br from-[#007AFF] to-[#AF52DE] overflow-hidden relative">
+      <div className="aspect-[3/4] rounded-xl shadow-[0_8px_24px_rgba(35,40,33,0.12)] group-hover:shadow-[0_12px_30px_rgba(35,40,33,0.17)] transition-shadow duration-300 bg-[#e4e5df] dark:bg-[#30332f] overflow-hidden relative">
         <BookCover book={entry.coverBook} className="w-full h-full object-cover" />
         <div className="absolute top-2 left-2 bg-black/30 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1">
           <Layers className="w-3 h-3" />
@@ -298,7 +297,7 @@ function BookTile({ book, onReadBook }: { book: Book; onReadBook: (book: Book) =
       onClick={() => onReadBook(book)}
       className="flex flex-col gap-3 cursor-pointer group text-left"
     >
-      <div className="aspect-[3/4] rounded-xl shadow-xl border border-black/5 dark:border-white/10 group-hover:shadow-2xl transition-all duration-300 bg-gradient-to-br from-[#007AFF] to-[#AF52DE] overflow-hidden relative">
+      <div className="aspect-[3/4] rounded-xl shadow-[0_8px_24px_rgba(35,40,33,0.12)] group-hover:shadow-[0_12px_30px_rgba(35,40,33,0.17)] transition-shadow duration-300 bg-[#e4e5df] dark:bg-[#30332f] overflow-hidden relative">
         <BookCover book={book} className="w-full h-full object-cover" showMeta />
         <div className="absolute top-2 right-2 bg-black/30 backdrop-blur-sm text-white text-[10px] uppercase font-bold px-2 py-0.5 rounded-full">
           {book.type}
@@ -324,7 +323,7 @@ function SeriesDetailView({
   const uniqueAuthors = Array.from(new Set(entry.books.map((book) => book.author).filter(Boolean)));
 
   return (
-    <div className="flex-1 flex flex-col relative bg-white/70 dark:bg-[#121212]/70">
+    <div className="glass-surface absolute inset-0 z-20 flex flex-col">
       <header className="h-14 border-b border-black/5 dark:border-white/5 flex items-center gap-3 px-8 bg-white/80 dark:bg-[#121212]/80 backdrop-blur-md sticky top-0 z-10">
         <button
           onClick={onBack}
@@ -339,7 +338,7 @@ function SeriesDetailView({
       <div className="flex-1 overflow-y-auto p-6 space-y-8">
         <section className="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)] rounded-3xl border border-black/5 dark:border-white/10 bg-white/75 dark:bg-white/10 p-6 shadow-sm">
           <div className="w-full max-w-[220px]">
-            <div className="aspect-[3/4] overflow-hidden rounded-2xl border border-black/5 dark:border-white/10 bg-gradient-to-br from-[#007AFF] to-[#AF52DE] shadow-xl">
+            <div className="aspect-[3/4] overflow-hidden rounded-2xl bg-[#e4e5df] dark:bg-[#30332f] shadow-[0_10px_30px_rgba(35,40,33,0.14)]">
               <BookCover book={entry.coverBook} className="w-full h-full object-cover" />
             </div>
           </div>
@@ -379,7 +378,7 @@ function SeriesDetailView({
                 onClick={() => onReadBook(book)}
                 className="group text-left overflow-hidden rounded-2xl border border-black/5 dark:border-white/10 bg-white/85 dark:bg-white/10 shadow-sm transition-colors hover:bg-white dark:hover:bg-white/15"
               >
-                <div className="relative aspect-[3/4] overflow-hidden bg-gradient-to-br from-[#007AFF] to-[#AF52DE]">
+                <div className="relative aspect-[3/4] overflow-hidden bg-[#e4e5df] dark:bg-[#30332f]">
                   <BookCover book={book} className="h-full w-full object-cover" />
                   <div className="absolute right-0 top-0 border-l-[26px] border-t-[26px] border-l-transparent border-t-[#F59E0B]" />
                   <div className="absolute right-2 top-1.5 text-[10px] font-bold text-white">{formatSeriesIndex(book, index)}</div>
