@@ -142,19 +142,20 @@ pub(super) fn stats(c: &ReaderConfig) -> Result<ReaderCacheStats, ReaderError> {
     })
 }
 pub(super) fn clear(s: &ReaderService) -> Result<(), ReaderError> {
-    if s.txt_books
-        .lock()
-        .map_err(|_| ReaderError::Busy)?
-        .values()
-        .any(|v| !v.active_sessions.is_empty())
-        || s.epub_books
-            .lock()
-            .map_err(|_| ReaderError::Busy)?
-            .values()
-            .any(|v| !v.active_sessions.is_empty())
+    let mut txt_books = s.txt_books.lock().map_err(|_| ReaderError::Busy)?;
+    let mut epub_books = s.epub_books.lock().map_err(|_| ReaderError::Busy)?;
+    if txt_books.values().any(|v| !v.active_sessions.is_empty())
+        || epub_books.values().any(|v| !v.active_sessions.is_empty())
     {
         return Err(ReaderError::Busy);
     };
+    // Some TXT encodings are transcoded into cache files. Keeping their
+    // in-memory indexes after deleting the disk cache leaves data_path pointing
+    // at a file that no longer exists, so the next open appears valid but the
+    // first resource read fails with ENOENT. EPUB entries also contain derived
+    // cache state and should follow the same invalidation boundary.
+    txt_books.clear();
+    epub_books.clear();
     if s.config.cache_dir.exists() {
         fs::remove_dir_all(&s.config.cache_dir).map_err(io_error)?
     }

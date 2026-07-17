@@ -94,8 +94,25 @@ export function normalizeLocatorToPublicationPosition(
   publication: ReadiumPublicationLike,
 ) {
   if (!locator) return undefined;
-  if (typeof locator.locations?.position === 'number') return locator;
-  const normalizedHref = publication.readingOrder.findWithHref(locator.href)?.href || locator.href.split('#')[0];
+  const currentLink = publication.readingOrder.findWithHref(locator.href);
+  if (currentLink && typeof locator.locations?.position === 'number') return locator;
+
+  // Reading-order hrefs are an implementation detail for virtual TXT
+  // publications and have changed across releases. Migrate a saved locator by
+  // its stable global position before handing it to Readium; otherwise Readium
+  // rejects the old href during navigator.load(). This also safely recovers an
+  // EPUB locator whose spine changed since progress was saved.
+  if (!currentLink) {
+    const position = locator.locations?.position;
+    if (typeof position === 'number' && publication.positions.length > 0) {
+      return publication.positions[Math.min(publication.positions.length - 1, Math.max(0, Math.round(position) - 1))];
+    }
+    const totalProgression = locator.locations?.totalProgression;
+    if (typeof totalProgression === 'number') return locatorAtProgress(publication, totalProgression);
+    return publication.positions[0] || publication.readingOrder.items[0]?.locator;
+  }
+
+  const normalizedHref = currentLink.href;
   const range = publication.positions.filter((position) => {
     const href = publication.readingOrder.findWithHref(position.href)?.href || position.href.split('#')[0];
     return href === normalizedHref;

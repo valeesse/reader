@@ -221,5 +221,15 @@ export function desktopFileSrc(path: string, protocol = 'asset') {
     };
   }).__TAURI_INTERNALS__;
   if (!internals) return path;
-  return internals.convertFileSrc(path, protocol);
+  return internals.convertFileSrc(normalizeDesktopFilePath(path), protocol);
+}
+
+// Windows canonicalization can return verbatim paths (\\?\C:\... or
+// \\?\UNC\server\share\...). Tauri's asset protocol expects regular Win32
+// paths; encoding the verbatim prefix produces an asset.localhost URL that the
+// protocol resolver cannot open.
+export function normalizeDesktopFilePath(path: string) {
+  if (path.startsWith('\\\\?\\UNC\\')) return `\\\\${path.slice(8)}`;
+  if (path.startsWith('\\\\?\\')) return path.slice(4);
+  return path;
 }

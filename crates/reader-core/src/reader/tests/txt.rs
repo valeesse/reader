@@ -131,3 +131,34 @@ fn clear_cache_cannot_remove_active_txt_data_during_open() {
         .unwrap();
     assert_eq!(window.text, "第一章 并发");
 }
+
+#[test]
+fn cleared_transcoded_txt_cache_is_rebuilt_on_reopen() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().join("books");
+    fs::create_dir_all(&root).unwrap();
+    let expected = "第一章 缓存重建\n中文正文\n";
+    let (encoded, _, _) = GBK.encode(expected);
+    fs::write(root.join("book.txt"), encoded.as_ref()).unwrap();
+    let mut registry = LibraryRegistry::open(&root, temp.path().join("state")).unwrap();
+    let id = registry.scan(|_| {}).unwrap()[0].resource_id.clone();
+    let service = ReaderService::new(
+        registry,
+        temp.path().join("state"),
+        temp.path().join("cache"),
+    )
+    .unwrap();
+
+    let first = service.open_txt(&id).unwrap();
+    service.close_txt(&id, &first.session_id).unwrap();
+    service.clear_cache().unwrap();
+
+    let reopened = service.open_txt(&id).unwrap();
+    assert_eq!(
+        service
+            .read_txt_window(&id, &reopened.session_id, 0, expected.chars().count())
+            .unwrap()
+            .text,
+        expected
+    );
+}
