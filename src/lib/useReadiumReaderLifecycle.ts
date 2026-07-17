@@ -108,7 +108,7 @@ export function useReadiumReaderLifecycle(runtime: ReadiumReaderRuntime, options
           const progress = progressionFromLocator(nextLocator, publication);
           runtime.lastEmittedProgressRef.current = progress;
           options.setPageLabel(formatProgressLabel(progress));
-          options.setPageCounter(formatResourceStripPageCounter(nextLocator, publication));
+          options.setPageCounter(formatResourceStripPageCounter(nextLocator, publication, created.pageMetrics));
           runtime.onProgressChangeRef.current(progress);
           runtime.onCurrentTocChangeRef.current(currentTocItemId(nextLocator, publication, created.currentDocument));
           queueProgressSave(nextLocator as ReadiumLocator);
@@ -155,12 +155,21 @@ export function useReadiumReaderLifecycle(runtime: ReadiumReaderRuntime, options
             || legacyProgressPosition(storedProgress?.scrollPercentage, publication), publication,
         );
         const initialHref = initialPosition?.href || publication.readingOrder.items[0]?.href || '';
-        publication.prefetchAroundHref(initialHref, 1).catch(() => {});
+        if (!isContinuousScroll(runtime.settingsRef.current)) publication.prefetchAroundHref(initialHref, 1).catch(() => {});
         const ensureResourceStrip = ensureStrip(publication, runtime.resourceStripHostRef.current);
         runtime.ensureResourceStripRef.current = ensureResourceStrip;
         const initialStripLocator = initialPosition || publication.readingOrder.items[0]?.locator;
         const stripMountPromise = isContinuousScroll(runtime.settingsRef.current) && initialStripLocator
           ? ensureResourceStrip(runtime.settingsRef.current, initialStripLocator) : Promise.resolve(null);
+        if (isContinuousScroll(runtime.settingsRef.current)) void stripMountPromise.then(async (strip) => {
+          if (!strip || cancelled || runtime.resourceStripRef.current !== strip) return;
+          strip.setActive(true);
+          await waitForNextPaint();
+          if (!cancelled) {
+            resolveLoading(false);
+            recordReaderMetric({ kind: 'load', name: `${book.type}-strip-presentable`, durationMs: performance.now() - initStartedAt });
+          }
+        });
         container.classList.toggle('zenith-resource-strip-suspended', isContinuousScroll(runtime.settingsRef.current));
         const backingSettings = isContinuousScroll(runtime.settingsRef.current)
           ? { ...runtime.settingsRef.current, pageTurnAnimation: 'minimal' as const } : runtime.settingsRef.current;
@@ -189,11 +198,11 @@ export function useReadiumReaderLifecycle(runtime: ReadiumReaderRuntime, options
           if (layoutChanged) await navigator.resizeHandler?.();
           recordReaderMetric({ kind: 'load', name: `${book.type}-post-load-resize`, durationMs: performance.now() - resizeStartedAt, detail: { performed: layoutChanged } });
           const layoutStartedAt = performance.now();
-          if (isContinuousScroll(runtime.settingsRef.current)) {
-            const strip = await stripMountPromise;
-            if (cancelled) return;
-            if (strip) { await strip.go(navigator.currentLocator as ReadiumLocatorLike, false); strip.setActive(true); }
-          }
+           if (isContinuousScroll(runtime.settingsRef.current)) {
+             const strip = await stripMountPromise;
+             if (cancelled) return;
+             if (strip) strip.setActive(true);
+           }
           await waitForNextPaint();
           if (cancelled) return;
           revealReadiumFrames(container, navigator);
@@ -205,8 +214,9 @@ export function useReadiumReaderLifecycle(runtime: ReadiumReaderRuntime, options
           if (!isReadiumNavigationReady(navigator)) throw new Error(`${book.type.toUpperCase()} 阅读页面未就绪`);
           revealReadiumFrames(container, navigator);
           runtime.appliedLayoutSettingsRef.current = runtime.settingsRef.current;
-          runtime.layoutRestoringRef.current = false;
-          runtime.operations.drainNavigationQueue();
+           runtime.layoutRestoringRef.current = false;
+           runtime.operations.drainAbsoluteNavigation();
+           runtime.operations.drainNavigationQueue();
           const assetsStartedAt = performance.now();
           void waitForCurrentFrameReadiness(navigator, book.type).then(() => recordReaderMetric({ kind: 'load', name: `${book.type}-frame-assets-ready`, durationMs: performance.now() - assetsStartedAt }));
           const currentLocator = navigator.currentLocator;

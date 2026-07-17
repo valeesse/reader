@@ -80,6 +80,7 @@ export interface ReadiumReaderRuntime {
   absoluteNavigationPendingRef: Ref<{ locator: ReadiumLocatorLike; requestId: number } | null>;
   absoluteNavigationRunningRef: Ref<boolean>;
   absoluteNavigationTimerRef: Ref<number | null>;
+  absoluteNavigationTokenRef: Ref<number>;
   seekPreviewTimerRef: Ref<number | null>;
   seekPreviewPendingRef: Ref<{ locator: ReadiumLocatorLike; requestId: number } | null>;
   deferredHrefRef: Ref<string>;

@@ -66,7 +66,10 @@ export async function applyContinuousReaderDocumentStyles(doc: Document, setting
     }
     body {
       overflow: hidden !important;
-      padding-bottom: 24px !important;
+      padding-block: 0 !important;
+    }
+    body > :last-child {
+      margin-block-end: 0 !important;
     }
   `;
 }

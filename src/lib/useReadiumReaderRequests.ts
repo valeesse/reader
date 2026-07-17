@@ -14,16 +14,28 @@ export function installAbsoluteNavigation(runtime: ReadiumReaderRuntime) {
     if (!request || !navigator) return;
     runtime.absoluteNavigationPendingRef.current = null;
     runtime.absoluteNavigationRunningRef.current = true;
+    const token = runtime.absoluteNavigationTokenRef.current;
+    let completed = false;
     const finish = (applied: boolean) => {
+      if (completed) return;
+      completed = true;
       if (runtime.absoluteNavigationTimerRef.current !== null) window.clearTimeout(runtime.absoluteNavigationTimerRef.current);
       runtime.absoluteNavigationTimerRef.current = null;
       runtime.absoluteNavigationRunningRef.current = false;
-      if (!applied && !runtime.absoluteNavigationPendingRef.current) runtime.absoluteNavigationPendingRef.current = request;
+      if (token !== runtime.absoluteNavigationTokenRef.current) {
+        window.setTimeout(drainAbsoluteNavigation, 0);
+        return;
+      }
+      if (!applied && !runtime.absoluteNavigationPendingRef.current) {
+        runtime.absoluteNavigationPendingRef.current = request;
+      }
       window.setTimeout(drainAbsoluteNavigation, applied ? 0 : 32);
     };
     runtime.absoluteNavigationTimerRef.current = window.setTimeout(() => {
       navigator.recoverNavigation();
-      finish(false);
+      // The navigator operation cannot be cancelled safely. Do not retry an
+      // operation which may still commit after the watchdog releases the queue.
+      finish(true);
     }, 2500);
     if (isContinuousScroll(runtime.settingsRef.current) && runtime.resourceStripRef.current) {
       runtime.resourceStripRef.current.go(request.locator, false).then(finish).catch(() => finish(false));
@@ -31,6 +43,7 @@ export function installAbsoluteNavigation(runtime: ReadiumReaderRuntime) {
   };
 
   const submitAbsoluteNavigation = (locator: Parameters<typeof runtime.operations.submitAbsoluteNavigation>[0], requestId: number) => {
+    runtime.absoluteNavigationTokenRef.current += 1;
     runtime.absoluteNavigationPendingRef.current = { locator, requestId };
     runtime.pendingNavigationRef.current = 0;
     drainAbsoluteNavigation();
@@ -55,7 +68,12 @@ export function useReadiumReaderRequests(
     if (link && navigator) {
       const fragment = tocTarget.href.split('#')[1];
       const locator = fragment
-        ? link.locator.copyWithLocations({ fragments: [decodeURIComponent(fragment)] })
+        ? link.locator.copyWithLocations({
+            ...link.locator.locations,
+            fragments: [safeDecodeFragment(fragment)],
+            progression: link.locator.locations.progression ?? 0,
+            zenithViewportY: 0,
+          })
         : link.locator;
       if (isContinuousScroll(runtime.settingsRef.current) && runtime.resourceStripRef.current) {
         runtime.operations.submitAbsoluteNavigation(locator, tocTarget.index ?? Date.now());
@@ -87,8 +105,12 @@ export function useReadiumReaderRequests(
       const pending = runtime.seekPreviewPendingRef.current;
       runtime.seekPreviewPendingRef.current = null;
       if (pending) runtime.operations.submitAbsoluteNavigation(pending.locator, pending.requestId);
-    }, 80);
+    }, 24);
   }, [seekRequest, loading]);
+}
+
+function safeDecodeFragment(fragment: string) {
+  try { return decodeURIComponent(fragment); } catch { return fragment; }
 }
 
 export function useReadiumReaderInput(runtime: ReadiumReaderRuntime, previewImage: unknown, loading: boolean) {

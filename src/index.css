@@ -149,13 +149,14 @@ button {
 }
 
 .zenith-resource-strip-spacer {
-  width: 100%;
+  display: none;
   pointer-events: none;
   overflow-anchor: none;
 }
 
 .zenith-resource-strip-item {
-  position: relative;
+  position: absolute;
+  left: 0;
   width: 100%;
   contain: layout style;
   overflow-anchor: none;

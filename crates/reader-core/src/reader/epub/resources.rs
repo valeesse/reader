@@ -81,6 +81,18 @@ pub(crate) fn prefetch(
             .cloned();
         if let Some(item) = item {
             if is_text(&item.media_type) {
+                let cached = {
+                    let mut books = s.epub_books.lock().map_err(|_| ReaderError::Busy)?;
+                    let book = books.get_mut(id).ok_or(ReaderError::InvalidSession)?;
+                    let cached = book.resource_cache.get(&href).cloned();
+                    if cached.is_some() {
+                        touch(book, &href);
+                    }
+                    cached
+                };
+                if cached.is_some() {
+                    continue;
+                }
                 let bytes = read_flexible(&mut archive, &item.absolute_href)?.1;
                 let resource = EpubCachedResource {
                     bytes: Arc::from(bytes),

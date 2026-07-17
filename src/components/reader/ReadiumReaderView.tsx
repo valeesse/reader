@@ -36,10 +36,10 @@ export function ReadiumReaderView({
       <div
         className="absolute inset-0 box-border"
         style={{
-          paddingLeft: `min(${settings.pageMargins.left}px, 18vw)`,
-          paddingRight: `min(${settings.pageMargins.right}px, 18vw)`,
-          paddingTop: `min(${settings.pageMargins.top}px, 30vh)`,
-          paddingBottom: `min(${settings.pageMargins.bottom}px, 30vh)`,
+          paddingLeft: `${settings.pageMargins.left}px`,
+          paddingRight: `${settings.pageMargins.right}px`,
+          paddingTop: `${settings.pageMargins.top}px`,
+          paddingBottom: `${settings.pageMargins.bottom}px`,
         }}
       >
         <div className="relative h-full w-full min-h-0 min-w-0">

@@ -16,6 +16,7 @@ export type ReaderRuntimePolicy = {
   highLatency: boolean;
   contentPrefetchRadius: number;
   continuousResourceRadius: number;
+  continuousResourceLimit: number;
   framePreparationConcurrency: number;
 };
 
@@ -40,6 +41,7 @@ export function readerRuntimePolicy(): ReaderRuntimePolicy {
     highLatency,
     contentPrefetchRadius: isDesktopRuntime ? 3 : constrained ? 1 : 2,
     continuousResourceRadius: isDesktopRuntime ? 3 : constrained ? 1 : 2,
+    continuousResourceLimit: isDesktopRuntime ? 12 : constrained ? 5 : 9,
     framePreparationConcurrency: isDesktopRuntime ? 2 : constrained ? 1 : 2,
   };
 }

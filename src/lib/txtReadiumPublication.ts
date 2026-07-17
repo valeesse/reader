@@ -12,7 +12,7 @@ import { adaptiveReaderBudget, estimateStringBytes, ReaderContentCache, ReaderWo
 // browser to recalculate the geometry of tens of thousands of CJK glyphs.
 const TXT_TARGET_RESOURCE_CHARS = 12 * 1024;
 const TXT_MIN_RESOURCE_CHARS = 8 * 1024;
-const TXT_MAX_RESOURCE_CHARS = 16 * 1024;
+const TXT_MAX_RESOURCE_CHARS = 20 * 1024;
 // Positions are navigation samples, not rendered pages. A 4K interval keeps
 // progress/seek resolution well below one resource while avoiding thousands
 // of locator objects on the synchronous book-open path.
@@ -64,8 +64,9 @@ export async function createTxtReadiumPublication(
     getCover: () => undefined,
     prefetchAroundHref: async (href, radius = 2, direction = 0) => manager.prefetch(href, radius, direction),
     prepareContentAroundHref: async (href, radius = 2, direction = 0) => manager.prefetch(href, radius, direction),
+    prepareResourceWindow: async (window) => manager.prefetchWindow(window.startIndex, window.endIndex, window.centerIndex, window.direction),
     advancePrefetchGeneration: () => manager.advanceGeneration(),
-    contentKey: `${resourceId}:${info.totalBytes}:${info.totalChars}:txt-content-v2`,
+    contentKey: `${resourceId}:${info.totalBytes}:${info.totalChars}:txt-content-v4`,
     close: () => {
       manager.close();
       closeTxtBook(resourceId, info.sessionId).catch(() => {});
@@ -78,22 +79,19 @@ function createChunks(info: NativeTxtBookInfo): TxtChunk[] {
   const chapters = info.chapters;
   let start = 0;
   while (start < info.totalChars || chunks.length === 0) {
-    const minimum = Math.min(info.totalChars, start + TXT_MIN_RESOURCE_CHARS);
     const ideal = Math.min(info.totalChars, start + TXT_TARGET_RESOURCE_CHARS);
+    const minimum = Math.min(info.totalChars, start + TXT_MIN_RESOURCE_CHARS);
     const maximum = Math.min(info.totalChars, start + TXT_MAX_RESOURCE_CHARS);
-    let chapterBoundary: number | undefined;
-    for (let index = lowerBoundChapter(chapters, minimum); index < chapters.length; index++) {
-      const position = chapters[index].startIndex;
-      if (position > maximum) break;
-      if (chapterBoundary === undefined || Math.abs(position - ideal) < Math.abs(chapterBoundary - ideal)) {
-        chapterBoundary = position;
-      }
-    }
-    const end = Math.max(start, chapterBoundary ?? ideal);
+    const after = lowerBound(info.lineBreaks, ideal);
+    const forward = info.lineBreaks[after];
+    const backward = info.lineBreaks[Math.max(0, after - 1)];
+    const end = Math.max(start, forward !== undefined && forward <= maximum
+      ? forward
+      : backward !== undefined && backward >= minimum ? backward : forward ?? info.totalChars);
     const chapter = chapters[Math.max(0, lowerBoundChapter(chapters, start + 1) - 1)]
       || chapters[lowerBoundChapter(chapters, end)];
     chunks.push({
-      href: `txt/chunk-${String(chunks.length).padStart(6, '0')}.xhtml`,
+      href: `txt/r-${String(start).padStart(12, '0')}.xhtml`,
       start,
       end,
       title: chapter?.title || `文本 ${chunks.length + 1}`,
@@ -102,6 +100,17 @@ function createChunks(info: NativeTxtBookInfo): TxtChunk[] {
     start = end;
   }
   return chunks;
+}
+
+function lowerBound(values: number[], target: number) {
+  let low = 0;
+  let high = values.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (values[middle] < target) low = middle + 1;
+    else high = middle;
+  }
+  return low;
 }
 
 function lowerBoundChapter(chapters: NativeTxtBookInfo['chapters'], position: number) {
@@ -191,6 +200,26 @@ class TxtResourceManager {
     )));
   }
 
+  async prefetchWindow(startIndex: number, endIndex: number, centerIndex: number, direction: -1 | 0 | 1) {
+    const targets = this.chunks
+      .map((chunk, index) => ({ chunk, index }))
+      .slice(Math.max(0, startIndex), Math.min(this.chunks.length, endIndex + 1))
+      .sort((left, right) => {
+        const leftAhead = direction !== 0 && (left.index - centerIndex) * direction > 0;
+        const rightAhead = direction !== 0 && (right.index - centerIndex) * direction > 0;
+        if (leftAhead !== rightAhead) return leftAhead ? -1 : 1;
+        return Math.abs(left.index - centerIndex) - Math.abs(right.index - centerIndex);
+      });
+    await Promise.all(targets.map(({ chunk }, index) => this.scheduler.schedule(
+      `content:${chunk.href}`,
+      index < 2 ? 1 : 2,
+      async (signal) => {
+        await this.read(new ReadiumLink({ href: chunk.href }));
+        if (signal.aborted) throw new DOMException('Stale TXT prefetch', 'AbortError');
+      },
+    )));
+  }
+
   advanceGeneration() {
     this.scheduler.advanceGeneration(2);
   }
@@ -224,10 +253,10 @@ function txtWindowToXhtml(text: string, start: number, info: NativeTxtBookInfo) 
   const body = lines.map((segment) => {
     const line = segment.replace(/[\r\n]+$/, '');
     const chapter = chapterOffsets.get(offset);
-    const content = escapeHtml(line.trim()) || '&#160;';
+    const content = escapeHtml(line) || '';
     const html = chapter
-      ? `<h2 id="txt-${chapter.startIndex}">${content}</h2>`
-      : `<p>${content}</p>`;
+      ? `<h2 id="txt-${chapter.startIndex}" data-txt-start="${offset}">${content}</h2>`
+      : content ? `<p id="txt-p-${offset}" data-txt-start="${offset}">${content}</p>` : '';
     offset += codePointLength(segment);
     return html;
   }).join('');

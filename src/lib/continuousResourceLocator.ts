@@ -1,5 +1,5 @@
 import { ReadiumLocatorLike, ReadiumPublicationLike } from './readiumPublication';
-import { clamp, cssSelector, distanceToElement } from './continuousResourceDom';
+import { clamp, cssSelector } from './continuousResourceDom';
 import { StripRecord } from './continuousResourceStripTypes';
 import { normalizeZipPath, stripHash } from './readiumPublicationSupport';
 
@@ -40,23 +40,22 @@ export function snapshotResourceLocator(
   scroller: HTMLDivElement,
   records: Map<number, StripRecord>,
 ) {
-  const focus = scroller.scrollTop + scroller.clientHeight * 0.5;
+  const focus = scroller.scrollTop + 8;
   const record = sortedRecords(records).find((item) => item.wrapper.offsetTop + item.wrapper.offsetHeight > focus)
     || records.get(currentIndex);
   const link = record && publication.readingOrder.items[record.index];
   const doc = record?.iframe.contentDocument;
   if (!record || !link || !doc?.body) return currentLocator;
   const localFocus = focus - record.wrapper.offsetTop;
-  const element = Array.from(doc.body.querySelectorAll<HTMLElement>('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre'))
-    .filter((item) => item.textContent?.trim())
-    .sort((a, b) => distanceToElement(a, localFocus) - distanceToElement(b, localFocus))[0];
+  const hit = doc.elementFromPoint(Math.max(1, record.iframe.clientWidth * 0.5), clamp(localFocus, 1, Math.max(1, record.height - 1)));
+  const element = hit?.closest<HTMLElement>('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre') || undefined;
   const progression = clamp(localFocus / Math.max(1, record.height), 0, 1);
   const locator = locatorForProgression(publication, positionRanges, currentLocator, link.href, progression);
   return locator.copyWithLocations({
     ...locator.locations,
     progression,
     cssSelector: element ? cssSelector(element) : undefined,
-    zenithViewportY: 0.5,
+    zenithViewportY: 8 / Math.max(1, scroller.clientHeight),
   });
 }
 

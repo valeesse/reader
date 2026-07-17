@@ -130,7 +130,9 @@ export function installRelativeNavigation(runtime: ReadiumReaderRuntime) {
       navigationId = ++runtime.navigationIdRef.current;
       runtime.navigationUnlockTimerRef.current = window.setTimeout(() => {
         releaseReadiumNavigationGuard(navigator);
-        finishNavigation(false);
+        // A timed-out navigator turn can still finish internally. Retrying here
+        // can apply the same turn twice and skip a page or resource.
+        finishNavigation(undefined);
       }, 2500);
       const onNavigationFinished = (ok: boolean, transport?: 'direct' | 'postMessage', turnRequestId?: number) => {
         if (turnRequestId !== undefined) {
@@ -160,7 +162,7 @@ export function installRelativeNavigation(runtime: ReadiumReaderRuntime) {
       runtime.resourceStripRef.current.turn(direction);
       return;
     }
-    runtime.pendingNavigationRef.current = Math.max(-3, Math.min(3, runtime.pendingNavigationRef.current + direction));
+    runtime.pendingNavigationRef.current = Math.max(-12, Math.min(12, runtime.pendingNavigationRef.current + direction));
     runtime.navigationStartedAtRef.current ??= performance.now();
     if (runtime.deferredDirectionRef.current !== direction) {
       runtime.deferredDirectionRef.current = direction;

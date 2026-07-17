@@ -64,7 +64,7 @@ export class EpubResourceManager {
     return (await this.payloadFor(link.href)).text ?? undefined;
   }
   async prepare(links: ReadiumLink[], direction: -1 | 0 | 1) {
-    await Promise.all(links.map((link, index) => this.scheduler.schedule(`content:${link.href}`, index === 0 ? 1 : direction === 0 ? 2 : 1, async (signal) => {
+    await Promise.all(links.map((link, index) => this.scheduler.schedule(`content:${link.href}`, index < 2 ? 1 : 2, async (signal) => {
       await this.readAsString(link);
       if (signal.aborted) throw new DOMException('Stale EPUB prefetch', 'AbortError');
     })));

@@ -6,6 +6,7 @@ type CacheEntry<T> = {
   value: Promise<T>;
   bytes: number;
   touchedAt: number;
+  settled: boolean;
 };
 
 export class ReaderContentCache<T> {
@@ -37,18 +38,21 @@ export class ReaderContentCache<T> {
     const started = performance.now();
     let value: Promise<T>;
     value = load().then((result) => {
+      const entry = this.entries.get(key);
+      if (entry?.value === value) entry.settled = true;
       recordReaderMetric({
         kind: 'content-prepare',
         name: this.name,
         durationMs: performance.now() - started,
         detail: { bytes: estimatedBytes },
       });
+      this.trim();
       return result;
     }).catch((error) => {
       if (this.entries.get(key)?.value === value) this.remove(key);
       throw error;
     });
-    this.entries.set(key, { value, bytes: estimatedBytes, touchedAt: performance.now() });
+    this.entries.set(key, { value, bytes: estimatedBytes, touchedAt: performance.now(), settled: false });
     this.residentBytes += estimatedBytes;
     this.trim();
     return value;
@@ -83,7 +87,7 @@ export class ReaderContentCache<T> {
       let oldestKey: string | undefined;
       let oldestAt = Number.POSITIVE_INFINITY;
       for (const [key, entry] of this.entries) {
-        if (entry.touchedAt < oldestAt) {
+        if (entry.settled && entry.touchedAt < oldestAt) {
           oldestAt = entry.touchedAt;
           oldestKey = key;
         }

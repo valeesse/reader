@@ -72,6 +72,7 @@ export function useReadiumReaderRuntime(
   const absoluteNavigationPendingRef = useRef<{ locator: ReadiumLocatorLike; requestId: number } | null>(null);
   const absoluteNavigationRunningRef = useRef(false);
   const absoluteNavigationTimerRef = useRef<number | null>(null);
+  const absoluteNavigationTokenRef = useRef(0);
   const seekPreviewTimerRef = useRef<number | null>(null);
   const seekPreviewPendingRef = useRef<{ locator: ReadiumLocatorLike; requestId: number } | null>(null);
   const deferredHrefRef = useRef('');
@@ -96,7 +97,7 @@ export function useReadiumReaderRuntime(
     pendingNavigationRef, navigationUnlockTimerRef, navigationTokenRef, navigationRetryTimerRef,
     navigationRetryCountRef, navigationIdRef, navigationByTurnRequestRef, stablePrefetchTimerRef,
     refinementTimerRef, refinementIdleRef, refinementAbortRef, positionsRefinedRef,
-    absoluteNavigationPendingRef, absoluteNavigationRunningRef, absoluteNavigationTimerRef,
+    absoluteNavigationPendingRef, absoluteNavigationRunningRef, absoluteNavigationTimerRef, absoluteNavigationTokenRef,
     seekPreviewTimerRef, seekPreviewPendingRef, deferredHrefRef, deferredDirectionRef,
     layoutCacheRef, preparedTargetRef, prepareGenerationRef, navigationStartedAtRef,
     pageTransitionRef, settingsLayoutFingerprintRef, operations: createReadiumReaderOperations(),

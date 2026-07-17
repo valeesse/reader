@@ -30,6 +30,7 @@ export interface NativeTxtBookInfo {
   totalChars: number;
   totalBytes: number;
   chapters: NativeTxtChapter[];
+  lineBreaks: number[];
 }
 
 export interface NativeTxtWindow {

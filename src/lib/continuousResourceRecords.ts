@@ -6,7 +6,9 @@ import { sortedRecords } from './continuousResourceLocator';
 const DEFAULT_RESOURCE_HEIGHT = 1600;
 
 export function createRecord(environment: StripRecordEnvironment, index: number) {
-  const { publication, scroller, content, records } = environment;
+  const { publication, content, records } = environment;
+  const existing = records.get(index);
+  if (existing) return existing.loadPromise;
   const wrapper = document.createElement('div');
   wrapper.className = 'zenith-resource-strip-item';
   wrapper.dataset.resourceIndex = String(index);
@@ -21,9 +23,7 @@ export function createRecord(environment: StripRecordEnvironment, index: number)
   wrapper.appendChild(iframe);
   const next = sortedRecords(records).find((record) => record.index > index);
   const height = environment.estimatedHeight(index);
-  const insertingAboveViewport = Boolean(next && next.wrapper.offsetTop <= scroller.scrollTop + 1);
   content.insertBefore(wrapper, next?.wrapper || environment.bottomSpacer);
-  if (insertingAboveViewport) scroller.scrollTop += height;
   const record = {
     index,
     wrapper,
@@ -33,7 +33,11 @@ export function createRecord(environment: StripRecordEnvironment, index: number)
     loadPromise: Promise.resolve(),
   } as StripRecord;
   records.set(index, record);
-  record.loadPromise = loadRecord(environment, record);
+  environment.positionRecord(record);
+  record.loadPromise = loadRecord(environment, record).catch((error) => {
+    if (records.get(index) === record) removeRecord(environment, record);
+    throw error;
+  });
   return record.loadPromise;
 }
 
@@ -57,18 +61,38 @@ async function loadRecord(environment: StripRecordEnvironment, record: StripReco
   });
   if (environment.destroyed() || records.get(record.index) !== record) return;
   const doc = record.iframe.contentDocument;
-  if (!doc) return;
+  if (!doc) throw new Error(`Resource strip frame has no document: ${link.href}`);
   await applyDocumentSettings(environment, doc);
   installDocumentInteractions(environment, record, doc);
   record.loaded = true;
   measureRecord(environment, record);
+  record.resizeObserver = new ResizeObserver(() => measureRecord(environment, record));
+  if (doc.body) record.resizeObserver.observe(doc.body);
+  void settleRecordLayout(environment, record, doc);
+}
+
+async function settleRecordLayout(environment: StripRecordEnvironment, record: StripRecord, doc: Document) {
   const fontSet = (doc as Document & { fonts?: FontFaceSet }).fonts;
-  fontSet?.ready.then(() => measureRecord(environment, record)).catch(() => {});
+  await Promise.race([
+    fontSet?.ready.catch(() => {}),
+    new Promise<void>((resolve) => window.setTimeout(resolve, 400)),
+  ]);
+  await Promise.race([
+    Promise.all(Array.from(doc.querySelectorAll('img')).slice(0, 8).map(async (image) => {
+      if (!image.complete) await new Promise<void>((resolve) => {
+        image.addEventListener('load', () => resolve(), { once: true });
+        image.addEventListener('error', () => resolve(), { once: true });
+      });
+      await image.decode?.().catch(() => {});
+    })),
+    new Promise<void>((resolve) => window.setTimeout(resolve, 400)),
+  ]);
+  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  if (environment.destroyed() || environment.records.get(record.index) !== record) return;
+  measureRecord(environment, record);
   doc.querySelectorAll('img').forEach((image) => {
     if (!image.complete) image.addEventListener('load', () => measureRecord(environment, record), { once: true });
   });
-  record.resizeObserver = new ResizeObserver(() => measureRecord(environment, record));
-  if (doc.body) record.resizeObserver.observe(doc.body);
 }
 
 function installDocumentInteractions(environment: StripRecordEnvironment, record: StripRecord, doc: Document) {
@@ -148,21 +172,16 @@ export function measureRecord(environment: StripRecordEnvironment, record: Strip
     Math.ceil(doc.body?.getBoundingClientRect().height || 0),
   );
   if (Math.abs(measured - oldHeight) < 1) return;
-  const aboveViewport = record.wrapper.offsetTop < environment.scroller.scrollTop - 1;
   record.height = measured;
   record.wrapper.style.height = `${measured}px`;
   record.iframe.style.height = `${measured}px`;
-  if (aboveViewport) environment.scroller.scrollTop += measured - oldHeight;
   environment.onRecordHeightChange(record, oldHeight);
 }
 
 export function removeRecord(environment: StripRecordEnvironment, record: StripRecord) {
-  const aboveViewport = record.wrapper.offsetTop < environment.scroller.scrollTop;
-  const height = record.wrapper.offsetHeight;
   record.resizeObserver?.disconnect();
   environment.records.delete(record.index);
   record.wrapper.remove();
-  if (aboveViewport) environment.scroller.scrollTop = Math.max(0, environment.scroller.scrollTop - height);
 }
 
 export function defaultResourceHeight(scroller: HTMLDivElement) {

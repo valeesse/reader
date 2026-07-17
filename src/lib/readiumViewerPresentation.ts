@@ -15,9 +15,14 @@ const geometryCache = new WeakMap<Document, PageGeometry>();
 export function formatProgressLabel(progress: number) {
   return formatProgressPercent(progress);
 }
-export function formatResourceStripPageCounter(locator: ReadiumLocator, publication: ReadiumPublicationLike) {
+export function formatResourceStripPageCounter(
+  locator: ReadiumLocator,
+  publication: ReadiumPublicationLike,
+  metrics?: { resourceCurrent: number; resourceTotal: number; publicationCurrent: number; publicationTotal: number },
+) {
   const page = pageFromLocator(locator, publication);
-  return `全书位置 ${page.current} / ${page.total} · ${formatProgressPercent(progressionFromLocator(locator, publication))}`;
+  if (!metrics) return `全书位置 ${page.current} / ${page.total} · ${formatProgressPercent(progressionFromLocator(locator, publication))}`;
+  return `本章屏 ${metrics.resourceCurrent} / ${metrics.resourceTotal} · 全书屏 ${metrics.publicationCurrent} / ${metrics.publicationTotal} · 全书位置 ${page.current} / ${page.total} · ${formatProgressPercent(progressionFromLocator(locator, publication))}`;
 }
 export function formatEpubPageCounter(navigator: EpubNavigator, locator: ReadiumLocator, publication: ReadiumPublicationLike) {
   const iframe = getLiveReadiumIframe(currentReadiumFrame(navigator));
@@ -58,7 +63,12 @@ export function invalidateReadiumPageGeometry(navigator: EpubNavigator) {
 }
 export function watchReadiumFrameLayout(wnd: Window, onLayout: () => void) {
   const doc = wnd.document;
-  const notify = () => { geometryCache.delete(doc); onLayout(); };
+  let raf: number | null = null;
+  const notify = () => {
+    geometryCache.delete(doc);
+    if (raf !== null) return;
+    raf = wnd.requestAnimationFrame(() => { raf = null; onLayout(); });
+  };
   wnd.addEventListener('load', notify, { once: true });
   doc.fonts?.ready.then(notify).catch(() => {});
   doc.querySelectorAll('img').forEach((image) => {
@@ -67,6 +77,16 @@ export function watchReadiumFrameLayout(wnd: Window, onLayout: () => void) {
       image.addEventListener('error', notify, { once: true });
     }
   });
+  const resizeObserver = new ResizeObserver(notify);
+  resizeObserver.observe(doc.documentElement);
+  if (doc.body) resizeObserver.observe(doc.body);
+  const mutationObserver = new MutationObserver(notify);
+  mutationObserver.observe(doc.documentElement, { childList: true, subtree: true, attributes: true });
+  wnd.addEventListener('pagehide', () => {
+    resizeObserver.disconnect();
+    mutationObserver.disconnect();
+    if (raf !== null) wnd.cancelAnimationFrame(raf);
+  }, { once: true });
 }
 export function installReadiumFrameStyles(doc: Document) {
   if (!doc?.head || doc.getElementById('zenith-readium-frame-style')) return;

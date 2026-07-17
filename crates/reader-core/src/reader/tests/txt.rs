@@ -7,10 +7,12 @@ fn txt_index_and_window_reads_are_character_accurate() {
         "正文🙂alpha\n".repeat(900)
     );
     fs::write(&p, &text).unwrap();
-    let (total, points, chapters) = txt::build_index(&p).unwrap();
+    let (total, points, chapters, line_breaks) = txt::build_index(&p).unwrap();
     assert_eq!(total, text.chars().count());
     assert!(points.len() >= 3);
     assert!(chapters.iter().any(|v| v.title == "第二章 开始"));
+    assert!(line_breaks.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_eq!(line_breaks.last().copied(), Some(total));
     let c = TxtBookCache {
         signature: file_signature(&p).unwrap(),
         last_used_at: 0,
@@ -20,6 +22,7 @@ fn txt_index_and_window_reads_are_character_accurate() {
         total_bytes: text.len() as u64,
         checkpoints: points,
         chapters,
+        line_breaks,
     };
     let start = TXT_CHAR_CHECKPOINT_INTERVAL - 17;
     let end = TXT_CHAR_CHECKPOINT_INTERVAL + 31;

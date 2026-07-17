@@ -15,12 +15,12 @@ pub(super) const TXT_BOOK_CACHE_LIMIT: usize = 5;
 pub(super) const EPUB_BOOK_CACHE_LIMIT: usize = 5;
 pub(super) const EPUB_RESOURCE_CACHE_LIMIT: usize = 96;
 pub(super) const EPUB_PREFETCH_MAX_RESOURCES: usize = 16;
-pub(super) const PERSISTENT_CACHE_VERSION: u8 = 4;
+pub(super) const PERSISTENT_CACHE_VERSION: u8 = 5;
 pub(super) const STREAM_BUFFER_BYTES: usize = 64 * 1024;
 pub(super) const EPUB_RESOURCE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 pub(super) const EPUB_ARCHIVE_MAX_UNCOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
 
-pub(super) type TxtIndex = (usize, Vec<(usize, usize)>, Vec<TxtChapterInfo>);
+pub(super) type TxtIndex = (usize, Vec<(usize, usize)>, Vec<TxtChapterInfo>, Vec<usize>);
 
 pub(super) fn epub_resource_cache_max_bytes() -> usize {
     48 * 1024 * 1024
@@ -78,6 +78,7 @@ pub(super) struct TxtBookCache {
     pub total_bytes: u64,
     pub checkpoints: Vec<(usize, usize)>,
     pub chapters: Vec<TxtChapterInfo>,
+    pub line_breaks: Vec<usize>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -93,6 +94,7 @@ pub struct TxtBookInfo {
     pub total_chars: usize,
     pub total_bytes: u64,
     pub chapters: Vec<TxtChapterInfo>,
+    pub line_breaks: Vec<usize>,
 }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -221,6 +223,8 @@ pub(super) struct PersistentTxtIndexCache {
     pub total_bytes: u64,
     pub checkpoints: Vec<(usize, usize)>,
     pub chapters: Vec<TxtChapterInfo>,
+    #[serde(default)]
+    pub line_breaks: Vec<usize>,
 }
 #[derive(Serialize, Deserialize)]
 pub(super) struct PersistentEpubBookCache {

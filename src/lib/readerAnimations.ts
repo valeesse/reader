@@ -26,7 +26,7 @@ export function animatePageExit(
     { duration: 130, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' },
   );
   animationRef.current = running;
-  running.finished.then(navigate, navigate);
+  navigate();
 }
 
 export function animatePageEntry(

@@ -44,6 +44,14 @@ export type ReadiumTextLike = {
   serialize: () => Record<string, string>;
 };
 
+export type ResourceWindow = {
+  startIndex: number;
+  endIndex: number;
+  centerIndex: number;
+  direction: -1 | 0 | 1;
+  generation: number;
+};
+
 export type ReadiumPublicationLike = {
   metadata: ReadiumMetadata;
   readingOrder: LinkCollection;
@@ -59,6 +67,7 @@ export type ReadiumPublicationLike = {
   getCover: () => ReadiumLink | undefined;
   prefetchAroundHref: (href: string, radius?: number, direction?: -1 | 0 | 1) => Promise<void>;
   prepareContentAroundHref: (href: string, radius?: number, direction?: -1 | 0 | 1) => Promise<void>;
+  prepareResourceWindow: (window: ResourceWindow) => Promise<void>;
   advancePrefetchGeneration: () => void;
   contentKey: string;
   refinePositions?: (signal: AbortSignal) => Promise<void>;
@@ -89,6 +98,7 @@ export async function createReadiumPublication(resourceId: string, fallbackTitle
   let lastPrefetchKey = '';
   let lastPrefetch: Promise<void> = Promise.resolve();
   let prefetchController: AbortController | undefined;
+  let windowPreparationController: AbortController | undefined;
 
   return {
     metadata: new ReadiumMetadata(book.metadata),
@@ -127,13 +137,25 @@ export async function createReadiumPublication(resourceId: string, fallbackTitle
       if (index < 0) return;
       const start = Math.max(0, direction > 0 ? index : index - radius);
       const end = Math.min(readingOrder.items.length, direction < 0 ? index + 1 : index + radius + 1);
-      const targets = readingOrder.items.slice(start, end);
-      await prefetchEpubResources(resourceId, sessionId, targets.map((link) => link.href));
-      await resourceManager.prepare(targets, direction);
+      await resourceManager.prepare(orderResourceLinks(readingOrder.items, start, end - 1, index, direction), direction);
+    },
+    prepareResourceWindow: async (window) => {
+      const start = Math.max(0, window.startIndex);
+      const end = Math.min(readingOrder.items.length - 1, window.endIndex);
+      if (start > end) return;
+      const targets = orderResourceLinks(readingOrder.items, start, end, window.centerIndex, window.direction);
+      windowPreparationController?.abort();
+      const controller = new AbortController();
+      windowPreparationController = controller;
+      await prefetchEpubResources(resourceId, sessionId, targets.map((link) => link.href), controller.signal);
+      if (controller.signal.aborted) return;
+      await resourceManager.prepare(targets, window.direction);
     },
     advancePrefetchGeneration: () => {
       prefetchController?.abort();
       prefetchController = undefined;
+      windowPreparationController?.abort();
+      windowPreparationController = undefined;
       lastPrefetchKey = '';
       resourceManager.advanceGeneration();
     },
@@ -151,6 +173,7 @@ export async function createReadiumPublication(resourceId: string, fallbackTitle
     },
     close: () => {
       prefetchController?.abort();
+      windowPreparationController?.abort();
       resourceManager.close();
       closeEpubBook(resourceId, sessionId).catch(() => {});
     },
@@ -195,6 +218,19 @@ export function progressionFromLocator(locator: any, publication: ReadiumPublica
   return clamp((range.first + local * range.count) / total, 0, 1);
 }
 
+function orderResourceLinks(
+  links: ReadiumLink[], start: number, end: number, center: number, direction: -1 | 0 | 1,
+) {
+  return links.slice(start, end + 1).sort((left, right) => {
+    const leftIndex = links.indexOf(left);
+    const rightIndex = links.indexOf(right);
+    const leftAhead = direction !== 0 && (leftIndex - center) * direction > 0;
+    const rightAhead = direction !== 0 && (rightIndex - center) * direction > 0;
+    if (leftAhead !== rightAhead) return leftAhead ? -1 : 1;
+    return Math.abs(leftIndex - center) - Math.abs(rightIndex - center);
+  });
+}
+
 const publicationPositionRanges = new WeakMap<object, Map<string, { first: number; count: number }>>();
 
 export function invalidatePublicationPositionRanges(publication: ReadiumPublicationLike) {
@@ -218,7 +254,17 @@ export function locatorAtProgress(publication: ReadiumPublicationLike, progress:
       position: positions.length,
     });
   }
-  return positions[Math.round(normalized * (positions.length - 1))];
+  const absolute = normalized * positions.length;
+  const selected = positions[Math.min(positions.length - 1, Math.floor(absolute))];
+  const range = positionRangeForLocator(selected, publication);
+  if (!range) return selected;
+  const local = clamp((absolute - range.first) / range.count, 0, 1);
+  return selected.copyWithLocations({
+    ...selected.locations,
+    progression: local,
+    totalProgression: normalized,
+    position: Math.min(positions.length, Math.floor(absolute) + 1),
+  });
 }
 
 export function pageFromLocator(locator: any, publication: ReadiumPublicationLike) {

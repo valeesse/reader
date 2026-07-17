@@ -85,8 +85,8 @@ The optional real-book probe was also run against a 302.06 MB EPUB in the worksp
 
 The reader now treats data readiness and layout readiness as separate states:
 
-1. **Visible viewport (L0)**: the current Readium frame. Page turns only enqueue navigator movement and defer counters, persistence, and prefetch work.
-2. **Layout cache (L1)**: adjacent reading-order resources are loaded into hidden, non-interactive Readium frames. A frame is marked ready only after reader CSS, fonts, critical image decoding, and two layout frames have completed.
+1. **Visible viewport (L0)**: the current Readium frame in paginated mode, or the visible records in the continuous resource strip. Page turns only enqueue navigator movement and defer counters, persistence, and prefetch work.
+2. **Layout cache (L1)**: adjacent reading-order resources are loaded into hidden Readium frames in paginated mode and warm strip records in continuous mode. A frame or record is marked ready only after reader CSS, fonts, bounded critical-image decoding, and two layout frames have completed.
 3. **Content cache (L2)**: EPUB XHTML/CSS is decoded and URL-rewritten before L1 asks for it; TXT chunks are converted to XHTML. Promise deduplication, byte-bounded LRU eviction, direction-aware scheduling, and stale-generation cancellation are shared by both formats.
 4. **Persistent derived cache (L3)**: metadata, indexes, transcoded TXT data, and extracted EPUB binary assets survive restarts. The combined cache has a 1 GiB disk budget and can be inspected or cleared from Settings.
 5. **Source file (L4)**: the original TXT or EPUB is used on a cold miss or signature/version invalidation.
@@ -105,6 +105,11 @@ The reader now treats data readiness and layout readiness as separate states:
 - Visible demand bypasses the background queue.
 - Adjacent content/layout work is yielded to the browser background/idle scheduler.
 - Direction changes advance the prefetch generation and cancel stale queued work.
+- Continuous mode computes one inclusive resource window and passes that exact identity through L0/L1 DOM retention, L2 transformation, and L3/source materialization. Layers must not reinterpret it as independent radii. The window is ordered nearest-first in the predicted direction and capped at 12 desktop, 9 normal-Web, or 5 constrained-Web resources, below both the 12-entry TXT L2 floor and the 16-resource backend EPUB batch limit.
+- L4 cold reads fill L3 and L2 for the same ordered window before L1 records become ready. A failed L1 record is removed immediately so the next window pass retries it rather than preserving a permanent spacer hole.
+- Continuous navigation uses a publication-wide absolute geometry index. Reading-order resources are positioned as adjacent absolute slices, while chapters remain locator metadata only. Loading, measuring, or evicting a record must not create a DOM-flow boundary or change another resource's coordinate.
+- L0 always includes every resource intersecting the visible or target viewport, even when many short resources share one screen. Resource-count budgets apply only to the L1 runway outside L0.
+- Resize and late asset geometry commits preserve the top-visible anchor. Existing content remains fixed at the top-left; width and height changes expose, remove, expand, or contract content only on the right and bottom edges.
 - EPUB payload, transformed XHTML/CSS, fallback Blob URLs, and TXT XHTML use count and byte limits. Frontend byte limits are reduced on devices reporting 4 GiB or less memory.
 - EPUB demand ZIP reads use a per-book archive mutex after releasing the global book-state lock. Batch prefetch uses its own archive handle, so speculative decompression cannot hold the demand archive lock. Binary prefetch writes only to disk; text prefetch alone populates the bounded runtime LRU.
 - Persisted binary assets are referenced through Tauri asset URLs on desktop. Web responses contain an opaque-to-the-filesystem same-origin URL; its GET handler revalidates the active session/resource/href and streams the cached file with `ReaderStream`.

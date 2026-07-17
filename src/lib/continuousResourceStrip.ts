@@ -3,7 +3,7 @@ import { ReadiumLocatorLike, ReadiumPublicationLike } from './readiumPublication
 import { readerThemeColors } from './readerDocumentStyles';
 import { cancelReaderIdle, ReaderIdleHandle, scheduleReaderIdle } from './readerScheduler';
 import { readerRuntimePolicy } from './readerRuntimePolicy';
-import { clamp, nextPaint, settleWithConcurrency, waitForScrollCompletion } from './continuousResourceDom';
+import { clamp, waitForScrollCompletion } from './continuousResourceDom';
 import {
   buildPositionRanges,
   indexForHref,
@@ -14,6 +14,7 @@ import {
 } from './continuousResourceLocator';
 import { applyDocumentSettings, createRecord, defaultResourceHeight, measureRecord, removeRecord } from './continuousResourceRecords';
 import { StripCallbacks, StripRecord, StripRecordEnvironment } from './continuousResourceStripTypes';
+import { ContinuousResourceGeometry } from './continuousResourceGeometry';
 
 export class ContinuousResourceStrip {
   private scroller: HTMLDivElement;
@@ -21,7 +22,7 @@ export class ContinuousResourceStrip {
   private topSpacer: HTMLDivElement;
   private bottomSpacer: HTMLDivElement;
   private records = new Map<number, StripRecord>();
-  private resourceHeights = new Map<number, number>();
+  private geometry: ContinuousResourceGeometry;
   private settings: AppSettings;
   private active = false;
   private destroyed = false;
@@ -31,14 +32,21 @@ export class ContinuousResourceStrip {
   private locatorTimer: number | null = null;
   private mutationGeneration = 0;
   private positionRanges: Map<string, ReadiumLocatorLike[]>;
-  private windowMutation: Promise<void> = Promise.resolve();
   private pendingWindowCenter: number | null = null;
+  private pendingWindowGeneration = 0;
   private windowTimer: number | null = null;
   private windowIdle: ReaderIdleHandle | null = null;
   private runtimePolicy = readerRuntimePolicy();
-  private resourceRadius = this.runtimePolicy.continuousResourceRadius;
   private programmaticScroll = false;
   private layoutGeneration = 0;
+  private predictedDirection: -1 | 0 | 1 = 1;
+  private predictedScreens = 3;
+  private lastScrollTop = 0;
+  private lastScrollAt = performance.now();
+  private lastWindowRequestTop = 0;
+  private turnTargetTop: number | null = null;
+  private turnTargetAnchor: { index: number; local: number } | null = null;
+  private turnTimer: number | null = null;
   private recordEnvironment: StripRecordEnvironment;
 
   constructor(
@@ -63,6 +71,11 @@ export class ContinuousResourceStrip {
     this.content.append(this.topSpacer, this.bottomSpacer);
     this.scroller.appendChild(this.content);
     this.host.replaceChildren(this.scroller);
+    this.geometry = new ContinuousResourceGeometry(
+      publication.readingOrder.items.length,
+      Math.max(1600, this.host.clientHeight * 1.5),
+    );
+    this.refreshGeometry();
     this.recordEnvironment = {
       publication: this.publication,
       scroller: this.scroller,
@@ -74,9 +87,23 @@ export class ContinuousResourceStrip {
       destroyed: () => this.destroyed,
       go: (locator, smooth) => this.go(locator, smooth),
       estimatedHeight: (index) => this.estimatedHeight(index),
-      onRecordHeightChange: (record) => {
-        this.resourceHeights.set(record.index, record.height);
-        this.refreshSpacers();
+      positionRecord: (record) => this.positionRecord(record),
+      onRecordHeightChange: (record, previousHeight) => {
+        const anchor = this.captureTopAnchor();
+        const turnAnchor = this.turnTargetAnchor;
+        this.geometry.setHeight(record.index, record.height);
+        this.positionRecords();
+        this.refreshGeometry();
+        this.restoreTopAnchor(anchor, record.index, previousHeight);
+        if (turnAnchor) {
+          this.turnTargetTop = clamp(
+            this.geometry.top(turnAnchor.index) + turnAnchor.local,
+            0,
+            Math.max(0, this.geometry.total() - this.scroller.clientHeight),
+          );
+          this.scroller.scrollTo({ top: this.turnTargetTop, behavior: 'smooth' });
+        }
+        if (this.active) this.emitLocator();
       },
       bottomSpacer: this.bottomSpacer,
     };
@@ -89,6 +116,28 @@ export class ContinuousResourceStrip {
 
   get currentDocument() {
     return this.records.get(this.currentIndex)?.iframe.contentDocument || undefined;
+  }
+
+  get pageMetrics() {
+    const viewport = Math.max(1, this.scroller.clientHeight);
+    const record = this.records.get(this.currentIndex);
+    const localOffset = record
+      ? clamp(this.scroller.scrollTop - this.geometry.top(this.currentIndex), 0, Math.max(0, record.height - 1))
+      : 0;
+    const resourceHeight = record?.height || this.estimatedHeight(this.currentIndex);
+    let precedingHeight = 0;
+    let totalHeight = 0;
+    for (let index = 0; index < this.publication.readingOrder.items.length; index++) {
+      const height = this.geometry.height(index);
+      if (index < this.currentIndex) precedingHeight += height;
+      totalHeight += height;
+    }
+    return {
+      resourceCurrent: Math.floor(localOffset / viewport) + 1,
+      resourceTotal: Math.max(1, Math.ceil(resourceHeight / viewport)),
+      publicationCurrent: Math.min(Math.max(1, Math.ceil(totalHeight / viewport)), Math.floor((precedingHeight + localOffset) / viewport) + 1),
+      publicationTotal: Math.max(1, Math.ceil(totalHeight / viewport)),
+    };
   }
 
   snapshotLocator() {
@@ -112,16 +161,18 @@ export class ContinuousResourceStrip {
     const index = indexForHref(this.publication, target?.href) ?? 0;
     this.currentIndex = index;
     this.currentLocatorValue = target || this.publication.readingOrder.items[index].locator;
-    // First paint waits only for the visible resource; the L1 band fills later.
+    // The first visible frame is not exposed until its following viewport is real
+    // content. Spacers represent distant resources, never the next reader page.
     const current = this.records.get(index);
     if (current) await current.loadPromise;
     else await createRecord(this.recordEnvironment, index);
     if (this.destroyed) return;
-    this.resourceHeights.set(index, this.records.get(index)?.height || this.estimatedHeight(index));
-    this.refreshSpacers();
+    this.positionRecords();
+    this.refreshGeometry();
     await this.scrollToLocator(this.currentLocatorValue, false);
-    this.emitLocator(true);
+    this.resetScrollSample();
     void this.ensureWindow(index, false);
+    this.emitLocator(true);
   }
 
   setActive(active: boolean) {
@@ -139,17 +190,24 @@ export class ContinuousResourceStrip {
     const generation = ++this.layoutGeneration;
     this.settings = settings;
     this.applyHostTheme();
-    await Promise.all(Array.from(this.records.values(), async (record) => {
+    const current = this.records.get(this.currentIndex);
+    const currentDoc = current?.iframe.contentDocument;
+    if (current && currentDoc) {
+      await applyDocumentSettings(this.recordEnvironment, currentDoc);
+      measureRecord(this.recordEnvironment, current);
+    }
+    if (this.destroyed || generation !== this.layoutGeneration) return false;
+    await this.scrollToLocator(anchor, false);
+    this.resetScrollSample();
+    if (this.destroyed || generation !== this.layoutGeneration) return false;
+    this.currentLocatorValue = anchor;
+    this.emitLocator(true);
+    void Promise.all(Array.from(this.records.values()).filter((record) => record !== current).map(async (record) => {
       const doc = record.iframe.contentDocument;
       if (!doc) return;
       await applyDocumentSettings(this.recordEnvironment, doc);
       measureRecord(this.recordEnvironment, record);
-    }));
-    await nextPaint(2);
-    if (this.destroyed || generation !== this.layoutGeneration) return false;
-    await this.scrollToLocator(anchor, false);
-    if (this.destroyed || generation !== this.layoutGeneration) return false;
-    this.currentLocatorValue = anchor;
+    })).then(() => this.ensureWindow(this.currentIndex, false));
     return true;
   }
 
@@ -165,8 +223,6 @@ export class ContinuousResourceStrip {
     if (current) await current.loadPromise.catch(() => {});
     else await createRecord(this.recordEnvironment, index).catch(() => {});
     if (this.destroyed || generation !== this.layoutGeneration) return false;
-    await this.ensureWindow(index, true);
-    if (this.destroyed || generation !== this.layoutGeneration) return false;
     // Cross-resource jumps stay atomic because window rebalancing can stop a
     // WebView smooth scroll short; local fragment jumps remain animated.
     this.programmaticScroll = shouldSmooth;
@@ -174,14 +230,37 @@ export class ContinuousResourceStrip {
     if (shouldSmooth) await waitForScrollCompletion(this.scroller);
     if (this.destroyed || generation !== this.layoutGeneration) return false;
     this.programmaticScroll = false;
+    this.resetScrollSample();
     this.emitLocator(true);
+    void this.ensureWindow(index, false);
     return true;
   }
 
   turn(direction: -1 | 1) {
     if (!this.active || this.destroyed) return;
-    const distance = Math.max(120, this.scroller.clientHeight * 0.9) * direction;
-    this.scroller.scrollBy({ top: distance, behavior: 'smooth' });
+    this.setPredictedDirection(direction);
+    this.predictedScreens = Math.max(this.predictedScreens, 5);
+    const distance = Math.max(1, this.scroller.clientHeight) * direction;
+    const base = this.turnTargetTop ?? this.scroller.scrollTop;
+    this.turnTargetTop = clamp(base + distance, 0, Math.max(0, this.geometry.total() - this.scroller.clientHeight));
+    const target = this.turnTargetTop;
+    const targetStart = this.geometry.indexAt(target);
+    this.turnTargetAnchor = { index: targetStart, local: target - this.geometry.top(targetStart) };
+    const targetEnd = this.geometry.indexAt(Math.min(this.geometry.total() - 1, target + this.scroller.clientHeight));
+    const ready = this.rangeReady(targetStart, targetEnd);
+    if (ready) this.scroller.scrollTo({ top: target, behavior: 'smooth' });
+    else void this.ensureRecordRange(targetStart, targetEnd).then(() => {
+      if (this.turnTargetTop === target && this.active && !this.destroyed) {
+        this.scroller.scrollTo({ top: target, behavior: 'smooth' });
+      }
+    });
+    if (this.turnTimer !== null) window.clearTimeout(this.turnTimer);
+    this.turnTimer = window.setTimeout(() => {
+      this.turnTimer = null;
+      this.turnTargetTop = null;
+      this.turnTargetAnchor = null;
+    }, 240);
+    void this.ensureWindow(this.currentIndex, false);
   }
 
   destroy() {
@@ -191,6 +270,7 @@ export class ContinuousResourceStrip {
     if (this.scrollRaf !== null) cancelAnimationFrame(this.scrollRaf);
     if (this.locatorTimer !== null) window.clearTimeout(this.locatorTimer);
     if (this.windowTimer !== null) window.clearTimeout(this.windowTimer);
+    if (this.turnTimer !== null) window.clearTimeout(this.turnTimer);
     cancelReaderIdle(this.windowIdle);
     this.scroller.removeEventListener('scroll', this.handleScroll);
     this.scroller.removeEventListener('click', this.handleBackgroundClick);
@@ -213,33 +293,65 @@ export class ContinuousResourceStrip {
 
   private updateCurrentFromScroll() {
     if (this.destroyed || this.records.size === 0) return;
-    const focus = this.scroller.scrollTop + this.scroller.clientHeight * 0.5;
-    let selected = sortedRecords(this.records)[0];
-    for (const record of sortedRecords(this.records)) {
-      if (record.wrapper.offsetTop <= focus) selected = record;
-      if (record.wrapper.offsetTop + record.wrapper.offsetHeight > focus) break;
-    }
-    if (!selected) return;
-    const changed = selected.index !== this.currentIndex;
-    this.currentIndex = selected.index;
-    this.emitLocator(changed);
+    this.updateScrollPrediction();
+    const focus = this.scroller.scrollTop + 1;
+    const selectedIndex = this.geometry.indexAt(focus);
+    const changed = selectedIndex !== this.currentIndex;
+    this.currentIndex = selectedIndex;
+    this.emitLocator(changed, false);
     const minimum = sortedRecords(this.records)[0]?.index ?? this.currentIndex;
     const maximum = sortedRecords(this.records).at(-1)?.index ?? this.currentIndex;
-    if (!this.programmaticScroll && (changed || selected.index <= minimum + 1 || selected.index >= maximum - 1)) {
-      void this.ensureWindow(selected.index, false);
+    const predictionAdvanced = Math.abs(this.scroller.scrollTop - this.lastWindowRequestTop)
+      >= this.scroller.clientHeight * 0.35;
+    if (!this.programmaticScroll && (
+      changed || predictionAdvanced || selectedIndex <= minimum + 1 || selectedIndex >= maximum - 1
+    )) {
+      this.lastWindowRequestTop = this.scroller.scrollTop;
+      void this.ensureWindow(selectedIndex, false);
     }
   }
 
-  private emitLocator(immediate = false) {
+  private updateScrollPrediction() {
+    const now = performance.now();
+    const top = this.scroller.scrollTop;
+    const delta = top - this.lastScrollTop;
+    const elapsed = Math.max(8, now - this.lastScrollAt);
+    this.lastScrollTop = top;
+    this.lastScrollAt = now;
+    if (Math.abs(delta) < 1) return;
+    this.setPredictedDirection(delta > 0 ? 1 : -1);
+    const screensPerSecond = Math.abs(delta) / Math.max(1, this.scroller.clientHeight) * 1000 / elapsed;
+    const maximum = this.runtimePolicy.constrained ? 5 : this.runtimePolicy.desktop ? 10 : 7;
+    this.predictedScreens = clamp(3 + Math.ceil(screensPerSecond * 0.75), 3, maximum);
+  }
+
+  private resetScrollSample() {
+    this.lastScrollTop = this.scroller.scrollTop;
+    this.lastWindowRequestTop = this.scroller.scrollTop;
+    this.lastScrollAt = performance.now();
+  }
+
+  private setPredictedDirection(direction: -1 | 1) {
+    if (this.predictedDirection !== direction) this.publication.advancePrefetchGeneration();
+    this.predictedDirection = direction;
+  }
+
+  private emitLocator(immediate = false, semantic = immediate) {
     if (!this.active) return;
-    const record = this.records.get(this.currentIndex);
-    const link = this.publication.readingOrder.items[this.currentIndex];
-    if (!record || !link) return;
-    const localFocus = Math.max(0, this.scroller.scrollTop + this.scroller.clientHeight * 0.5 - record.wrapper.offsetTop);
-    const progression = clamp(localFocus / Math.max(1, record.height), 0, 1);
-    this.currentLocatorValue = locatorForProgression(
-      this.publication, this.positionRanges, this.currentLocatorValue, link.href, progression,
-    );
+    if (semantic && this.records.has(this.currentIndex)) {
+      this.currentLocatorValue = snapshotResourceLocator(
+        this.publication, this.positionRanges, this.currentLocatorValue,
+        this.currentIndex, this.scroller, this.records,
+      );
+    } else {
+      const link = this.publication.readingOrder.items[this.currentIndex];
+      if (!link) return;
+      const local = this.scroller.scrollTop - this.geometry.top(this.currentIndex);
+      this.currentLocatorValue = locatorForProgression(
+        this.publication, this.positionRanges, this.currentLocatorValue, link.href,
+        clamp(local / this.geometry.height(this.currentIndex), 0, 1),
+      );
+    }
     if (this.locatorTimer !== null) window.clearTimeout(this.locatorTimer);
     if (immediate) {
       this.locatorTimer = null;
@@ -253,59 +365,112 @@ export class ContinuousResourceStrip {
   }
 
   private ensureWindow(center: number, waitForCenter: boolean): Promise<void> {
+    const generation = ++this.mutationGeneration;
     if (waitForCenter) {
       if (this.windowTimer !== null) window.clearTimeout(this.windowTimer);
       this.windowTimer = null;
       this.pendingWindowCenter = null;
-      const task = this.windowMutation.then(() => this.applyWindow(center, true));
-      this.windowMutation = task.catch(() => {});
-      return task;
+      return this.applyWindow(center, true, generation);
     }
     this.pendingWindowCenter = center;
+    this.pendingWindowGeneration = generation;
     if (this.windowTimer === null) {
       this.windowTimer = window.setTimeout(() => {
         this.windowTimer = null;
         const target = this.pendingWindowCenter;
+        const targetGeneration = this.pendingWindowGeneration;
         this.pendingWindowCenter = null;
         if (target === null || this.destroyed) return;
-        this.windowMutation = this.windowMutation.then(() => this.applyWindow(target, false)).catch(() => {});
+        void this.applyWindow(target, false, targetGeneration).catch(() => {});
       }, 24);
     }
-    return this.windowMutation;
+    return Promise.resolve();
   }
 
-  private async applyWindow(center: number, waitForCenter: boolean) {
-    this.mutationGeneration += 1;
-    const start = Math.max(0, center - this.resourceRadius);
-    const end = Math.min(this.publication.readingOrder.items.length - 1, center + this.resourceRadius);
-    const anchor = this.records.get(center);
-    const anchorOffset = anchor ? this.scroller.scrollTop - anchor.wrapper.offsetTop : 0;
+  private async applyWindow(center: number, waitForCenter: boolean, generation: number) {
+    if (this.destroyed || generation !== this.mutationGeneration) return;
+    const viewportTop = this.scroller.scrollTop;
+    const viewportBottom = viewportTop + this.scroller.clientHeight;
+    const behind = this.predictedDirection < 0 ? this.predictedScreens : 2;
+    const ahead = this.predictedDirection >= 0 ? this.predictedScreens : 2;
+    let start = this.geometry.indexAt(Math.max(0, viewportTop - this.scroller.clientHeight * behind));
+    let end = this.geometry.indexAt(Math.min(this.geometry.total() - 1, viewportBottom + this.scroller.clientHeight * ahead));
+    start = Math.min(start, center);
+    end = Math.max(end, center);
+    const anchorOffset = this.scroller.scrollTop - this.geometry.top(center);
+    const limit = this.runtimePolicy.continuousResourceLimit;
+    const visibleStart = this.geometry.indexAt(viewportTop);
+    const visibleEnd = this.geometry.indexAt(Math.min(this.geometry.total() - 1, viewportBottom));
+    const effectiveLimit = Math.max(limit, visibleEnd - visibleStart + 1);
+    while (end - start + 1 > effectiveLimit) {
+      if (this.predictedDirection < 0 && end > Math.max(center, visibleEnd)) end -= 1;
+      else if (this.predictedDirection >= 0 && start < Math.min(center, visibleStart)) start += 1;
+      else if (end > Math.max(center, visibleEnd)) end -= 1;
+      else if (start < Math.min(center, visibleStart)) start += 1;
+      else break;
+    }
+    void this.publication.prepareResourceWindow({
+      startIndex: start,
+      endIndex: end,
+      centerIndex: center,
+      direction: this.predictedDirection,
+      generation,
+    }).catch(() => {});
     const keep = new Set<number>();
     for (let index = start; index <= end; index++) keep.add(index);
     for (const record of sortedRecords(this.records)) {
       if (keep.has(record.index)) continue;
-      this.resourceHeights.set(record.index, record.height);
       removeRecord(this.recordEnvironment, record);
     }
-    this.refreshSpacers(start, end);
-    const additions: Array<() => Promise<void>> = [];
+    this.refreshGeometry();
+    const additions: Array<{ index: number; run: () => Promise<void> }> = [];
     for (let index = start; index <= end; index++) {
-      if (!this.records.has(index)) additions.push(() => createRecord(this.recordEnvironment, index));
+      if (!this.records.has(index)) additions.push({ index, run: () => createRecord(this.recordEnvironment, index) });
     }
-    if (this.runtimePolicy.desktop) {
-      const tasks = additions.map((add) => add());
-      if (waitForCenter) await Promise.all(tasks);
-      else await Promise.allSettled(tasks);
-    } else {
-      await settleWithConcurrency(additions, this.runtimePolicy.framePreparationConcurrency, waitForCenter);
-    }
-    if (this.destroyed) return;
-    this.refreshSpacers();
+    additions.sort((left, right) => {
+      const leftAhead = (left.index - center) * this.predictedDirection >= 0;
+      const rightAhead = (right.index - center) * this.predictedDirection >= 0;
+      if (leftAhead !== rightAhead) return leftAhead ? -1 : 1;
+      return Math.abs(left.index - center) - Math.abs(right.index - center);
+    });
+    const centerTask = additions.find((addition) => addition.index === center);
+    if (waitForCenter && centerTask) await centerTask.run().catch(() => {});
+    const background = additions.filter((addition) => addition !== centerTask);
+    void this.loadRecordsInBackground(background.map((addition) => addition.run), generation);
+    if (this.destroyed || generation !== this.mutationGeneration) return;
+    this.positionRecords();
+    this.refreshGeometry();
     const restoredAnchor = this.records.get(center);
-    if (restoredAnchor) this.scroller.scrollTop = Math.max(0, restoredAnchor.wrapper.offsetTop + anchorOffset);
-    this.publication.prefetchAroundHref(
-      this.publication.readingOrder.items[center]?.href || '', this.resourceRadius + 1, 0,
-    ).catch(() => {});
+    if (restoredAnchor) this.scroller.scrollTop = Math.max(0, this.geometry.top(center) + anchorOffset);
+    this.resetScrollSample();
+    // The predicted direction gets a velocity-scaled runway of real DOM. The
+    // opposite direction stays warm so reversing direction remains immediate.
+    const requiredBottom = () => this.scroller.scrollTop + this.scroller.clientHeight * ahead;
+    if (this.predictedDirection >= 0) void this.extendForwardRunway(start, end, limit, requiredBottom, generation);
+    this.refreshGeometry();
+  }
+
+  private async loadRecordsInBackground(tasks: Array<() => Promise<void>>, generation: number) {
+    const pending = tasks.entries();
+    const worker = async () => {
+      for (let next = pending.next(); !next.done && generation === this.mutationGeneration; next = pending.next()) {
+        await next.value[1]().catch(() => {});
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(tasks.length, this.runtimePolicy.framePreparationConcurrency) }, worker));
+  }
+
+  private async extendForwardRunway(start: number, initialEnd: number, limit: number, requiredBottom: () => number, generation: number) {
+    let end = initialEnd;
+    while (!this.destroyed && generation === this.mutationGeneration
+      && end < this.publication.readingOrder.items.length - 1 && end - start + 1 < limit) {
+      const last = this.records.get(end);
+      if (last?.loaded && this.geometry.top(end) + last.height >= requiredBottom()) break;
+      end += 1;
+      await createRecord(this.recordEnvironment, end).catch(() => {});
+      this.positionRecords();
+      this.refreshGeometry();
+    }
   }
 
   private scrollToLocator(locator: ReadiumLocatorLike, smooth: boolean) {
@@ -319,25 +484,47 @@ export class ContinuousResourceStrip {
   }
 
   private estimatedHeight(index: number) {
-    const known = this.resourceHeights.get(index);
-    if (known !== undefined) return known;
-    const measured = Array.from(this.resourceHeights.values()).filter((height) => height > 0);
-    return measured.length > 0
-      ? measured.reduce((sum, height) => sum + height, 0) / measured.length
-      : defaultResourceHeight(this.scroller);
+    return this.geometry?.height(index) || defaultResourceHeight(this.scroller);
   }
 
-  private refreshSpacers(start?: number, end?: number) {
-    const records = sortedRecords(this.records);
-    const first = start ?? records[0]?.index ?? 0;
-    const last = end ?? records.at(-1)?.index ?? -1;
-    let top = 0;
-    let bottom = 0;
-    for (let index = 0; index < first; index++) top += this.estimatedHeight(index);
-    for (let index = last + 1; index < this.publication.readingOrder.items.length; index++) {
-      bottom += this.estimatedHeight(index);
+  private positionRecord(record: StripRecord) {
+    record.wrapper.style.top = `${this.geometry.top(record.index)}px`;
+  }
+
+  private positionRecords() {
+    for (const record of this.records.values()) this.positionRecord(record);
+  }
+
+  private refreshGeometry() {
+    this.content.style.height = `${Math.max(1, this.geometry.total())}px`;
+  }
+
+  private captureTopAnchor() {
+    const index = this.geometry.indexAt(this.scroller.scrollTop + 1);
+    return { index, local: this.scroller.scrollTop - this.geometry.top(index) };
+  }
+
+  private restoreTopAnchor(anchor: { index: number; local: number }, changedIndex: number, previousHeight?: number) {
+    if (previousHeight !== undefined && changedIndex >= anchor.index) return;
+    this.scroller.scrollTop = clamp(
+      this.geometry.top(anchor.index) + anchor.local,
+      0,
+      Math.max(0, this.geometry.total() - this.scroller.clientHeight),
+    );
+  }
+
+  private rangeReady(start: number, end: number) {
+    for (let index = start; index <= end; index++) {
+      if (!this.records.get(index)?.loaded) return false;
     }
-    this.topSpacer.style.height = `${Math.max(0, top)}px`;
-    this.bottomSpacer.style.height = `${Math.max(0, bottom)}px`;
+    return true;
+  }
+
+  private async ensureRecordRange(start: number, end: number) {
+    await Promise.all(Array.from({ length: end - start + 1 }, (_, offset) => (
+      createRecord(this.recordEnvironment, start + offset).catch(() => {})
+    )));
+    this.positionRecords();
+    this.refreshGeometry();
   }
 }

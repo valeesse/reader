@@ -17,8 +17,8 @@ export function snapshotVisibleTextLocator(navigator: EpubNavigator, _settings: 
   const wnd = getLiveReadiumIframe(frame)?.contentWindow;
   const doc = wnd?.document;
   if (!wnd || !doc?.body) return fallback;
-  const targetX = wnd.innerWidth * 0.5;
-  const targetY = wnd.innerHeight * 0.5;
+  const targetX = Math.min(8, wnd.innerWidth * 0.5);
+  const targetY = Math.min(8, wnd.innerHeight * 0.5);
   const candidates = Array.from(doc.body.querySelectorAll<HTMLElement>('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre'))
     .flatMap((element) => Array.from(element.getClientRects()).map((rect) => ({ element, rect })))
     .filter(({ element, rect }) => element.textContent?.trim() && rect.right > 0 && rect.left < wnd.innerWidth && rect.bottom > 0 && rect.top < wnd.innerHeight)
@@ -48,7 +48,7 @@ export function snapshotVisibleTextLocator(navigator: EpubNavigator, _settings: 
 export function retargetLocatorViewport(locator: ReadiumLocator, _settings: AppSettings) {
   try {
     const serialized = JSON.parse(serializeReadiumLocator(locator));
-    serialized.locations = { ...serialized.locations, zenithViewportX: 0.5, zenithViewportY: 0.5 };
+    serialized.locations = { ...serialized.locations, zenithViewportX: 0, zenithViewportY: 0 };
     return deserializeReadiumLocator(JSON.stringify(serialized)) || locator;
   } catch { return locator; }
 }

@@ -60,6 +60,7 @@ pub(super) fn open(s: &ReaderService, id: &str) -> Result<TxtBookInfo, ReaderErr
         total_chars: cache.total_chars,
         total_bytes: cache.total_bytes,
         chapters: cache.chapters.clone(),
+        line_breaks: cache.line_breaks.clone(),
     };
     lifecycle::trim(&mut books, TXT_BOOK_CACHE_LIMIT);
     Ok(result)
@@ -109,25 +110,26 @@ fn load(
             total_bytes: v.total_bytes,
             checkpoints: v.checkpoints,
             chapters: v.chapters,
+            line_breaks: v.line_breaks,
         });
     }
     let bom = detect_bom(path)?;
-    let (data_path, total_chars, checkpoints, chapters) = if let Some(bom) = bom {
+    let (data_path, total_chars, checkpoints, chapters, line_breaks) = if let Some(bom) = bom {
         let (skip, enc) = match bom {
             TxtBom::Utf8 => (3, None),
             TxtBom::Utf16Le => (2, Some(UTF_16LE)),
             TxtBom::Utf16Be => (2, Some(UTF_16BE)),
         };
         let data = create_utf8_cache(&s.config, id, path, sig, skip, enc)?;
-        let (i, c, h) = build_index(&data)?;
-        (data, i, c, h)
+        let (i, c, h, b) = build_index(&data)?;
+        (data, i, c, h, b)
     } else {
         match build_index(path) {
-            Ok((i, c, h)) => (path.to_path_buf(), i, c, h),
+            Ok((i, c, h, b)) => (path.to_path_buf(), i, c, h, b),
             Err(TxtIndexError::InvalidUtf8) => {
                 let data = create_utf8_cache(&s.config, id, path, sig, 0, Some(GBK))?;
-                let (i, c, h) = build_index(&data)?;
-                (data, i, c, h)
+                let (i, c, h, b) = build_index(&data)?;
+                (data, i, c, h, b)
             }
             Err(e) => return Err(e.into()),
         }
@@ -141,6 +143,7 @@ fn load(
         total_bytes: sig.len,
         checkpoints,
         chapters,
+        line_breaks,
     };
     save_persistent(&s.config, id, &value);
     Ok(value)
@@ -175,6 +178,7 @@ fn save_persistent(c: &ReaderConfig, id: &str, v: &TxtBookCache) {
         total_bytes: v.total_bytes,
         checkpoints: v.checkpoints.clone(),
         chapters: v.chapters.clone(),
+        line_breaks: v.line_breaks.clone(),
     };
     if let (Ok(path), Ok(bytes)) = (cache::txt_index(c, id), serde_json::to_vec(&p)) {
         let _ = cache::write_atomic(&path, &bytes);
@@ -209,6 +213,7 @@ pub(super) fn build_index(path: &Path) -> Result<TxtIndex, TxtIndexError> {
     let mut title = String::with_capacity(128);
     let mut points = vec![(0, 0)];
     let mut chapters = Vec::new();
+    let mut line_breaks = Vec::new();
     loop {
         let n = file
             .read(&mut buffer)
@@ -240,7 +245,8 @@ pub(super) fn build_index(path: &Path) -> Result<TxtIndex, TxtIndexError> {
                 title.clear();
                 line_chars = 0;
                 too_long = false;
-                line_start = chars + 1
+                line_start = chars + 1;
+                line_breaks.push(chars + 1)
             } else {
                 line_chars += 1;
                 if line_chars <= 90 {
@@ -258,7 +264,10 @@ pub(super) fn build_index(path: &Path) -> Result<TxtIndex, TxtIndexError> {
         push_chapter(&mut chapters, &title, too_long, line_start)
     }
     points.push((chars, total));
-    Ok((chars, points, finalize_chapters(chapters)))
+    if line_breaks.last().copied() != Some(chars) {
+        line_breaks.push(chars);
+    }
+    Ok((chars, points, finalize_chapters(chapters), line_breaks))
 }
 
 include!("txt/support.rs");
