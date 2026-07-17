@@ -104,6 +104,8 @@ function fitSinglePageEpubMedia(
   if (bookType !== 'epub' || settings.pageMode !== 'single' || isContinuousScroll(settings)) return;
 
   const maximumHeight = `${Math.max(1, viewportHeight - 16)}px`;
+  const viewportWidth = Math.max(1, doc.defaultView?.innerWidth || doc.documentElement.clientWidth || 1);
+  const maximumWidth = Math.max(1, viewportWidth - 16);
   const targets = [
     ...Array.from(doc.querySelectorAll<HTMLElement>('img')),
     ...Array.from(doc.querySelectorAll<HTMLElement>('body > svg, body > * > svg:only-child')),
@@ -125,6 +127,12 @@ function fitSinglePageEpubMedia(
     element.style.setProperty('max-width', '100%', 'important');
     element.style.setProperty('object-fit', 'contain', 'important');
     element.style.setProperty('width', 'auto', 'important');
+    const image = element.tagName.toLowerCase() === 'img' ? element as HTMLImageElement : undefined;
+    if (image && image.naturalWidth > 0 && image.naturalHeight > 0) {
+      const scale = Math.min(1, maximumWidth / image.naturalWidth, (viewportHeight - 16) / image.naturalHeight);
+      element.style.setProperty('height', `${Math.max(1, Math.floor(image.naturalHeight * scale))}px`, 'important');
+      element.style.setProperty('width', `${Math.max(1, Math.floor(image.naturalWidth * scale))}px`, 'important');
+    }
   });
   fittedEpubMedia.set(doc, saved);
 }
