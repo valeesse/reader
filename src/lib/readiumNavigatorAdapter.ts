@@ -2,6 +2,7 @@ import { EpubNavigator } from '../vendor/readium-navigator';
 
 export type ReadiumFrameHandle = {
   destroyed?: boolean;
+  hidden?: boolean;
   frame?: HTMLIFrameElement;
   msg?: { ready?: boolean };
 };

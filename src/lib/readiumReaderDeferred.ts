@@ -87,7 +87,7 @@ export function installDeferredOperations(
       const frames = await reservedFrames;
       if (!isCurrentTarget(link.href, generation) || frames.length === 0) return false;
       await Promise.all(frames.map(async (frameWindow) => {
-        applyReadiumFrameSettings(frameWindow.document, runtime.settingsRef.current, runtime.bookType);
+        applyReadiumFrameSettings(frameWindow.document, runtime.settingsRef.current, runtime.bookType, navigator.layout);
         await waitForFrameReadiness(frameWindow.document, runtime.bookType);
       }));
       await waitForLayoutFrames();

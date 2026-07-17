@@ -86,7 +86,7 @@ export async function createTxtReadiumPublication(
       return chunk ? { start: chunk.start, end: chunk.end } : undefined;
     },
     advancePrefetchGeneration: () => manager.advanceGeneration(),
-    contentKey: `${resourceId}:${info.totalBytes}:${info.totalChars}:txt-content-v6`,
+    contentKey: `${resourceId}:${info.totalBytes}:${info.totalChars}:txt-content-v7`,
     close: () => {
       manager.close();
       closeTxtBook(resourceId, info.sessionId).catch(() => {});
@@ -97,17 +97,21 @@ export async function createTxtReadiumPublication(
 export function createTxtChunks(info: NativeTxtBookInfo): TxtChunk[] {
   const chunks: TxtChunk[] = [];
   const chapters = info.chapters;
+  const chapterBreaks = chapters.map((chapter) => chapter.startIndex);
   let start = 0;
   while (start < info.totalChars || chunks.length === 0) {
     const ideal = Math.min(info.totalChars, start + TXT_RENDER_BAND_CHARS);
     const minimum = Math.min(info.totalChars, start + TXT_RENDER_BAND_CHARS - TXT_NATURAL_BOUNDARY_TOLERANCE);
     const maximum = Math.min(info.totalChars, start + TXT_RENDER_BAND_CHARS + TXT_NATURAL_BOUNDARY_TOLERANCE);
-    const after = lowerBound(info.lineBreaks, ideal);
-    const forward = info.lineBreaks[after];
-    const backward = info.lineBreaks[Math.max(0, after - 1)];
-    const end = Math.max(start, forward !== undefined && forward <= maximum
-      ? forward
-      : backward !== undefined && backward >= minimum ? backward : forward ?? info.totalChars);
+    // A paginated Readium resource cannot flow its remaining page into the
+    // next iframe. Prefer a chapter boundary so an artificial render band
+    // never leaves a half-empty page in the middle of a chapter.
+    const chapterBoundary = boundaryNear(
+      chapterBreaks, ideal, minimum, maximum, start,
+    );
+    const paragraphBoundary = boundaryNear(info.lineBreaks, ideal, minimum, maximum, start)
+      ?? info.lineBreaks[lowerBound(info.lineBreaks, ideal)];
+    const end = Math.max(start, chapterBoundary ?? paragraphBoundary ?? info.totalChars);
     const chapter = chapters[Math.max(0, lowerBoundChapter(chapters, start + 1) - 1)]
       || chapters[lowerBoundChapter(chapters, end)];
     chunks.push({
@@ -120,6 +124,15 @@ export function createTxtChunks(info: NativeTxtBookInfo): TxtChunk[] {
     start = end;
   }
   return chunks;
+}
+
+function boundaryNear(values: number[], ideal: number, minimum: number, maximum: number, start: number) {
+  const after = lowerBound(values, ideal);
+  const forward = values[after];
+  if (forward !== undefined && forward > start && forward <= maximum) return forward;
+  const backward = values[Math.max(0, after - 1)];
+  if (backward !== undefined && backward > start && backward >= minimum) return backward;
+  return undefined;
 }
 
 function lowerBound(values: number[], target: number) {

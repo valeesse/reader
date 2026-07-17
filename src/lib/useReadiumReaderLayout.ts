@@ -131,6 +131,8 @@ export function useReadiumReaderResize(runtime: ReadiumReaderRuntime, loading: b
     let stableWidth = Math.max(1, element.getBoundingClientRect().width);
     let stableHeight = Math.max(1, element.getBoundingClientRect().height);
     let frozen = false;
+    let ownsResizeTransaction = false;
+    let resizeGeneration = 0;
     const stripHost = runtime.resourceStripHostRef.current;
     let frozenInlineStyle: Partial<Record<'width' | 'height' | 'position' | 'left' | 'top' | 'transform' | 'margin' | 'willChange' | 'transformOrigin', string>> | null = null;
     let frozenStripStyle: { width: string; height: string; inset: string; transform: string; transformOrigin: string } | null = null;
@@ -193,10 +195,12 @@ export function useReadiumReaderResize(runtime: ReadiumReaderRuntime, loading: b
     };
     const applyResize = () => {
       const suppressionRemaining = Math.max(0, runtime.suppressResizeUntilRef.current - performance.now());
-      if (runtime.settingsApplyTimerRef.current !== null || suppressionRemaining > 0) {
+      if (runtime.settingsApplyTimerRef.current !== null || suppressionRemaining > 0
+        || runtime.navigationLockedRef.current || runtime.absoluteNavigationRunningRef.current) {
         runtime.resizeTimerRef.current = window.setTimeout(applyResize, Math.max(24, suppressionRemaining + 8));
         return;
       }
+      const generation = resizeGeneration;
       navigator.clearPreparedReady();
       invalidatePublicationPageMap(runtime.publicationRef.current);
       runtime.prepareGenerationRef.current += 1;
@@ -261,9 +265,11 @@ export function useReadiumReaderResize(runtime: ReadiumReaderRuntime, loading: b
           const href = navigator.currentLocator?.href;
           if (href) runtime.operations.scheduleDeferredWork(href, runtime.deferredDirectionRef.current, false);
         } finally {
+          if (generation !== resizeGeneration || runtime.resizeTimerRef.current !== null) return;
           releaseSurface();
           runtime.resizeAnchorRef.current = undefined;
           runtime.layoutRestoringRef.current = false;
+          ownsResizeTransaction = false;
           if (before) runtime.stableViewportAnchorRef.current = before;
           runtime.operations.drainAbsoluteNavigation();
           runtime.operations.drainNavigationQueue();
@@ -278,6 +284,7 @@ export function useReadiumReaderResize(runtime: ReadiumReaderRuntime, loading: b
       const box = entries[entries.length - 1]?.contentRect;
       if (box && Math.abs(box.width - observedWidth) < 0.5 && Math.abs(box.height - observedHeight) < 0.5) return;
       if (box) { observedWidth = box.width; observedHeight = box.height; }
+      resizeGeneration += 1;
       const startsResizeTransaction = runtime.resizeTimerRef.current === null && !runtime.layoutRestoringRef.current;
       if (stripAnchorReleaseTimer !== null) {
         window.clearTimeout(stripAnchorReleaseTimer);
@@ -288,6 +295,7 @@ export function useReadiumReaderResize(runtime: ReadiumReaderRuntime, loading: b
         : snapshotVisibleTextLocator(navigator, runtime.appliedLayoutSettingsRef.current)
           || runtime.stableViewportAnchorRef.current || snapshotLocator(navigator.currentLocator);
       if (startsResizeTransaction) {
+        ownsResizeTransaction = true;
         stableStripViewportAnchor = runtime.resourceStripRef.current?.stableTopAnchor() || stableStripViewportAnchor;
       }
       runtime.layoutRestoringRef.current = true;
@@ -305,6 +313,14 @@ export function useReadiumReaderResize(runtime: ReadiumReaderRuntime, loading: b
       }
       releaseSurface();
       runtime.resizeAnchorRef.current = undefined;
+      if (ownsResizeTransaction) {
+        ownsResizeTransaction = false;
+        runtime.layoutRestoringRef.current = false;
+        queueMicrotask(() => {
+          runtime.operations.drainAbsoluteNavigation();
+          runtime.operations.drainNavigationQueue();
+        });
+      }
     };
   }, [loading]);
 }

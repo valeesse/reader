@@ -8,7 +8,7 @@ import { isContinuousScroll } from './readiumViewerModel';
 const fittedEpubMedia = new WeakMap<Document, Map<HTMLElement, Map<string, { value: string; priority: string }>>>();
 const FITTED_MEDIA_PROPERTIES = [
   'block-size', 'break-inside', 'display', 'height', 'margin-inline', 'max-block-size',
-  'max-height', 'max-width', 'object-fit', 'width',
+  'max-height', 'max-width', 'min-block-size', 'min-height', 'min-width', 'object-fit', 'width',
 ] as const;
 
 export function waitForNextPaint() {
@@ -52,20 +52,29 @@ export function applyReadiumFrameSettingsToNavigator(navigator: EpubNavigator, s
   let layoutChanged = false;
   for (const frame of readiumFrames(navigator)) {
     const doc = getLiveReadiumIframe(frame)?.contentDocument;
-    if (doc) layoutChanged = applyReadiumFrameSettings(doc, settings, bookType) || layoutChanged;
+    if (doc) layoutChanged = applyReadiumFrameSettings(doc, settings, bookType, navigator.layout) || layoutChanged;
   }
   return layoutChanged;
 }
 
-export function applyReadiumFrameSettings(doc: Document, settings: AppSettings, bookType: 'epub' | 'txt') {
+export function applyReadiumFrameSettings(
+  doc: Document,
+  settings: AppSettings,
+  bookType: 'epub' | 'txt',
+  layout?: EpubNavigator['layout'],
+) {
   const root = doc.documentElement;
   const before = frameLayoutFingerprint(root);
   root.dataset.zenithPageMode = isContinuousScroll(settings) ? 'scroll' : settings.pageMode;
   root.dataset.zenithBookType = bookType;
-  const viewportHeight = Math.max(1, doc.defaultView?.innerHeight || root.clientHeight || 1);
-  root.style.setProperty('--ZENITH__pageImageMaxHeight', `${viewportHeight}px`);
-  fitSinglePageEpubMedia(doc, settings, bookType, viewportHeight);
+  root.dataset.zenithLayout = layout || 'reflowable';
   applyReaderDocumentProperties(doc, settings, bookType);
+  const viewportHeight = Math.max(1, doc.defaultView?.innerHeight || root.clientHeight || 1);
+  const viewportWidth = Math.max(1, doc.defaultView?.innerWidth || root.clientWidth || 1);
+  const contentScale = readiumContentScale(doc);
+  root.style.setProperty('--ZENITH__pageImageMaxHeight', `${viewportHeight / contentScale}px`);
+  root.style.setProperty('--ZENITH__pageImageMaxWidth', `${viewportWidth / contentScale}px`);
+  fitSinglePageEpubMedia(doc, settings, bookType, viewportWidth, viewportHeight, layout);
   if (isContinuousScroll(settings)) {
     root.style.removeProperty('--USER__colCount');
     root.style.removeProperty('--RS__colCount');
@@ -91,50 +100,90 @@ function fitSinglePageEpubMedia(
   doc: Document,
   settings: AppSettings,
   bookType: 'epub' | 'txt',
+  viewportWidth: number,
   viewportHeight: number,
+  layout?: EpubNavigator['layout'],
 ) {
   const previous = fittedEpubMedia.get(doc);
-  previous?.forEach((properties, element) => {
-    properties.forEach(({ value, priority }, property) => {
-      if (value) element.style.setProperty(property, value, priority);
-      else element.style.removeProperty(property);
-    });
-  });
-  fittedEpubMedia.delete(doc);
-  if (bookType !== 'epub' || settings.pageMode !== 'single' || isContinuousScroll(settings)) return;
+  if (bookType !== 'epub' || layout === 'fixed' || settings.pageMode !== 'single' || isContinuousScroll(settings)) {
+    previous?.forEach((properties, element) => restoreInlineProperties(element, properties));
+    fittedEpubMedia.delete(doc);
+    return;
+  }
 
-  const maximumHeight = `${Math.max(1, viewportHeight - 16)}px`;
-  const viewportWidth = Math.max(1, doc.defaultView?.innerWidth || doc.documentElement.clientWidth || 1);
-  const maximumWidth = Math.max(1, viewportWidth - 16);
+  const bodyStyle = doc.defaultView?.getComputedStyle(doc.body);
+  const contentScale = readiumContentScale(doc);
+  const paddingBlock = numericCssValue(bodyStyle?.paddingTop) + numericCssValue(bodyStyle?.paddingBottom);
+  const paddingInline = numericCssValue(bodyStyle?.paddingLeft) + numericCssValue(bodyStyle?.paddingRight);
+  const logicalViewportHeight = viewportHeight / contentScale;
+  const logicalViewportWidth = viewportWidth / contentScale;
+  const bodyWidth = numericCssValue(bodyStyle?.width);
+  const maximumHeightValue = Math.max(1, logicalViewportHeight - paddingBlock - 16 / contentScale);
+  const maximumWidthValue = Math.max(1, Math.min(
+    logicalViewportWidth - paddingInline - 16 / contentScale,
+    bodyWidth > 0 ? bodyWidth - paddingInline : Number.POSITIVE_INFINITY,
+  ));
+  const maximumHeight = `${maximumHeightValue}px`;
+  const maximumWidth = `${maximumWidthValue}px`;
   const targets = [
     ...Array.from(doc.querySelectorAll<HTMLElement>('img')),
     ...Array.from(doc.querySelectorAll<HTMLElement>('body > svg, body > * > svg:only-child')),
   ];
-  const saved = new Map<HTMLElement, Map<string, { value: string; priority: string }>>();
+  const saved = previous || new Map<HTMLElement, Map<string, { value: string; priority: string }>>();
   targets.forEach((element) => {
-    const properties = new Map<string, { value: string; priority: string }>();
-    FITTED_MEDIA_PROPERTIES.forEach((property) => properties.set(property, {
-      value: element.style.getPropertyValue(property),
-      priority: element.style.getPropertyPriority(property),
-    }));
-    saved.set(element, properties);
-    element.style.setProperty('break-inside', 'avoid', 'important');
-    element.style.setProperty('display', 'block', 'important');
-    element.style.setProperty('height', 'auto', 'important');
-    element.style.setProperty('margin-inline', 'auto', 'important');
-    element.style.setProperty('max-block-size', maximumHeight, 'important');
-    element.style.setProperty('max-height', maximumHeight, 'important');
-    element.style.setProperty('max-width', '100%', 'important');
-    element.style.setProperty('object-fit', 'contain', 'important');
-    element.style.setProperty('width', 'auto', 'important');
+    if (!saved.has(element)) {
+      const properties = new Map<string, { value: string; priority: string }>();
+      FITTED_MEDIA_PROPERTIES.forEach((property) => properties.set(property, {
+        value: element.style.getPropertyValue(property),
+        priority: element.style.getPropertyPriority(property),
+      }));
+      saved.set(element, properties);
+    }
+    setInlineProperty(element, 'break-inside', 'avoid');
+    setInlineProperty(element, 'display', 'block');
+    setInlineProperty(element, 'height', 'auto');
+    setInlineProperty(element, 'margin-inline', 'auto');
+    setInlineProperty(element, 'max-block-size', maximumHeight);
+    setInlineProperty(element, 'max-height', maximumHeight);
+    setInlineProperty(element, 'max-width', `min(100%, ${maximumWidth})`);
+    setInlineProperty(element, 'min-block-size', '0');
+    setInlineProperty(element, 'min-height', '0');
+    setInlineProperty(element, 'min-width', '0');
+    setInlineProperty(element, 'object-fit', 'contain');
+    setInlineProperty(element, 'width', 'auto');
     const image = element.tagName.toLowerCase() === 'img' ? element as HTMLImageElement : undefined;
     if (image && image.naturalWidth > 0 && image.naturalHeight > 0) {
-      const scale = Math.min(1, maximumWidth / image.naturalWidth, (viewportHeight - 16) / image.naturalHeight);
-      element.style.setProperty('height', `${Math.max(1, Math.floor(image.naturalHeight * scale))}px`, 'important');
-      element.style.setProperty('width', `${Math.max(1, Math.floor(image.naturalWidth * scale))}px`, 'important');
+      const scale = Math.min(1, maximumWidthValue / image.naturalWidth, maximumHeightValue / image.naturalHeight);
+      setInlineProperty(element, 'height', `${Math.max(1, Math.floor(image.naturalHeight * scale))}px`);
+      setInlineProperty(element, 'width', `${Math.max(1, Math.floor(image.naturalWidth * scale))}px`);
     }
   });
   fittedEpubMedia.set(doc, saved);
+}
+
+function setInlineProperty(element: HTMLElement, property: string, value: string) {
+  if (element.style.getPropertyValue(property) === value && element.style.getPropertyPriority(property) === 'important') return;
+  element.style.setProperty(property, value, 'important');
+}
+
+function restoreInlineProperties(
+  element: HTMLElement,
+  properties: Map<string, { value: string; priority: string }>,
+) {
+  properties.forEach(({ value, priority }, property) => {
+    if (value) element.style.setProperty(property, value, priority);
+    else element.style.removeProperty(property);
+  });
+}
+
+function readiumContentScale(doc: Document) {
+  const zoom = Number.parseFloat(doc.defaultView?.getComputedStyle(doc.body).zoom || '');
+  return Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+}
+
+function numericCssValue(value?: string) {
+  const parsed = Number.parseFloat(value || '');
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function frameLayoutFingerprint(root: HTMLElement) {

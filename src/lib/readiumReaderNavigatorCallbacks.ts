@@ -21,7 +21,7 @@ interface CallbackOptions {
 
 export function createNavigatorCallbacks(runtime: ReadiumReaderRuntime, options: CallbackOptions) {
   const { book, publication, openPreview, queueProgressSave, schedulePageCounter } = options;
-  const watchedImages = new WeakSet<HTMLImageElement>();
+  const initializedDocuments = new WeakSet<Document>();
   const handlePointer = (event: ReadiumFrameClickEvent) => {
     if (handleReadiumClick(event, openPreview)) return true;
     if (event.doNotDisturb || runtime.previewImageRef.current
@@ -33,16 +33,18 @@ export function createNavigatorCallbacks(runtime: ReadiumReaderRuntime, options:
       const doc = wnd.document;
       const refreshFrameSettings = () => {
         if (wnd.document !== doc || runtime.publicationRef.current !== publication) return;
-        applyReadiumFrameSettings(doc, runtime.settingsRef.current, book.type);
+        applyReadiumFrameSettings(doc, runtime.settingsRef.current, book.type, options.navigator().layout);
       };
       refreshFrameSettings();
+      if (initializedDocuments.has(doc)) {
+        queueMicrotask(runtime.operations.drainNavigationQueue);
+        return;
+      }
+      initializedDocuments.add(doc);
       wnd.requestAnimationFrame(() => wnd.requestAnimationFrame(refreshFrameSettings));
-      Array.from(doc.images).forEach((image) => {
-        if (image.complete || watchedImages.has(image)) return;
-        watchedImages.add(image);
-        image.addEventListener('load', refreshFrameSettings, { once: true });
-        image.addEventListener('error', refreshFrameSettings, { once: true });
-      });
+      doc.addEventListener('load', (event) => {
+        if ((event.target as Element | null)?.tagName?.toLowerCase() === 'img') refreshFrameSettings();
+      }, true);
       installImagePreview(wnd, openPreview);
       installReadiumWheel(
         wnd,
@@ -72,7 +74,7 @@ export function createNavigatorCallbacks(runtime: ReadiumReaderRuntime, options:
       });
       if (runtime.layoutRestoringRef.current) return;
       const visibleDocument = getLiveReadiumIframe(currentReadiumFrame(navigator))?.contentDocument || undefined;
-      if (visibleDocument) applyReadiumFrameSettings(visibleDocument, runtime.settingsRef.current, book.type);
+      if (visibleDocument) applyReadiumFrameSettings(visibleDocument, runtime.settingsRef.current, book.type, navigator.layout);
       const semanticLocator = locatorFromVisibleTxtOffset(locator as unknown as import('./readiumPublication').ReadiumLocatorLike, publication, visibleDocument) as unknown as ReadiumLocator;
       runtime.operations.scheduleStableAnchorCapture(navigator);
       const visibleLink = publication.readingOrder.findWithHref(semanticLocator.href);

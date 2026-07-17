@@ -45,8 +45,6 @@ export function installWheelController(runtime: ReadiumReaderRuntime) {
     runtime.wheelDeltaRef.current += dominantDelta;
     if (Math.abs(runtime.wheelDeltaRef.current) < WHEEL_PAGE_THRESHOLD) return;
     runtime.wheelDeltaRef.current = 0;
-    // Do not impose a time cooldown. Relative navigation coalesces wheel input
-    // to one pending turn while the navigator/layout is busy.
     runtime.operations.navigatePage(dominantDelta > 0 ? 1 : -1, true);
   };
 

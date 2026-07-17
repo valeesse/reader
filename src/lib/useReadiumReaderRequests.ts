@@ -8,7 +8,8 @@ const IMMEDIATE_PREFETCH_RADIUS = 1;
 
 export function installAbsoluteNavigation(runtime: ReadiumReaderRuntime) {
   const drainAbsoluteNavigation = () => {
-    if (runtime.absoluteNavigationRunningRef.current || runtime.layoutRestoringRef.current) return;
+    if (runtime.absoluteNavigationRunningRef.current || runtime.layoutRestoringRef.current
+      || runtime.navigationLockedRef.current) return;
     const request = runtime.absoluteNavigationPendingRef.current;
     const navigator = runtime.navigatorRef.current;
     if (!request || !navigator) return;
@@ -24,12 +25,14 @@ export function installAbsoluteNavigation(runtime: ReadiumReaderRuntime) {
       runtime.absoluteNavigationRunningRef.current = false;
       if (token !== runtime.absoluteNavigationTokenRef.current) {
         window.setTimeout(drainAbsoluteNavigation, 0);
+        queueMicrotask(runtime.operations.drainNavigationQueue);
         return;
       }
       if (!applied && !runtime.absoluteNavigationPendingRef.current) {
         runtime.absoluteNavigationPendingRef.current = request;
       }
       window.setTimeout(drainAbsoluteNavigation, applied ? 0 : 32);
+      queueMicrotask(runtime.operations.drainNavigationQueue);
     };
     runtime.absoluteNavigationTimerRef.current = window.setTimeout(() => {
       navigator.recoverNavigation();

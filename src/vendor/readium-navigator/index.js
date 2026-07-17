@@ -7582,9 +7582,13 @@ class to {
       await Promise.all(c.map((p) => u(p)));
       if (this.currentHref !== o) return;
       const m = this.pool.get(o);
-      if ((m?.source !== this._currentFrame?.source || n) && (await this._currentFrame?.hide(), m && await m.load(i), m && await m.show(e.locations.progression), this._currentFrame = m, m)) {
-        const p = this.container.ownerDocument.activeElement;
-        p && p.tagName === "IFRAME" && p !== m.iframe && m.iframe.focus({ preventScroll: !0 });
+      if (m?.source !== this._currentFrame?.source || n) {
+        const p = this._currentFrame;
+        if (m) {
+          await m.load(i), await m.show(e.locations.progression), this._currentFrame = m, await p?.hide();
+          const f = this.container.ownerDocument.activeElement;
+          f && f.tagName === "IFRAME" && f !== m.iframe && m.iframe.focus({ preventScroll: !0 });
+        }
       }
     })();
     this.inprogress.set(o, a);
@@ -9670,6 +9674,8 @@ class zn extends Pn {
       e.msg && (e.msg.listener = (i, n) => {
         this.eventListener(i, n, e);
       });
+      const i = e.iframe.contentWindow;
+      i && this.listeners.frameLoaded(i);
     }), this._reapplyDecorationsToCurrentFrames();
   }
   async apply() {
@@ -9925,12 +9931,14 @@ class zn extends Pn {
       return;
     }
     this._isNavigating = !0;
+    const p = this._navigationEpoch || 0;
     const n = (s) => {
-      this._isNavigating = !1, console.error("Failed to go backward:", s), e(!1, void 0, r);
+      p === (this._navigationEpoch || 0) && (this._isNavigating = !1, console.error("Failed to go backward:", s), e(!1, void 0, r));
     };
     this._layout === v.fixed ? this.changeResource(-1).then((s) => {
-      this._isNavigating = !1, e(s, void 0, r);
+      p === (this._navigationEpoch || 0) && (this._isNavigating = !1, e(s, void 0, r));
     }).catch(n) : i.msg.send("go_prev", void 0, async (s, o) => {
+      if (p !== (this._navigationEpoch || 0)) return;
       const a = s?.kind === "turn", l = a ? !!s.ok : !!s, d = a ? this.commitProgress(s.progress) : void 0, h = s?.transport ?? o;
       if (l) {
         this._isNavigating = !1;
@@ -9950,7 +9958,7 @@ class zn extends Pn {
       else {
         try {
           const c = await this.changeResource(-1);
-          this._isNavigating = !1, e(c, h, r);
+          p === (this._navigationEpoch || 0) && (this._isNavigating = !1, e(c, h, r));
         } catch (c) {
           n(c);
         }
@@ -9969,12 +9977,14 @@ class zn extends Pn {
       return;
     }
     this._isNavigating = !0;
+    const p = this._navigationEpoch || 0;
     const n = (s) => {
-      this._isNavigating = !1, console.error("Failed to go forward:", s), e(!1, void 0, r);
+      p === (this._navigationEpoch || 0) && (this._isNavigating = !1, console.error("Failed to go forward:", s), e(!1, void 0, r));
     };
     this._layout === v.fixed ? this.changeResource(1).then((s) => {
-      this._isNavigating = !1, e(s, void 0, r);
+      p === (this._navigationEpoch || 0) && (this._isNavigating = !1, e(s, void 0, r));
     }).catch(n) : i.msg.send("go_next", void 0, async (s, o) => {
+      if (p !== (this._navigationEpoch || 0)) return;
       const a = s?.kind === "turn", l = a ? !!s.ok : !!s, d = a ? this.commitProgress(s.progress) : void 0, h = s?.transport ?? o;
       if (l) {
         this._isNavigating = !1;
@@ -9994,7 +10004,7 @@ class zn extends Pn {
       else {
         try {
           const c = await this.changeResource(1);
-          this._isNavigating = !1, e(c, h, r);
+          p === (this._navigationEpoch || 0) && (this._isNavigating = !1, e(c, h, r));
         } catch (c) {
           n(c);
         }

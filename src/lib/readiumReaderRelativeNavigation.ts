@@ -73,7 +73,10 @@ export function installRelativeNavigation(runtime: ReadiumReaderRuntime) {
         if (runtime.navigationUnlockTimerRef.current === watchdogId) runtime.navigationUnlockTimerRef.current = null;
         if (runtime.navigationTokenRef.current !== token) return;
         runtime.navigationLockedRef.current = false;
-        queueMicrotask(drainNavigationQueue);
+        queueMicrotask(() => {
+          runtime.operations.drainAbsoluteNavigation();
+          drainNavigationQueue();
+        });
       };
       watchdogId = window.setTimeout(() => {
         releaseReadiumNavigationGuard(navigator);
@@ -93,7 +96,8 @@ export function installRelativeNavigation(runtime: ReadiumReaderRuntime) {
   const drainNavigationQueue = () => {
     const navigator = runtime.navigatorRef.current;
     const pending = runtime.pendingNavigationRef.current;
-    if (!navigator || pending === 0 || runtime.layoutRestoringRef.current || runtime.navigationLockedRef.current) return;
+    if (!navigator || pending === 0 || runtime.layoutRestoringRef.current || runtime.navigationLockedRef.current
+      || runtime.absoluteNavigationRunningRef.current || runtime.absoluteNavigationPendingRef.current) return;
     if (!isReadiumNavigationReady(navigator)) {
       recoverPendingNavigationFrame();
       return;
@@ -113,6 +117,7 @@ export function installRelativeNavigation(runtime: ReadiumReaderRuntime) {
         window.clearTimeout(timeoutId);
         if (runtime.navigationTokenRef.current !== token) return;
         runtime.navigationLockedRef.current = false;
+        runtime.operations.drainAbsoluteNavigation();
         drainNavigationQueue();
       };
       const timeoutId = window.setTimeout(releasePreparation, ADJACENT_PREPARATION_TIMEOUT_MS);
@@ -154,7 +159,10 @@ export function installRelativeNavigation(runtime: ReadiumReaderRuntime) {
           runtime.navigationRetryTimerRef.current = null;
           drainNavigationQueue();
         }, 50);
-      } else queueMicrotask(drainNavigationQueue);
+      } else queueMicrotask(() => {
+        runtime.operations.drainAbsoluteNavigation();
+        drainNavigationQueue();
+      });
     };
     const finishNavigation = (ok?: boolean, transport?: 'direct' | 'postMessage') => {
       if (finished || runtime.navigationTokenRef.current !== token) return;
@@ -197,7 +205,7 @@ export function installRelativeNavigation(runtime: ReadiumReaderRuntime) {
       else navigator.goBackward(false, onNavigationFinished);
     };
     try {
-      if (isContinuousScroll(runtime.settingsRef.current)) navigate();
+      if (isContinuousScroll(runtime.settingsRef.current) || warmNavigation.detail.crossesResource) navigate();
       else animatePageExit(
         runtime.containerRef.current, runtime.settingsRef.current.pageTurnAnimation, direction,
         runtime.pageTransitionRef, navigate, { reduce: Math.abs(runtime.pendingNavigationRef.current) > 0 },

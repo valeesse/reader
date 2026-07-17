@@ -137,26 +137,30 @@ export function installReadiumFrameStyles(doc: Document) {
       padding-block-end: 0 !important;
       padding-inline-start: 0 !important;
     }
-    img {
+    :root:not([data-zenith-layout="fixed"]) img {
       border-radius: 5px !important; cursor: zoom-in !important; display: block;
       height: auto; max-width: 100%; object-fit: contain;
     }
-    :root[data-zenith-book-type="epub"][data-zenith-page-mode="single"] img {
+    :root[data-zenith-layout="reflowable"][data-zenith-book-type="epub"][data-zenith-page-mode="single"] img {
       box-sizing: border-box !important;
       break-inside: avoid !important;
       max-block-size: calc(var(--ZENITH__pageImageMaxHeight, 100vh) - 16px) !important;
       max-height: calc(var(--ZENITH__pageImageMaxHeight, 100vh) - 16px) !important;
+      max-width: max(1px, calc(var(--ZENITH__pageImageMaxWidth, 100vw) - 16px)) !important;
+      min-block-size: 0 !important;
+      min-height: 0 !important;
+      min-width: 0 !important;
       object-fit: contain !important;
       width: auto !important;
     }
-    :root[data-zenith-book-type="epub"][data-zenith-page-mode="single"] :is(figure, picture):has(img) {
+    :root[data-zenith-layout="reflowable"][data-zenith-book-type="epub"][data-zenith-page-mode="single"] :is(figure, picture):has(img) {
       break-inside: avoid !important;
       max-block-size: 100vh !important;
       max-height: 100vh !important;
       max-width: 100% !important;
     }
-    :root[data-zenith-book-type="epub"][data-zenith-page-mode="single"] body > svg,
-    :root[data-zenith-book-type="epub"][data-zenith-page-mode="single"] body > * > svg:only-child {
+    :root[data-zenith-layout="reflowable"][data-zenith-book-type="epub"][data-zenith-page-mode="single"] body > svg,
+    :root[data-zenith-layout="reflowable"][data-zenith-book-type="epub"][data-zenith-page-mode="single"] body > * > svg:only-child {
       box-sizing: border-box !important;
       display: block !important;
       height: calc(var(--ZENITH__pageImageMaxHeight, 100vh) - 16px) !important;
@@ -164,23 +168,10 @@ export function installReadiumFrameStyles(doc: Document) {
       max-width: 100% !important;
       width: 100% !important;
     }
-    body > img, body > picture, body > svg { margin-inline: auto !important; }
-    body:has(img):not(:has(p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote)) {
-      align-items: center !important; box-sizing: border-box !important; display: flex !important;
-      flex-direction: column !important; gap: 28px !important; justify-content: center !important;
-      min-height: 100vh !important; padding: 24px !important;
-    }
-    body:has(img):not(:has(p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote)) img {
-      margin: 0 auto !important;
-      max-height: calc(var(--ZENITH__pageImageMaxHeight, 100vh) - 48px) !important;
-      width: auto !important;
-    }
-    body:has(img):not(:has(p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote)) > *,
-    body:has(img):not(:has(p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote)) :is(div, section, figure) {
-      align-items: center !important; box-sizing: border-box !important; display: flex !important;
-      flex-wrap: wrap !important; gap: 28px !important; justify-content: center !important;
-      margin-inline: auto !important; max-width: 100% !important;
-    }`;
+    :root:not([data-zenith-layout="fixed"]) body > img,
+    :root:not([data-zenith-layout="fixed"]) body > picture,
+    :root:not([data-zenith-layout="fixed"]) body > svg { margin-inline: auto !important; }
+    `;
   doc.head.appendChild(style);
 }
 export function revealReadiumFrames(container: HTMLElement | null, navigator: EpubNavigator | null) {
@@ -196,7 +187,7 @@ export function revealReadiumFrames(container: HTMLElement | null, navigator: Ep
   });
   frames.forEach((frame) => {
     const iframe = getLiveReadiumIframe(frame);
-    if (!iframe || !container.contains(iframe)) return;
+    if (!iframe || frame.hidden || !container.contains(iframe)) return;
     iframe.style.removeProperty('visibility');
     iframe.style.removeProperty('opacity');
     iframe.style.removeProperty('pointer-events');
