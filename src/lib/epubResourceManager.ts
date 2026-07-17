@@ -26,7 +26,7 @@ class ReadiumResource implements ReadiumResourceLike {
   async link() { return this.linkValue; }
   async length() { return (await this.read())?.byteLength; }
   async read() { return this.manager.read(this.linkValue); }
-  async readAsString() { return this.manager.readAsString(this.linkValue); }
+  async readAsString(signal?: AbortSignal) { return this.manager.readAsString(this.linkValue, signal); }
   async readAsJSON() { const text = await this.readAsString(); return text ? JSON.parse(text) : undefined; }
   async readAsXML() { const text = await this.readAsString(); return text ? parseXml(text, 'application/xml') : undefined; }
   close() {}
@@ -51,21 +51,22 @@ export class EpubResourceManager {
     if (bytes) return bytes;
     return typeof payload.text === 'string' ? new TextEncoder().encode(payload.text) : undefined;
   }
-  async readAsString(link: ReadiumLink) {
+  async readAsString(link: ReadiumLink, signal?: AbortSignal) {
     const key = normalizeZipPath(stripHash(link.href));
     if (link.mediaType.isHTML || link.type === 'text/css') {
       return this.transformed.getOrCreate(key, async () => {
-        const text = (await this.payloadFor(link.href)).text ?? '';
+        const text = (await this.payloadFor(link.href, signal)).text ?? '';
         const result = link.mediaType.isHTML ? await this.rewriteHtml(text, link.href) : await this.rewriteCss(text, link.href);
         this.transformed.updateSize(key, estimateStringBytes(result));
         return result;
       });
     }
-    return (await this.payloadFor(link.href)).text ?? undefined;
+    return (await this.payloadFor(link.href, signal)).text ?? undefined;
   }
   async prepare(links: ReadiumLink[], direction: -1 | 0 | 1) {
+    this.scheduler.replaceWindow(links.map((link) => `content:${link.href}`));
     await Promise.all(links.map((link, index) => this.scheduler.schedule(`content:${link.href}`, index < 2 ? 1 : 2, async (signal) => {
-      await this.readAsString(link);
+      await this.readAsString(link, signal);
       if (signal.aborted) throw new DOMException('Stale EPUB prefetch', 'AbortError');
     })));
   }
@@ -75,10 +76,10 @@ export class EpubResourceManager {
     this.blobUrls.clear(); this.blobOrder = []; this.blobSizes.clear(); this.blobBytes = 0;
     this.payloads.clear(); this.transformed.clear(); this.scheduler.close();
   }
-  private payloadFor(href: string) {
+  private payloadFor(href: string, signal?: AbortSignal) {
     const key = normalizeZipPath(stripHash(href));
     return this.payloads.getOrCreate(key, async () => {
-      const payload = await readEpubResource(this.resourceId, this.sessionId, key);
+      const payload = await readEpubResource(this.resourceId, this.sessionId, key, signal);
       this.payloads.updateSize(key, typeof payload.text === 'string' ? estimateStringBytes(payload.text) : 256);
       return payload;
     });

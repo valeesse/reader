@@ -5,6 +5,7 @@ import {
   ReadiumPublicationLike,
 } from './readiumPublication';
 import { currentReadiumFrame, getLiveReadiumIframe, readiumFrames } from './readiumNavigatorAdapter';
+import { chapterPageFromProgress, updatePublicationPageMap } from './publicationPageMap';
 
 type PageGeometry = {
   viewportWidth: number; viewportHeight: number; scrollWidth: number; scrollHeight: number;
@@ -22,7 +23,9 @@ export function formatResourceStripPageCounter(
 ) {
   const page = pageFromLocator(locator, publication);
   if (!metrics) return `全书位置 ${page.current} / ${page.total} · ${formatProgressPercent(progressionFromLocator(locator, publication))}`;
-  return `本章屏 ${metrics.resourceCurrent} / ${metrics.resourceTotal} · 全书屏 ${metrics.publicationCurrent} / ${metrics.publicationTotal} · 全书位置 ${page.current} / ${page.total} · ${formatProgressPercent(progressionFromLocator(locator, publication))}`;
+  const progress = progressionFromLocator(locator, publication);
+  const chapter = chapterPageFromProgress(publication, progress, { current: metrics.publicationCurrent, total: metrics.publicationTotal });
+  return `本章屏 ${chapter.current} / ${chapter.total} · 全书屏 ${metrics.publicationCurrent} / ${metrics.publicationTotal} · 全书位置 ${page.current} / ${page.total} · ${formatProgressPercent(progress)}`;
 }
 export function formatEpubPageCounter(navigator: EpubNavigator, locator: ReadiumLocator, publication: ReadiumPublicationLike) {
   const iframe = getLiveReadiumIframe(currentReadiumFrame(navigator));
@@ -48,7 +51,44 @@ export function formatEpubPageCounter(navigator: EpubNavigator, locator: Readium
   const current = Math.max(1, Math.min(total, Math.floor((offset + 1) / geometry.stride) + 1));
   const end = Math.min(total, current + (geometry.horizontal ? geometry.columnCount : 1) - 1);
   const page = pageFromLocator(locator, publication);
-  return `本章${geometry.horizontal ? '页' : '屏'} ${end > current ? `${current}–${end}` : current} / ${total} · 全书位置 ${page.current} / ${page.total} · ${formatProgressPercent(progressionFromLocator(locator, publication))}`;
+  const layoutKey = [geometry.viewportWidth, geometry.viewportHeight, geometry.columnCount, geometry.columnGap, geometry.horizontal].join(':');
+  const publicationPage = updatePublicationPageMap(publication, locator.href, current, total, layoutKey);
+  const progress = progressionFromLocator(locator, publication);
+  const chapter = chapterPageFromDocument(publication, locator.href, doc || undefined, geometry, current)
+    || { current, total };
+  return `本章${geometry.horizontal ? '页' : '屏'} ${chapter.current} / ${chapter.total} · 全书页 ${publicationPage.current} / ${publicationPage.total}${publicationPage.estimated ? '（估算）' : ''} · 当前资源 ${end > current ? `${current}–${end}` : current} / ${total} · 全书位置 ${page.current} / ${page.total} · ${formatProgressPercent(progress)}`;
+}
+function chapterPageFromDocument(
+  publication: ReadiumPublicationLike,
+  href: string,
+  doc: Document | undefined,
+  geometry: PageGeometry,
+  currentPage: number,
+) {
+  if (!doc) return undefined;
+  const resource = publication.readingOrder.findWithHref(href)?.href || href.split('#')[0];
+  const anchors = publication.toc.items.flatMap((link) => {
+    const linkResource = publication.readingOrder.findWithHref(link.href)?.href || link.href.split('#')[0];
+    const fragment = link.locator.locations.fragments?.[0];
+    if (linkResource !== resource || !fragment) return [];
+    const element = doc.getElementById(fragment);
+    if (!element) return [];
+    const rect = element.getBoundingClientRect();
+    const scroller = doc.scrollingElement as HTMLElement | null;
+    const offset = geometry.horizontal
+      ? Math.abs(scroller?.scrollLeft || 0) + rect.left
+      : Math.max(0, scroller?.scrollTop || 0) + rect.top;
+    return [{ page: Math.max(1, Math.floor(Math.max(0, offset) / geometry.stride) + 1) }];
+  }).sort((left, right) => left.page - right.page);
+  if (anchors.length === 0) return undefined;
+  let index = 0;
+  while (index + 1 < anchors.length && anchors[index + 1].page <= currentPage) index += 1;
+  const start = anchors[index].page;
+  const end = anchors[index + 1]?.page || Math.max(currentPage, Math.ceil((geometry.horizontal ? geometry.scrollWidth : geometry.scrollHeight) / geometry.stride));
+  return {
+    current: Math.max(1, currentPage - start + 1),
+    total: Math.max(1, end - start + (anchors[index + 1] ? 0 : 1)),
+  };
 }
 function formatProgressPercent(progress: number) {
   const percent = Math.max(0, Math.min(100, progress * 100));

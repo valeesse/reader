@@ -47,11 +47,16 @@ export class ReadiumLink {
   }
   get locator() {
     const fragment = fragmentFromHref(this.href);
+    const locatorLocations = this.properties.locatorLocations;
     return createLocator({
       href: stripHash(this.href),
       type: this.type,
       title: this.title,
-      locations: { progression: 0, ...(fragment ? { fragments: [fragment] } : {}) },
+      locations: {
+        progression: 0,
+        ...(typeof locatorLocations === 'object' && locatorLocations ? locatorLocations : {}),
+        ...(fragment ? { fragments: [fragment], htmlIdValue: fragment } : {}),
+      },
     });
   }
 }

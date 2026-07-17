@@ -24,6 +24,8 @@ export function locatorForProgression(
   href: string,
   progression: number,
 ) {
+  const authoritative = publication.locatorAtResourceProgression?.(href, progression);
+  if (authoritative) return authoritative;
   const normalized = publication.readingOrder.findWithHref(href)?.href || href.split('#')[0];
   const range = positionRanges.get(normalized) || [];
   const selected = range[Math.min(range.length - 1, Math.max(0, Math.floor(progression * range.length)))]
@@ -47,14 +49,19 @@ export function snapshotResourceLocator(
   const doc = record?.iframe.contentDocument;
   if (!record || !link || !doc?.body) return currentLocator;
   const localFocus = focus - record.wrapper.offsetTop;
-  const hit = doc.elementFromPoint(Math.max(1, record.iframe.clientWidth * 0.5), clamp(localFocus, 1, Math.max(1, record.height - 1)));
-  const element = hit?.closest<HTMLElement>('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre') || undefined;
+  const elements = Array.from(doc.body.querySelectorAll<HTMLElement>('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre'));
+  const element = elements.find((candidate) => candidate.getBoundingClientRect().top >= localFocus)
+    || elements.find((candidate) => candidate.getBoundingClientRect().bottom > localFocus);
   const progression = clamp(localFocus / Math.max(1, record.height), 0, 1);
-  const locator = locatorForProgression(publication, positionRanges, currentLocator, link.href, progression);
+  const txtOffset = element ? Number(element.dataset.txtStart) : undefined;
+  const locator = Number.isFinite(txtOffset) && publication.locatorAtTextOffset
+    ? publication.locatorAtTextOffset(txtOffset!)
+    : locatorForProgression(publication, positionRanges, currentLocator, link.href, progression);
   return locator.copyWithLocations({
     ...locator.locations,
     progression,
     cssSelector: element ? cssSelector(element) : undefined,
+    ...(Number.isFinite(txtOffset) ? { txtOffset } : {}),
     zenithViewportY: 8 / Math.max(1, scroller.clientHeight),
   });
 }
@@ -78,7 +85,17 @@ export async function scrollToResourceLocator(
     ? locations.getCssSelector()
     : typeof locations.cssSelector === 'string' ? locations.cssSelector : undefined;
   const doc = record.iframe.contentDocument;
+  const txtOffset = typeof locations.txtOffset === 'number' ? locations.txtOffset : undefined;
   let element = fragment ? doc?.getElementById(decodeURIComponent(fragment)) : null;
+  if (!element && txtOffset !== undefined) {
+    const candidates = Array.from(doc?.querySelectorAll<HTMLElement>('[data-txt-start]') || []);
+    element = candidates.reduce<HTMLElement | null>((closest, candidate) => {
+      const candidateOffset = Number(candidate.dataset.txtStart);
+      if (!Number.isFinite(candidateOffset) || candidateOffset > txtOffset) return closest;
+      if (!closest || candidateOffset > Number(closest.dataset.txtStart)) return candidate;
+      return closest;
+    }, null);
+  }
   if (!element && selector) {
     try {
       element = doc?.querySelector(selector) || null;

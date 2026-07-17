@@ -1,7 +1,7 @@
 import { AppSettings, BookType } from '../types';
 import { ReadiumLocatorLike, ReadiumPublicationLike } from './readiumPublication';
 import { readerThemeColors } from './readerDocumentStyles';
-import { cancelReaderIdle, ReaderIdleHandle, scheduleReaderIdle } from './readerScheduler';
+import { cancelReaderIdle, ReaderIdleHandle, scheduleReaderIdle, yieldReaderTask } from './readerScheduler';
 import { readerRuntimePolicy } from './readerRuntimePolicy';
 import { clamp, waitForScrollCompletion } from './continuousResourceDom';
 import {
@@ -47,6 +47,9 @@ export class ContinuousResourceStrip {
   private turnTargetTop: number | null = null;
   private turnTargetAnchor: { index: number; local: number } | null = null;
   private turnTimer: number | null = null;
+  private turnGeneration = 0;
+  private stableViewportAnchor?: { index: number; id: string; txtOffset?: string; viewportOffset: number };
+  private stableAnchorLocked = false;
   private recordEnvironment: StripRecordEnvironment;
 
   constructor(
@@ -71,9 +74,14 @@ export class ContinuousResourceStrip {
     this.content.append(this.topSpacer, this.bottomSpacer);
     this.scroller.appendChild(this.content);
     this.host.replaceChildren(this.scroller);
+    const baseline = Math.max(1600, this.host.clientHeight * 1.5);
+    const positionCounts = publication.readingOrder.items.map((link) => Math.max(1, publication.positions.filter((position) => (
+      publication.readingOrder.findWithHref(position.href)?.href === link.href
+    )).length));
+    const median = [...positionCounts].sort((a, b) => a - b)[Math.floor(positionCounts.length / 2)] || 1;
     this.geometry = new ContinuousResourceGeometry(
       publication.readingOrder.items.length,
-      Math.max(1600, this.host.clientHeight * 1.5),
+      positionCounts.map((count) => baseline * count / median),
     );
     this.refreshGeometry();
     this.recordEnvironment = {
@@ -103,12 +111,14 @@ export class ContinuousResourceStrip {
           );
           this.scroller.scrollTo({ top: this.turnTargetTop, behavior: 'smooth' });
         }
-        if (this.active) this.emitLocator();
+        if (this.active) this.emitLocator(true);
       },
       bottomSpacer: this.bottomSpacer,
     };
     this.scroller.addEventListener('scroll', this.handleScroll, { passive: true });
     this.scroller.addEventListener('click', this.handleBackgroundClick);
+    this.scroller.addEventListener('wheel', this.unlockStableAnchor, { passive: true });
+    this.scroller.addEventListener('pointerdown', this.unlockStableAnchor, { passive: true });
     this.applyHostTheme();
   }
 
@@ -125,6 +135,18 @@ export class ContinuousResourceStrip {
       ? clamp(this.scroller.scrollTop - this.geometry.top(this.currentIndex), 0, Math.max(0, record.height - 1))
       : 0;
     const resourceHeight = record?.height || this.estimatedHeight(this.currentIndex);
+    const textRange = this.publication.textRangeForHref?.(this.publication.readingOrder.items[this.currentIndex]?.href || '');
+    const txtOffset = this.currentLocatorValue.locations.txtOffset;
+    if (textRange && this.publication.textLength && typeof txtOffset === 'number') {
+      const screensPerCharacter = resourceHeight / viewport / Math.max(1, textRange.end - textRange.start);
+      const publicationTotal = Math.max(1, Math.ceil(this.publication.textLength * screensPerCharacter));
+      return {
+        resourceCurrent: Math.floor(Math.max(0, txtOffset - textRange.start) * screensPerCharacter) + 1,
+        resourceTotal: Math.max(1, Math.ceil((textRange.end - textRange.start) * screensPerCharacter)),
+        publicationCurrent: Math.max(1, Math.min(publicationTotal, Math.floor(txtOffset * screensPerCharacter) + 1)),
+        publicationTotal,
+      };
+    }
     let precedingHeight = 0;
     let totalHeight = 0;
     for (let index = 0; index < this.publication.readingOrder.items.length; index++) {
@@ -186,8 +208,43 @@ export class ContinuousResourceStrip {
     }
   }
 
-  async updateSettings(settings: AppSettings, anchor = this.snapshotLocator()) {
+  captureViewportAnchor() {
+    return this.captureLiveViewportAnchor() || this.stableViewportAnchor;
+  }
+
+  stableTopAnchor() {
+    return this.stableViewportAnchor;
+  }
+
+  private captureLiveViewportAnchor() {
+    const viewportTop = this.scroller.getBoundingClientRect().top;
+    const current = this.geometry.indexAt(this.scroller.scrollTop + 1);
+    const candidates = [this.records.get(current), this.records.get(current + 1)].filter((record): record is StripRecord => Boolean(record));
+    for (const record of candidates) {
+      const frameTop = record.iframe.getBoundingClientRect().top;
+      const elements = Array.from(record.iframe.contentDocument?.querySelectorAll<HTMLElement>('[data-txt-start], [id]') || []);
+      const element = elements.find((candidate) => frameTop + candidate.getBoundingClientRect().top >= viewportTop)
+        || elements.find((candidate) => frameTop + candidate.getBoundingClientRect().bottom > viewportTop);
+      if (!element) continue;
+      return {
+        index: record.index,
+        id: element.id,
+        txtOffset: element.dataset.txtStart,
+        viewportOffset: frameTop + element.getBoundingClientRect().top - viewportTop,
+      };
+    }
+    return undefined;
+  }
+
+  async updateSettings(settings: AppSettings, anchor = this.snapshotLocator(), viewportAnchor = this.captureViewportAnchor()) {
     const generation = ++this.layoutGeneration;
+    this.stableAnchorLocked = true;
+    this.turnGeneration += 1;
+    if (this.turnTimer !== null) window.clearTimeout(this.turnTimer);
+    this.turnTimer = null;
+    this.turnTargetTop = null;
+    this.turnTargetAnchor = null;
+    this.scroller.scrollTo({ top: this.scroller.scrollTop, behavior: 'auto' });
     this.settings = settings;
     this.applyHostTheme();
     const current = this.records.get(this.currentIndex);
@@ -197,17 +254,22 @@ export class ContinuousResourceStrip {
       measureRecord(this.recordEnvironment, current);
     }
     if (this.destroyed || generation !== this.layoutGeneration) return false;
-    await this.scrollToLocator(anchor, false);
+    if (!this.restoreViewportAnchor(viewportAnchor)) await this.scrollToLocator(anchor, false);
     this.resetScrollSample();
     if (this.destroyed || generation !== this.layoutGeneration) return false;
     this.currentLocatorValue = anchor;
     this.emitLocator(true);
     void Promise.all(Array.from(this.records.values()).filter((record) => record !== current).map(async (record) => {
+      await yieldReaderTask('background', { timeout: 80 }).catch(() => {});
+      if (this.destroyed || generation !== this.layoutGeneration || this.records.get(record.index) !== record) return;
       const doc = record.iframe.contentDocument;
       if (!doc) return;
       await applyDocumentSettings(this.recordEnvironment, doc);
+      if (this.destroyed || generation !== this.layoutGeneration || this.records.get(record.index) !== record) return;
       measureRecord(this.recordEnvironment, record);
-    })).then(() => this.ensureWindow(this.currentIndex, false));
+    })).then(() => {
+      if (!this.destroyed && generation === this.layoutGeneration) void this.ensureWindow(this.currentIndex, false);
+    });
     return true;
   }
 
@@ -239,33 +301,33 @@ export class ContinuousResourceStrip {
   turn(direction: -1 | 1) {
     if (!this.active || this.destroyed) return;
     this.setPredictedDirection(direction);
+    this.stableAnchorLocked = false;
     this.predictedScreens = Math.max(this.predictedScreens, 5);
     const distance = Math.max(1, this.scroller.clientHeight) * direction;
     const base = this.turnTargetTop ?? this.scroller.scrollTop;
     this.turnTargetTop = clamp(base + distance, 0, Math.max(0, this.geometry.total() - this.scroller.clientHeight));
     const target = this.turnTargetTop;
+    const turnGeneration = ++this.turnGeneration;
     const targetStart = this.geometry.indexAt(target);
     this.turnTargetAnchor = { index: targetStart, local: target - this.geometry.top(targetStart) };
     const targetEnd = this.geometry.indexAt(Math.min(this.geometry.total() - 1, target + this.scroller.clientHeight));
     const ready = this.rangeReady(targetStart, targetEnd);
-    if (ready) this.scroller.scrollTo({ top: target, behavior: 'smooth' });
+    if (ready) this.commitTurn(turnGeneration);
     else void this.ensureRecordRange(targetStart, targetEnd).then(() => {
-      if (this.turnTargetTop === target && this.active && !this.destroyed) {
-        this.scroller.scrollTo({ top: target, behavior: 'smooth' });
-      }
-    });
-    if (this.turnTimer !== null) window.clearTimeout(this.turnTimer);
-    this.turnTimer = window.setTimeout(() => {
-      this.turnTimer = null;
+      if (turnGeneration === this.turnGeneration) this.commitTurn(turnGeneration);
+    }).catch(() => {
+      if (turnGeneration !== this.turnGeneration) return;
       this.turnTargetTop = null;
       this.turnTargetAnchor = null;
-    }, 240);
+    });
+    if (this.turnTimer !== null) window.clearTimeout(this.turnTimer);
     void this.ensureWindow(this.currentIndex, false);
   }
 
   destroy() {
     this.destroyed = true;
     this.layoutGeneration += 1;
+    this.turnGeneration += 1;
     this.mutationGeneration += 1;
     if (this.scrollRaf !== null) cancelAnimationFrame(this.scrollRaf);
     if (this.locatorTimer !== null) window.clearTimeout(this.locatorTimer);
@@ -274,7 +336,9 @@ export class ContinuousResourceStrip {
     cancelReaderIdle(this.windowIdle);
     this.scroller.removeEventListener('scroll', this.handleScroll);
     this.scroller.removeEventListener('click', this.handleBackgroundClick);
-    for (const record of this.records.values()) record.resizeObserver?.disconnect();
+    this.scroller.removeEventListener('wheel', this.unlockStableAnchor);
+    this.scroller.removeEventListener('pointerdown', this.unlockStableAnchor);
+    for (const record of Array.from(this.records.values())) removeRecord(this.recordEnvironment, record);
     this.records.clear();
     this.host.replaceChildren();
   }
@@ -291,8 +355,15 @@ export class ContinuousResourceStrip {
     if (event.target === this.scroller || event.target === this.content) this.callbacks.onToggleChrome();
   };
 
+  private unlockStableAnchor = () => {
+    this.stableAnchorLocked = false;
+  };
+
   private updateCurrentFromScroll() {
     if (this.destroyed || this.records.size === 0) return;
+    if (!this.stableAnchorLocked) {
+      this.stableViewportAnchor = this.captureLiveViewportAnchor() || this.stableViewportAnchor;
+    }
     this.updateScrollPrediction();
     const focus = this.scroller.scrollTop + 1;
     const selectedIndex = this.geometry.indexAt(focus);
@@ -355,12 +426,20 @@ export class ContinuousResourceStrip {
     if (this.locatorTimer !== null) window.clearTimeout(this.locatorTimer);
     if (immediate) {
       this.locatorTimer = null;
+      if (!this.stableAnchorLocked) {
+        this.stableViewportAnchor = this.captureLiveViewportAnchor() || this.stableViewportAnchor;
+      }
       this.callbacks.onLocator(this.currentLocatorValue);
       return;
     }
     this.locatorTimer = window.setTimeout(() => {
       this.locatorTimer = null;
-      if (this.active && !this.destroyed) this.callbacks.onLocator(this.currentLocatorValue);
+      if (this.active && !this.destroyed) {
+        if (!this.stableAnchorLocked) {
+          this.stableViewportAnchor = this.captureLiveViewportAnchor() || this.stableViewportAnchor;
+        }
+        this.callbacks.onLocator(this.currentLocatorValue);
+      }
     }, 90);
   }
 
@@ -397,7 +476,6 @@ export class ContinuousResourceStrip {
     let end = this.geometry.indexAt(Math.min(this.geometry.total() - 1, viewportBottom + this.scroller.clientHeight * ahead));
     start = Math.min(start, center);
     end = Math.max(end, center);
-    const anchorOffset = this.scroller.scrollTop - this.geometry.top(center);
     const limit = this.runtimePolicy.continuousResourceLimit;
     const visibleStart = this.geometry.indexAt(viewportTop);
     const visibleEnd = this.geometry.indexAt(Math.min(this.geometry.total() - 1, viewportBottom));
@@ -418,6 +496,11 @@ export class ContinuousResourceStrip {
     }).catch(() => {});
     const keep = new Set<number>();
     for (let index = start; index <= end; index++) keep.add(index);
+    if (this.turnTargetTop !== null) {
+      const targetStart = this.geometry.indexAt(this.turnTargetTop);
+      const targetEnd = this.geometry.indexAt(Math.min(this.geometry.total() - 1, this.turnTargetTop + this.scroller.clientHeight));
+      for (let index = targetStart; index <= targetEnd; index++) keep.add(index);
+    }
     for (const record of sortedRecords(this.records)) {
       if (keep.has(record.index)) continue;
       removeRecord(this.recordEnvironment, record);
@@ -440,9 +523,6 @@ export class ContinuousResourceStrip {
     if (this.destroyed || generation !== this.mutationGeneration) return;
     this.positionRecords();
     this.refreshGeometry();
-    const restoredAnchor = this.records.get(center);
-    if (restoredAnchor) this.scroller.scrollTop = Math.max(0, this.geometry.top(center) + anchorOffset);
-    this.resetScrollSample();
     // The predicted direction gets a velocity-scaled runway of real DOM. The
     // opposite direction stays warm so reversing direction remains immediate.
     const requiredBottom = () => this.scroller.scrollTop + this.scroller.clientHeight * ahead;
@@ -454,6 +534,8 @@ export class ContinuousResourceStrip {
     const pending = tasks.entries();
     const worker = async () => {
       for (let next = pending.next(); !next.done && generation === this.mutationGeneration; next = pending.next()) {
+        await yieldReaderTask('background', { timeout: 80 }).catch(() => {});
+        if (generation !== this.mutationGeneration) break;
         await next.value[1]().catch(() => {});
       }
     };
@@ -504,6 +586,25 @@ export class ContinuousResourceStrip {
     return { index, local: this.scroller.scrollTop - this.geometry.top(index) };
   }
 
+  private restoreViewportAnchor(anchor?: { index: number; id: string; txtOffset?: string; viewportOffset: number }) {
+    if (!anchor) return false;
+    const record = this.records.get(anchor.index);
+    const doc = record?.iframe.contentDocument;
+    if (!record || !doc) return false;
+    const element = anchor.id ? doc.getElementById(anchor.id) : anchor.txtOffset
+      ? doc.querySelector<HTMLElement>(`[data-txt-start="${CSS.escape(anchor.txtOffset)}"]`)
+      : null;
+    if (!element) return false;
+    const contentTop = this.geometry.top(record.index) + element.getBoundingClientRect().top;
+    this.scroller.scrollTop = clamp(
+      contentTop - anchor.viewportOffset,
+      0,
+      Math.max(0, this.geometry.total() - this.scroller.clientHeight),
+    );
+    this.stableViewportAnchor = anchor;
+    return true;
+  }
+
   private restoreTopAnchor(anchor: { index: number; local: number }, changedIndex: number, previousHeight?: number) {
     if (previousHeight !== undefined && changedIndex >= anchor.index) return;
     this.scroller.scrollTop = clamp(
@@ -515,16 +616,38 @@ export class ContinuousResourceStrip {
 
   private rangeReady(start: number, end: number) {
     for (let index = start; index <= end; index++) {
-      if (!this.records.get(index)?.loaded) return false;
+      if (!this.records.get(index)?.layoutReady) return false;
     }
     return true;
   }
 
   private async ensureRecordRange(start: number, end: number) {
-    await Promise.all(Array.from({ length: end - start + 1 }, (_, offset) => (
-      createRecord(this.recordEnvironment, start + offset).catch(() => {})
-    )));
+    const failures: number[] = [];
+    await Promise.all(Array.from({ length: end - start + 1 }, async (_, offset) => {
+      const index = start + offset;
+      try {
+        await createRecord(this.recordEnvironment, index);
+        await this.records.get(index)?.readyPromise;
+      } catch { failures.push(index); }
+    }));
+    for (const index of failures) {
+      await createRecord(this.recordEnvironment, index);
+      await this.records.get(index)?.readyPromise;
+    }
     this.positionRecords();
     this.refreshGeometry();
+  }
+
+  private commitTurn(generation: number) {
+    if (generation !== this.turnGeneration || this.turnTargetTop === null || !this.active || this.destroyed) return;
+    this.scroller.scrollTo({ top: this.turnTargetTop, behavior: 'smooth' });
+    if (this.turnTimer !== null) window.clearTimeout(this.turnTimer);
+    this.turnTimer = window.setTimeout(() => {
+      if (generation !== this.turnGeneration) return;
+      this.turnTimer = null;
+      this.turnTargetTop = null;
+      this.turnTargetAnchor = null;
+      this.emitLocator(true);
+    }, 900);
   }
 }

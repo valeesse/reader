@@ -13,11 +13,13 @@ export function toTocItems(publication: ReadiumPublicationLike): ReaderTocItem[]
     title: link.title || `章节 ${index + 1}`,
     href: link.href,
     index,
+    txtOffset: typeof link.locator.locations.txtOffset === 'number' ? link.locator.locations.txtOffset : undefined,
+    progression: link.locator.locations.progression,
   }));
 }
 
 export function currentTocItemId(
-  locator: { href: string; locations?: { progression?: number } },
+  locator: { href: string; locations?: { progression?: number; txtOffset?: number } },
   publication: ReadiumPublicationLike,
   document?: Document,
 ) {
@@ -26,8 +28,14 @@ export function currentTocItemId(
   const href = publication.readingOrder.findWithHref(locator.href)?.href || locator.href.split('#')[0];
   const resourceIndex = publication.readingOrder.findIndexWithHref(href);
   let current = items[0];
+  const locatorTxtOffset = locator.locations?.txtOffset;
   for (const item of items) {
     if (!item.href) continue;
+    if (typeof locatorTxtOffset === 'number' && typeof item.txtOffset === 'number') {
+      if (item.txtOffset > locatorTxtOffset) break;
+      current = item;
+      continue;
+    }
     const itemHref = publication.readingOrder.findWithHref(item.href)?.href || item.href.split('#')[0];
     const itemResourceIndex = publication.readingOrder.findIndexWithHref(itemHref);
     if (itemResourceIndex > resourceIndex) break;
@@ -40,6 +48,24 @@ export function currentTocItemId(
     current = item;
   }
   return current.id;
+}
+
+export function locatorFromVisibleTxtOffset(locator: ReadiumLocatorLike, publication: ReadiumPublicationLike, document?: Document) {
+  if (!publication.locatorAtTextOffset || !document) return locator;
+  const wnd = document.defaultView;
+  if (!wnd) return locator;
+  const horizontal = document.documentElement.scrollWidth > wnd.innerWidth * 1.1;
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>('[data-txt-start]'));
+  const visible = candidates.find((element) => {
+    const rect = element.getBoundingClientRect();
+    return horizontal ? rect.right > 0 && rect.left < wnd.innerWidth : rect.bottom > 0 && rect.top < wnd.innerHeight;
+  });
+  const offset = Number(visible?.dataset.txtStart);
+  if (!Number.isFinite(offset)) return locator;
+  return publication.locatorAtTextOffset(offset).copyWithLocations({
+    ...publication.locatorAtTextOffset(offset).locations,
+    cssSelector: visible ? `#${CSS.escape(visible.id)}` : undefined,
+  });
 }
 
 function safeDecodeFragment(fragment: string) {
@@ -94,6 +120,11 @@ export function normalizeLocatorToPublicationPosition(
   publication: ReadiumPublicationLike,
 ) {
   if (!locator) return undefined;
+  const txtOffset = locator.locations?.txtOffset;
+  if (typeof txtOffset === 'number' && publication.locatorAtTextOffset) {
+    const migrated = publication.locatorAtTextOffset(txtOffset);
+    return migrated.copyWithLocations({ ...migrated.locations, ...locator.locations, ...migrated.locations });
+  }
   const currentLink = publication.readingOrder.findWithHref(locator.href);
   if (currentLink && typeof locator.locations?.position === 'number') return locator;
 

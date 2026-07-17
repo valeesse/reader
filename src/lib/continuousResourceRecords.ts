@@ -30,7 +30,10 @@ export function createRecord(environment: StripRecordEnvironment, index: number)
     iframe,
     height,
     loaded: false,
+    layoutReady: false,
     loadPromise: Promise.resolve(),
+    readyPromise: Promise.resolve(),
+    abortController: new AbortController(),
   } as StripRecord;
   records.set(index, record);
   environment.positionRecord(record);
@@ -45,7 +48,7 @@ async function loadRecord(environment: StripRecordEnvironment, record: StripReco
   const { publication, records } = environment;
   const link = publication.readingOrder.items[record.index];
   if (!link || environment.destroyed()) return;
-  const source = await publication.get(link).readAsString();
+  const source = await publication.get(link).readAsString(record.abortController.signal);
   if (!source || environment.destroyed() || records.get(record.index) !== record) return;
   await new Promise<void>((resolve, reject) => {
     const timeout = window.setTimeout(() => reject(new Error(`Resource strip frame timed out: ${link.href}`)), 2500);
@@ -68,7 +71,11 @@ async function loadRecord(environment: StripRecordEnvironment, record: StripReco
   measureRecord(environment, record);
   record.resizeObserver = new ResizeObserver(() => measureRecord(environment, record));
   if (doc.body) record.resizeObserver.observe(doc.body);
-  void settleRecordLayout(environment, record, doc);
+  record.readyPromise = settleRecordLayout(environment, record, doc).then(() => {
+    if (!environment.destroyed() && records.get(record.index) === record && !record.abortController.signal.aborted) {
+      record.layoutReady = true;
+    }
+  });
 }
 
 async function settleRecordLayout(environment: StripRecordEnvironment, record: StripRecord, doc: Document) {
@@ -129,7 +136,7 @@ function installDocumentInteractions(environment: StripRecordEnvironment, record
         event.preventDefault();
         const fragment = rawHref.includes('#') ? decodeURIComponent(rawHref.split('#')[1] || '') : '';
         const locator = fragment
-          ? link.locator.copyWithLocations({ ...link.locator.locations, fragments: [fragment] })
+          ? link.locator.copyWithLocations({ ...link.locator.locations, fragments: [fragment], htmlIdValue: fragment })
           : link.locator;
         void environment.go(locator, true);
         return;
@@ -179,6 +186,7 @@ export function measureRecord(environment: StripRecordEnvironment, record: Strip
 }
 
 export function removeRecord(environment: StripRecordEnvironment, record: StripRecord) {
+  record.abortController.abort();
   record.resizeObserver?.disconnect();
   environment.records.delete(record.index);
   record.wrapper.remove();

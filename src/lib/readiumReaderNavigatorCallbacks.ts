@@ -5,7 +5,7 @@ import { recordReaderMetric } from './readerPerformance';
 import { applyReadiumFrameSettings } from './readiumFrameLayout';
 import { currentReadiumFrame, getLiveReadiumIframe } from './readiumNavigatorAdapter';
 import { handleReadiumClick, installImagePreview, installReadiumWheel } from './readiumViewerInteractions';
-import { currentTocItemId, isContinuousScroll } from './readiumViewerModel';
+import { currentTocItemId, isContinuousScroll, locatorFromVisibleTxtOffset } from './readiumViewerModel';
 import { progressionFromLocator, type ReadiumPublicationLike } from './readiumPublication';
 import { formatProgressLabel, watchReadiumFrameLayout } from './readiumViewerPresentation';
 import type { ReadiumReaderRuntime } from './readiumReaderRuntime';
@@ -38,7 +38,11 @@ export function createNavigatorCallbacks(runtime: ReadiumReaderRuntime, options:
         runtime.operations.navigateContinuousScrollBoundary,
         runtime.settingsRef,
       );
-      watchReadiumFrameLayout(wnd, () => schedulePageCounter(runtime.navigatorRef.current?.currentLocator));
+      watchReadiumFrameLayout(wnd, () => {
+        if (!runtime.layoutRestoringRef.current && !isContinuousScroll(runtime.settingsRef.current)) {
+          schedulePageCounter(runtime.navigatorRef.current?.currentLocator);
+        }
+      });
       queueMicrotask(runtime.operations.drainNavigationQueue);
     },
     positionChanged: (locator: ReadiumLocator, context?: ReadiumPositionChangedContext) => {
@@ -55,8 +59,10 @@ export function createNavigatorCallbacks(runtime: ReadiumReaderRuntime, options:
         detail: { navigationId, turnRequestId: context.turnRequestId, cause: context.cause, callbackReleased: context.callbackReleased, transport: context.transport },
       });
       if (runtime.layoutRestoringRef.current) return;
+      const visibleDocument = getLiveReadiumIframe(currentReadiumFrame(navigator))?.contentDocument || undefined;
+      const semanticLocator = locatorFromVisibleTxtOffset(locator as unknown as import('./readiumPublication').ReadiumLocatorLike, publication, visibleDocument) as unknown as ReadiumLocator;
       runtime.operations.scheduleStableAnchorCapture(navigator);
-      const visibleLink = publication.readingOrder.findWithHref(locator.href);
+      const visibleLink = publication.readingOrder.findWithHref(semanticLocator.href);
       if (visibleLink) {
         const container = runtime.containerRef.current!;
         const viewport = {
@@ -65,30 +71,29 @@ export function createNavigatorCallbacks(runtime: ReadiumReaderRuntime, options:
           devicePixelRatio: window.devicePixelRatio || 1,
         };
         const key = `${createReaderLayoutKey(publication.contentKey, runtime.settingsRef.current, viewport, book.type)}:${visibleLink.href}`;
-        navigator.markPreparedReady(locator, key);
+        navigator.markPreparedReady(semanticLocator, key);
       }
-      const progress = progressionFromLocator(locator, publication);
+      const progress = progressionFromLocator(semanticLocator, publication);
       runtime.onCurrentTocChangeRef.current(currentTocItemId(
-        locator, publication,
-        getLiveReadiumIframe(currentReadiumFrame(navigator))?.contentDocument || undefined,
+        semanticLocator, publication, visibleDocument,
       ));
       const previousProgress = runtime.lastEmittedProgressRef.current;
       const direction: -1 | 0 | 1 = previousProgress < 0 ? 0 : progress > previousProgress ? 1 : progress < previousProgress ? -1 : 0;
       const cacheDirection: -1 | 0 | 1 = context?.cause === 'turn' ? direction : 1;
       queueMicrotask(() => {
         if (runtime.publicationRef.current !== publication) return;
-        if (runtime.deferredHrefRef.current !== locator.href) {
-          publication.prefetchAroundHref(locator.href, 1, cacheDirection).catch(() => {});
+        if (runtime.deferredHrefRef.current !== semanticLocator.href) {
+          publication.prefetchAroundHref(semanticLocator.href, 1, cacheDirection).catch(() => {});
         }
-        runtime.operations.scheduleDeferredWork(locator.href, cacheDirection, false);
+        runtime.operations.scheduleDeferredWork(semanticLocator.href, cacheDirection, false);
       });
-      schedulePageCounter(locator);
+      schedulePageCounter(semanticLocator);
       if (Math.abs(progress - runtime.lastEmittedProgressRef.current) >= 0.0001) {
         runtime.lastEmittedProgressRef.current = progress;
         options.setPageLabel(formatProgressLabel(progress));
         runtime.onProgressChangeRef.current(progress);
       }
-      queueProgressSave(locator);
+      queueProgressSave(semanticLocator);
     },
     click: handlePointer,
     tap: handlePointer,

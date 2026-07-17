@@ -80,6 +80,18 @@ pub(super) struct TxtBookCache {
     pub chapters: Vec<TxtChapterInfo>,
     pub line_breaks: Vec<usize>,
 }
+pub(super) struct TxtReadIndex {
+    pub data_path: PathBuf,
+    pub checkpoints: Vec<(usize, usize)>,
+}
+impl From<&TxtBookCache> for TxtReadIndex {
+    fn from(value: &TxtBookCache) -> Self {
+        Self {
+            data_path: value.data_path.clone(),
+            checkpoints: value.checkpoints.clone(),
+        }
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TxtChapterInfo {

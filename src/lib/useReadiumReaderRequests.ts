@@ -67,14 +67,20 @@ export function useReadiumReaderRequests(
       || publication?.linkWithHref(tocTarget.href);
     if (link && navigator) {
       const fragment = tocTarget.href.split('#')[1];
+      const sourceLocator = link.locator;
+      const txtOffset = sourceLocator.locations.txtOffset;
+      const baseLocator = typeof txtOffset === 'number' && publication?.locatorAtTextOffset
+        ? publication.locatorAtTextOffset(txtOffset)
+        : sourceLocator;
       const locator = fragment
-        ? link.locator.copyWithLocations({
-            ...link.locator.locations,
+        ? baseLocator.copyWithLocations({
+            ...baseLocator.locations,
             fragments: [safeDecodeFragment(fragment)],
-            progression: link.locator.locations.progression ?? 0,
+            htmlIdValue: safeDecodeFragment(fragment),
+            progression: baseLocator.locations.progression ?? 0,
             zenithViewportY: 0,
           })
-        : link.locator;
+        : baseLocator;
       if (isContinuousScroll(runtime.settingsRef.current) && runtime.resourceStripRef.current) {
         runtime.operations.submitAbsoluteNavigation(locator, tocTarget.index ?? Date.now());
       } else runtime.operations.submitAbsoluteNavigation(locator, tocTarget.index ?? Date.now());

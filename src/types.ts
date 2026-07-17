@@ -32,6 +32,8 @@ export interface ReaderTocItem {
   title: string;
   href?: string;
   index?: number;
+  txtOffset?: number;
+  progression?: number;
 }
 
 export interface ReaderSeekRequest {

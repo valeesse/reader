@@ -15,18 +15,6 @@ import { createFrameTransition } from './readiumReaderTransition';
 import type { ReadiumReaderRuntime } from './readiumReaderRuntime';
 
 export function installRelativeNavigation(runtime: ReadiumReaderRuntime) {
-  const canNavigateInDirection = (navigator: EpubNavigator, direction: -1 | 1) => {
-    const publication = runtime.publicationRef.current;
-    const locator = navigator.currentLocator;
-    if (!publication || !locator?.href) return false;
-    const normalized = publication.readingOrder.findWithHref(locator.href)?.href || locator.href;
-    const visible = navigator.viewport.progressions.get(normalized);
-    if (direction < 0 && (visible?.start ?? locator.locations?.progression ?? 0) > 0.001) return true;
-    if (direction > 0 && (visible?.end ?? locator.locations?.progression ?? 1) < 0.999) return true;
-    const index = publication.readingOrder.findIndexWithHref(normalized);
-    return index >= 0 && index + direction >= 0 && index + direction < publication.readingOrder.items.length;
-  };
-
   const inspectWarmNavigationPath = (navigator: EpubNavigator, direction: -1 | 1) => {
     const publication = runtime.publicationRef.current;
     const container = runtime.containerRef.current;
@@ -65,6 +53,17 @@ export function installRelativeNavigation(runtime: ReadiumReaderRuntime) {
     const direction: -1 | 1 = pending > 0 ? 1 : -1;
     const warmNavigation = inspectWarmNavigationPath(navigator, direction);
     const warmPath = warmNavigation.warm;
+    if (warmNavigation.detail.crossesResource && !warmPath && runtime.navigationRetryCountRef.current === 0) {
+      runtime.navigationLockedRef.current = true;
+      runtime.navigationRetryCountRef.current = 1;
+      const href = navigator.currentLocator?.href || '';
+      void runtime.operations.prepareAdjacentLayouts(href, direction).finally(() => {
+        runtime.navigationLockedRef.current = false;
+        drainNavigationQueue();
+      });
+      return;
+    }
+    runtime.navigationRetryCountRef.current = 0;
     runtime.pendingNavigationRef.current -= direction;
     runtime.navigationLockedRef.current = true;
     const token = ++runtime.navigationTokenRef.current;
@@ -84,13 +83,8 @@ export function installRelativeNavigation(runtime: ReadiumReaderRuntime) {
       if (runtime.navigationUnlockTimerRef.current !== null) window.clearTimeout(runtime.navigationUnlockTimerRef.current);
       runtime.navigationUnlockTimerRef.current = null;
       runtime.navigationLockedRef.current = false;
-      const shouldRetry = ok === false && runtime.navigationRetryCountRef.current < 2
-        && canNavigateInDirection(navigator, direction);
-      if (shouldRetry) {
-        runtime.navigationRetryCountRef.current += 1;
-        runtime.pendingNavigationRef.current = Math.max(-3, Math.min(3, runtime.pendingNavigationRef.current + direction));
-        runtime.navigationStartedAtRef.current ??= inputStartedAt;
-      } else runtime.navigationRetryCountRef.current = 0;
+      const shouldRetry = false;
+      runtime.navigationRetryCountRef.current = 0;
       if (navigationId > 0) recordReaderMetric({
         kind: 'navigation', name: 'navigator-callback', durationMs: performance.now() - dispatchedAt,
         hit: warmPath,

@@ -13,7 +13,10 @@ export type StripRecord = {
   iframe: HTMLIFrameElement;
   height: number;
   loaded: boolean;
+  layoutReady: boolean;
   loadPromise: Promise<void>;
+  readyPromise: Promise<void>;
+  abortController: AbortController;
   resizeObserver?: ResizeObserver;
 };
 

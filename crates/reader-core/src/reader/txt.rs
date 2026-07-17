@@ -74,15 +74,18 @@ pub(super) fn read_window(
 ) -> Result<TxtTextWindow, ReaderError> {
     let path = s.resolve(id, "txt")?;
     let sig = file_signature(&path)?;
-    let mut books = s.txt_books.lock().map_err(|_| ReaderError::Busy)?;
-    let cache = books.get_mut(id).ok_or(ReaderError::InvalidSession)?;
-    lifecycle::validate(cache, sig, session)?;
-    let start = start.min(cache.total_chars);
-    let end = end.max(start).min(cache.total_chars);
+    let (index, start, end) = {
+        let mut books = s.txt_books.lock().map_err(|_| ReaderError::Busy)?;
+        let cache = books.get_mut(id).ok_or(ReaderError::InvalidSession)?;
+        lifecycle::validate(cache, sig, session)?;
+        let start = start.min(cache.total_chars);
+        let end = end.max(start).min(cache.total_chars);
+        (TxtReadIndex::from(&*cache), start, end)
+    };
     Ok(TxtTextWindow {
         start,
         end,
-        text: read_range(cache, start, end)?,
+        text: read_range(&index, start, end)?,
     })
 }
 pub(super) fn close(s: &ReaderService, id: &str, session: &str) -> Result<(), ReaderError> {

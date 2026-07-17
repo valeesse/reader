@@ -106,21 +106,35 @@ type ScheduledTask<T> = {
   controller: AbortController;
   resolve: (value: T) => void;
   reject: (reason?: unknown) => void;
+  promise: Promise<T>;
+  sequence: number;
 };
 
 export class ReaderWorkScheduler {
   private generation = 0;
   private active = 0;
   private queued: ScheduledTask<unknown>[] = [];
-  private pending = new Map<string, Promise<unknown>>();
+  private pending = new Map<string, ScheduledTask<unknown>>();
   private controllers = new Set<AbortController>();
   private running = new Set<ScheduledTask<unknown>>();
+  private sequence = 0;
 
   constructor(private concurrency = 2) {}
 
   schedule<T>(key: string, priority: CachePriority, run: (signal: AbortSignal) => Promise<T>) {
-    const existing = this.pending.get(key);
-    if (existing) return existing as Promise<T>;
+    let existing = this.pending.get(key);
+    if (existing?.controller.signal.aborted) {
+      if (this.pending.get(key) === existing) this.pending.delete(key);
+      existing = undefined;
+    }
+    if (existing) {
+      if (priority < existing.priority) {
+        existing.priority = priority;
+        existing.generation = this.generation;
+        this.sortQueue();
+      }
+      return existing.promise as Promise<T>;
+    }
     const controller = new AbortController();
     this.controllers.add(controller);
     let resolve!: (value: T) => void;
@@ -129,11 +143,28 @@ export class ReaderWorkScheduler {
       resolve = onResolve;
       reject = onReject;
     });
-    this.pending.set(key, promise);
-    this.queued.push({ key, priority, generation: this.generation, run, controller, resolve, reject } as ScheduledTask<unknown>);
-    this.queued.sort((a, b) => a.priority - b.priority);
+    const task = {
+      key, priority, generation: this.generation, run, controller, resolve, reject,
+      promise, sequence: this.sequence++,
+    } as ScheduledTask<unknown>;
+    this.pending.set(key, task);
+    this.queued.push(task);
+    this.sortQueue();
     this.drain();
     return promise;
+  }
+
+  replaceWindow(keys: Iterable<string>) {
+    this.generation++;
+    const keep = new Set(keys);
+    const stale = this.queued.filter((task) => !keep.has(task.key));
+    this.queued = this.queued.filter((task) => keep.has(task.key));
+    for (const task of stale) this.cancelQueued(task);
+    for (const task of this.running) {
+      if (!keep.has(task.key) && task.priority > 0) task.controller.abort();
+    }
+    for (const task of this.queued) task.generation = this.generation;
+    this.sortQueue();
   }
 
   advanceGeneration(cancelPriorityAtOrBelow: CachePriority = 2) {
@@ -143,7 +174,7 @@ export class ReaderWorkScheduler {
     for (const task of stale) {
       task.controller.abort();
       task.reject(new DOMException('Stale reader prefetch', 'AbortError'));
-      this.pending.delete(task.key);
+      if (this.pending.get(task.key) === task) this.pending.delete(task.key);
       this.controllers.delete(task.controller);
     }
     for (const task of this.running) {
@@ -156,9 +187,21 @@ export class ReaderWorkScheduler {
   close() {
     for (const controller of this.controllers) controller.abort();
     for (const task of this.queued) task.reject(new DOMException('Reader closed', 'AbortError'));
+    for (const task of this.running) task.reject(new DOMException('Reader closed', 'AbortError'));
     this.queued = [];
     this.pending.clear();
     this.controllers.clear();
+  }
+
+  private cancelQueued(task: ScheduledTask<unknown>) {
+    task.controller.abort();
+    task.reject(new DOMException('Stale reader prefetch', 'AbortError'));
+    if (this.pending.get(task.key) === task) this.pending.delete(task.key);
+    this.controllers.delete(task.controller);
+  }
+
+  private sortQueue() {
+    this.queued.sort((left, right) => left.priority - right.priority || left.sequence - right.sequence);
   }
 
   private drain() {
@@ -167,12 +210,12 @@ export class ReaderWorkScheduler {
       if (task.controller.signal.aborted) continue;
       this.active++;
       this.running.add(task);
-      Promise.resolve(task.run(task.controller.signal))
+      Promise.resolve().then(() => task.run(task.controller.signal))
         .then(task.resolve, task.reject)
         .finally(() => {
           this.active--;
           this.running.delete(task);
-          this.pending.delete(task.key);
+          if (this.pending.get(task.key) === task) this.pending.delete(task.key);
           this.controllers.delete(task.controller);
           this.drain();
         });

@@ -3,22 +3,22 @@ import {
   createLocator,
   LinkCollection,
   ReadiumLink,
+  ReadiumLocatorLike,
   ReadiumPublicationLike,
   ReadiumResourceLike,
 } from './readiumPublication';
 import { adaptiveReaderBudget, estimateStringBytes, ReaderContentCache, ReaderWorkScheduler } from './readerCacheCoordinator';
 
-// Keep paginated TXT resources small enough that a page turn never forces the
-// browser to recalculate the geometry of tens of thousands of CJK glyphs.
+// Transport slices bound native I/O independently from the larger render band.
 const TXT_TARGET_RESOURCE_CHARS = 12 * 1024;
-const TXT_MIN_RESOURCE_CHARS = 8 * 1024;
-const TXT_MAX_RESOURCE_CHARS = 20 * 1024;
+const TXT_NATURAL_BOUNDARY_TOLERANCE = 12 * 1024;
 // Positions are navigation samples, not rendered pages. A 4K interval keeps
 // progress/seek resolution well below one resource while avoiding thousands
 // of locator objects on the synchronous book-open path.
 const TXT_POSITION_CHARS = 4 * 1024;
 const TXT_RESOURCE_CACHE_LIMIT = 12;
 const TXT_RESOURCE_CACHE_BYTES = adaptiveReaderBudget(24 * 1024 * 1024, 12 * 1024 * 1024);
+const TXT_RENDER_BAND_CHARS = 48 * 1024;
 
 type TxtChunk = {
   href: string;
@@ -33,7 +33,7 @@ export async function createTxtReadiumPublication(
   author?: string,
 ): Promise<ReadiumPublicationLike> {
   const info = await openTxtBook(resourceId);
-  const chunks = createChunks(info);
+  const chunks = createTxtChunks(info);
   const readingOrder = new LinkCollection(chunks.map((chunk) => new ReadiumLink({
     href: chunk.href,
     type: 'application/xhtml+xml',
@@ -41,14 +41,24 @@ export async function createTxtReadiumPublication(
   })));
   const toc = new LinkCollection(info.chapters.map((chapter) => {
     const chunk = chunkForPosition(chunks, chapter.startIndex);
+    const progression = (chapter.startIndex - chunk.start) / Math.max(1, chunk.end - chunk.start);
     return new ReadiumLink({
       href: `${chunk.href}#txt-${chapter.startIndex}`,
       type: 'application/xhtml+xml',
       title: chapter.title,
+      properties: {
+        locatorLocations: {
+          txtOffset: chapter.startIndex,
+          progression,
+          totalProgression: chapter.startIndex / Math.max(1, info.totalChars),
+          htmlIdValue: `txt-${chapter.startIndex}`,
+        },
+      },
     });
   }));
   const manager = new TxtResourceManager(resourceId, info, chunks);
-  const positions = createTxtPositions(chunks, info.totalChars);
+  const positions = createTxtPositions(chunks, info);
+  const locatorAtTextOffset = (offset: number) => txtLocatorAtOffset(chunks, positions, info.totalChars, offset);
 
   return {
     metadata: createTxtMetadata(title, author),
@@ -65,8 +75,18 @@ export async function createTxtReadiumPublication(
     prefetchAroundHref: async (href, radius = 2, direction = 0) => manager.prefetch(href, radius, direction),
     prepareContentAroundHref: async (href, radius = 2, direction = 0) => manager.prefetch(href, radius, direction),
     prepareResourceWindow: async (window) => manager.prefetchWindow(window.startIndex, window.endIndex, window.centerIndex, window.direction),
+    locatorAtTextOffset,
+    locatorAtResourceProgression: (href, progression) => {
+      const chunk = chunks.find((item) => item.href === href.split('#')[0]) || chunks[0];
+      return locatorAtTextOffset(chunk.start + Math.max(0, Math.min(1, progression)) * (chunk.end - chunk.start));
+    },
+    textLength: info.totalChars,
+    textRangeForHref: (href) => {
+      const chunk = chunks.find((item) => item.href === href.split('#')[0]);
+      return chunk ? { start: chunk.start, end: chunk.end } : undefined;
+    },
     advancePrefetchGeneration: () => manager.advanceGeneration(),
-    contentKey: `${resourceId}:${info.totalBytes}:${info.totalChars}:txt-content-v4`,
+    contentKey: `${resourceId}:${info.totalBytes}:${info.totalChars}:txt-content-v5`,
     close: () => {
       manager.close();
       closeTxtBook(resourceId, info.sessionId).catch(() => {});
@@ -74,14 +94,14 @@ export async function createTxtReadiumPublication(
   };
 }
 
-function createChunks(info: NativeTxtBookInfo): TxtChunk[] {
+export function createTxtChunks(info: NativeTxtBookInfo): TxtChunk[] {
   const chunks: TxtChunk[] = [];
   const chapters = info.chapters;
   let start = 0;
   while (start < info.totalChars || chunks.length === 0) {
-    const ideal = Math.min(info.totalChars, start + TXT_TARGET_RESOURCE_CHARS);
-    const minimum = Math.min(info.totalChars, start + TXT_MIN_RESOURCE_CHARS);
-    const maximum = Math.min(info.totalChars, start + TXT_MAX_RESOURCE_CHARS);
+    const ideal = Math.min(info.totalChars, start + TXT_RENDER_BAND_CHARS);
+    const minimum = Math.min(info.totalChars, start + TXT_RENDER_BAND_CHARS - TXT_NATURAL_BOUNDARY_TOLERANCE);
+    const maximum = Math.min(info.totalChars, start + TXT_RENDER_BAND_CHARS + TXT_NATURAL_BOUNDARY_TOLERANCE);
     const after = lowerBound(info.lineBreaks, ideal);
     const forward = info.lineBreaks[after];
     const backward = info.lineBreaks[Math.max(0, after - 1)];
@@ -124,10 +144,13 @@ function lowerBoundChapter(chapters: NativeTxtBookInfo['chapters'], position: nu
   return low;
 }
 
-function createTxtPositions(chunks: TxtChunk[], totalChars: number) {
-  const total = Math.max(1, Math.ceil(totalChars / TXT_POSITION_CHARS));
-  return Array.from({ length: total }, (_, index) => {
-    const absolute = Math.min(totalChars, index * TXT_POSITION_CHARS);
+export function createTxtPositions(chunks: TxtChunk[], info: NativeTxtBookInfo) {
+  const offsets = new Set<number>([0, info.totalChars]);
+  for (let offset = 0; offset < info.totalChars; offset += TXT_POSITION_CHARS) offsets.add(offset);
+  for (const chunk of chunks) { offsets.add(chunk.start); offsets.add(chunk.end); }
+  for (const chapter of info.chapters) offsets.add(chapter.startIndex);
+  const ordered = Array.from(offsets).filter((offset) => offset >= 0 && offset <= info.totalChars).sort((a, b) => a - b);
+  return ordered.map((absolute, index) => {
     const chunk = chunkForPosition(chunks, absolute);
     const chunkLength = Math.max(1, chunk.end - chunk.start);
     return createLocator({
@@ -136,11 +159,38 @@ function createTxtPositions(chunks: TxtChunk[], totalChars: number) {
       title: chunk.title,
       locations: {
         progression: Math.min(1, (absolute - chunk.start) / chunkLength),
-        totalProgression: total > 1 ? index / (total - 1) : 0,
+        totalProgression: absolute / Math.max(1, info.totalChars),
         position: index + 1,
         txtOffset: absolute,
       },
     });
+  });
+}
+
+function txtLocatorAtOffset(chunks: TxtChunk[], positions: ReadiumLocatorLike[], totalChars: number, value: number) {
+  const offset = Math.max(0, Math.min(totalChars, Math.round(value)));
+  const chunk = chunkForPosition(chunks, offset);
+  let low = 0;
+  let high = positions.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (Number(positions[middle].locations.txtOffset) < offset) low = middle + 1;
+    else high = middle;
+  }
+  const exact = Number(positions[Math.min(positions.length - 1, low)]?.locations.txtOffset) === offset;
+  const positionIndex = exact ? low : Math.max(0, low - 1);
+  const sample = positions[Math.min(positions.length - 1, positionIndex)];
+  return createLocator({
+    href: chunk.href,
+    type: 'application/xhtml+xml',
+    title: chunk.title,
+    locations: {
+      ...(sample?.locations || {}),
+      progression: (offset - chunk.start) / Math.max(1, chunk.end - chunk.start),
+      totalProgression: offset / Math.max(1, totalChars),
+      position: Math.min(positions.length, positionIndex + 1),
+      txtOffset: offset,
+    },
   });
 }
 
@@ -159,6 +209,7 @@ function chunkForPosition(chunks: TxtChunk[], position: number) {
 
 class TxtResourceManager {
   private cache = new ReaderContentCache<string>('txt-xhtml', TXT_RESOURCE_CACHE_LIMIT, TXT_RESOURCE_CACHE_BYTES);
+  private transportCache = new ReaderContentCache<string>('txt-transport', TXT_RESOURCE_CACHE_LIMIT * 4, TXT_RESOURCE_CACHE_BYTES);
   private scheduler = new ReaderWorkScheduler(2);
   private closed = false;
 
@@ -172,13 +223,24 @@ class TxtResourceManager {
     return new TxtResource(link, this);
   }
 
-  async read(link: ReadiumLink) {
+  async read(link: ReadiumLink, signal?: AbortSignal) {
     if (this.closed) throw new Error('TXT 阅读会话已关闭');
     const chunk = this.chunks.find((item) => item.href === link.href.split('#')[0]);
     if (!chunk) throw new Error(`TXT 虚拟资源不存在: ${link.href}`);
     return this.cache.getOrCreate(chunk.href, async () => {
-      const window = await readTxtWindow(this.resourceId, this.info.sessionId, chunk.start, chunk.end);
-      const xhtml = txtWindowToXhtml(window.text, window.start, this.info);
+      const slices: Array<{ start: number; end: number }> = [];
+      for (let start = chunk.start; start < chunk.end; start += TXT_TARGET_RESOURCE_CHARS) {
+        slices.push({ start, end: Math.min(chunk.end, start + TXT_TARGET_RESOURCE_CHARS) });
+      }
+      const text = (await Promise.all(slices.map(({ start, end }) => {
+        const key = `${start}:${end}`;
+        return this.transportCache.getOrCreate(key, async () => {
+          const window = await readTxtWindow(this.resourceId, this.info.sessionId, start, end, signal);
+          this.transportCache.updateSize(key, estimateStringBytes(window.text));
+          return window.text;
+        });
+      }))).join('');
+      const xhtml = txtWindowToXhtml(text, chunk.start, this.info);
       this.cache.updateSize(chunk.href, estimateStringBytes(xhtml));
       return xhtml;
     });
@@ -194,7 +256,7 @@ class TxtResourceManager {
       `content:${chunk.href}`,
       targetIndex === 0 ? 1 : 2,
       async (signal) => {
-        await this.read(new ReadiumLink({ href: chunk.href }));
+        await this.read(new ReadiumLink({ href: chunk.href }), signal);
         if (signal.aborted) throw new DOMException('Stale TXT prefetch', 'AbortError');
       },
     )));
@@ -210,11 +272,12 @@ class TxtResourceManager {
         if (leftAhead !== rightAhead) return leftAhead ? -1 : 1;
         return Math.abs(left.index - centerIndex) - Math.abs(right.index - centerIndex);
       });
+    this.scheduler.replaceWindow(targets.map(({ chunk }) => `content:${chunk.href}`));
     await Promise.all(targets.map(({ chunk }, index) => this.scheduler.schedule(
       `content:${chunk.href}`,
       index < 2 ? 1 : 2,
       async (signal) => {
-        await this.read(new ReadiumLink({ href: chunk.href }));
+        await this.read(new ReadiumLink({ href: chunk.href }), signal);
         if (signal.aborted) throw new DOMException('Stale TXT prefetch', 'AbortError');
       },
     )));
@@ -227,6 +290,7 @@ class TxtResourceManager {
   close() {
     this.closed = true;
     this.cache.clear();
+    this.transportCache.clear();
     this.scheduler.close();
   }
 }
@@ -235,7 +299,7 @@ class TxtResource implements ReadiumResourceLike {
   constructor(private linkValue: ReadiumLink, private manager: TxtResourceManager) {}
 
   async link() { return this.linkValue; }
-  async readAsString() { return this.manager.read(this.linkValue); }
+  async readAsString(signal?: AbortSignal) { return this.manager.read(this.linkValue, signal); }
   async read() { return new TextEncoder().encode(await this.readAsString()); }
   async length() { return (await this.read())?.byteLength; }
   async readAsJSON() { return JSON.parse(await this.readAsString()); }

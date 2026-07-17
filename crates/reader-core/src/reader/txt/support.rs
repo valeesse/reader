@@ -29,22 +29,35 @@ fn finalize_chapters(mut v: Vec<TxtChapterInfo>) -> Vec<TxtChapterInfo> {
     v
 }
 
-pub(super) fn read_range(
-    c: &TxtBookCache,
+pub(super) trait TxtRangeIndex {
+    fn data_path(&self) -> &Path;
+    fn checkpoints(&self) -> &[(usize, usize)];
+}
+impl TxtRangeIndex for TxtReadIndex {
+    fn data_path(&self) -> &Path { &self.data_path }
+    fn checkpoints(&self) -> &[(usize, usize)] { &self.checkpoints }
+}
+impl TxtRangeIndex for TxtBookCache {
+    fn data_path(&self) -> &Path { &self.data_path }
+    fn checkpoints(&self) -> &[(usize, usize)] { &self.checkpoints }
+}
+
+pub(super) fn read_range<I: TxtRangeIndex>(
+    c: &I,
     start: usize,
     end: usize,
 ) -> Result<String, ReaderError> {
     let a = c
-        .checkpoints
+        .checkpoints()
         .partition_point(|(i, _)| *i <= start)
         .saturating_sub(1);
     let b = c
-        .checkpoints
+        .checkpoints()
         .partition_point(|(i, _)| *i <= end)
-        .min(c.checkpoints.len() - 1);
-    let (base, byte) = c.checkpoints[a];
-    let (_, bound) = c.checkpoints[b];
-    let mut file = File::open(&c.data_path).map_err(io_error)?;
+        .min(c.checkpoints().len() - 1);
+    let (base, byte) = c.checkpoints()[a];
+    let (_, bound) = c.checkpoints()[b];
+    let mut file = File::open(c.data_path()).map_err(io_error)?;
     file.seek(SeekFrom::Start(byte as u64)).map_err(io_error)?;
     let mut bytes = Vec::with_capacity(bound - byte);
     file.take((bound - byte) as u64)

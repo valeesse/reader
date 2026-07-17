@@ -13,11 +13,11 @@ import {
 } from './readiumPublication';
 import {
   createReadiumDefaults, createReadiumPreferences, currentTocItemId, isContinuousScroll,
-  legacyProgressPosition, normalizeLocatorToPublicationPosition, toTocItems,
+  legacyProgressPosition, locatorFromVisibleTxtOffset, normalizeLocatorToPublicationPosition, toTocItems,
 } from './readiumViewerModel';
 import { createNavigatorCallbacks } from './readiumReaderNavigatorCallbacks';
 import { applyReadiumFrameSettingsToNavigator, waitForCurrentFrameReadiness, waitForNextPaint } from './readiumFrameLayout';
-import { isReadiumNavigationReady } from './readiumNavigatorAdapter';
+import { currentReadiumFrame, getLiveReadiumIframe, isReadiumNavigationReady } from './readiumNavigatorAdapter';
 import { waitUntil } from './readiumViewerNavigation';
 import {
   formatEpubPageCounter, formatProgressLabel, formatResourceStripPageCounter, revealReadiumFrames,
@@ -50,7 +50,7 @@ export function useReadiumReaderLifecycle(runtime: ReadiumReaderRuntime, options
         if (!cancelled && runtime.publicationRef.current === publication) onTocChange(toTocItems(publication));
       }, { timeout: 1600 });
     };
-    const schedulePageCounter = (locator?: ReadiumLocator, delay = 120) => {
+    const schedulePageCounter = (locator?: ReadiumLocator, delay = 16) => {
       if (!locator) return;
       if (pageCounterTimer !== null) window.clearTimeout(pageCounterTimer);
       pageCounterTimer = window.setTimeout(() => {
@@ -58,7 +58,15 @@ export function useReadiumReaderLifecycle(runtime: ReadiumReaderRuntime, options
         const navigator = runtime.navigatorRef.current;
         const publication = runtime.publicationRef.current;
         if (cancelled || !navigator || !publication) return;
-        options.setPageCounter(formatEpubPageCounter(navigator, locator, publication));
+        const strip = isContinuousScroll(runtime.settingsRef.current) ? runtime.resourceStripRef.current : null;
+        if (strip) {
+          const stripLocator = strip.snapshotLocator();
+          options.setPageCounter(formatResourceStripPageCounter(stripLocator, publication, strip.pageMetrics));
+          return;
+        }
+        const doc = getLiveReadiumIframe(currentReadiumFrame(navigator))?.contentDocument || undefined;
+        const semanticLocator = locatorFromVisibleTxtOffset(locator as unknown as ReadiumLocatorLike, publication, doc) as unknown as ReadiumLocator;
+        options.setPageCounter(formatEpubPageCounter(navigator, semanticLocator, publication));
       }, delay);
     };
     runtime.pageCounterRefreshRef.current = schedulePageCounter;

@@ -2,8 +2,8 @@ export class ContinuousResourceGeometry {
   private heights: number[];
   private prefixes: number[];
 
-  constructor(count: number, estimate: number) {
-    this.heights = Array.from({ length: count }, () => Math.max(1, estimate));
+  constructor(count: number, estimate: number | number[]) {
+    this.heights = Array.from({ length: count }, (_, index) => Math.max(1, Array.isArray(estimate) ? estimate[index] || 1 : estimate));
     this.prefixes = new Array(count + 1).fill(0);
     this.rebuild(0);
   }

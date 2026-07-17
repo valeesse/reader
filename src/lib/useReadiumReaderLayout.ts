@@ -3,6 +3,7 @@ import { EpubPreferences, type ReadiumLocator } from '../vendor/readium-navigato
 import type { AppSettings } from '../types';
 import { createReaderSettingsLayoutFingerprint } from './readerLayoutCache';
 import type { ReadiumLocatorLike } from './readiumPublication';
+import { invalidatePublicationPageMap } from './publicationPageMap';
 import { applyReadiumFrameSettingsToNavigator, waitForLayoutFrames } from './readiumFrameLayout';
 import { navigateToLocator, waitUntil } from './readiumViewerNavigation';
 import { retargetLocatorViewport, snapshotLocator, snapshotVisibleTextLocator } from './readiumViewerAnchors';
@@ -51,6 +52,7 @@ export function useReadiumReaderSettingsLayout(
     }
     runtime.operations.cancelDeferredWork(true);
     runtime.layoutCacheRef.current.invalidate();
+    invalidatePublicationPageMap(runtime.publicationRef.current);
     navigator.clearPreparedReady();
     runtime.prepareGenerationRef.current += 1;
     runtime.preparedTargetRef.current = null;
@@ -131,6 +133,8 @@ export function useReadiumReaderResize(runtime: ReadiumReaderRuntime, loading: b
     const stripHost = runtime.resourceStripHostRef.current;
     let frozenInlineStyle: Partial<Record<'width' | 'height' | 'position' | 'left' | 'top' | 'transform' | 'margin' | 'willChange' | 'transformOrigin', string>> | null = null;
     let frozenStripStyle: { width: string; height: string; inset: string; transform: string; transformOrigin: string } | null = null;
+    let stableStripViewportAnchor = runtime.resourceStripRef.current?.stableTopAnchor();
+    let stripAnchorReleaseTimer: number | null = null;
     const freezeSurface = () => {
       if (frozen) return;
       frozen = true;
@@ -193,12 +197,14 @@ export function useReadiumReaderResize(runtime: ReadiumReaderRuntime, loading: b
         return;
       }
       navigator.clearPreparedReady();
+      invalidatePublicationPageMap(runtime.publicationRef.current);
       runtime.prepareGenerationRef.current += 1;
       runtime.preparedTargetRef.current = null;
       runtime.resizeTimerRef.current = null;
       runtime.operations.enqueueLayout(async () => {
         if (runtime.navigatorRef.current !== navigator) return;
         const activeStrip = isContinuousScroll(runtime.settingsRef.current) ? runtime.resourceStripRef.current : null;
+        const stripViewportAnchor = stableStripViewportAnchor || activeStrip?.stableTopAnchor();
         const before = activeStrip?.snapshotLocator()
           || runtime.resizeAnchorRef.current
           || snapshotVisibleTextLocator(navigator, runtime.appliedLayoutSettingsRef.current)
@@ -208,7 +214,12 @@ export function useReadiumReaderResize(runtime: ReadiumReaderRuntime, loading: b
           runtime.suppressResizeUntilRef.current = performance.now() + 24;
           releaseSurface();
           if (activeStrip && before) {
-            await activeStrip.updateSettings(runtime.settingsRef.current, before as unknown as ReadiumLocatorLike);
+            await activeStrip.updateSettings(runtime.settingsRef.current, before as unknown as ReadiumLocatorLike, stripViewportAnchor);
+            if (stripAnchorReleaseTimer !== null) window.clearTimeout(stripAnchorReleaseTimer);
+            stripAnchorReleaseTimer = window.setTimeout(() => {
+              stableStripViewportAnchor = undefined;
+              stripAnchorReleaseTimer = null;
+            }, 120);
             runtime.appliedLayoutSettingsRef.current = runtime.settingsRef.current;
             return;
           }
@@ -251,10 +262,18 @@ export function useReadiumReaderResize(runtime: ReadiumReaderRuntime, loading: b
       const box = entries[entries.length - 1]?.contentRect;
       if (box && Math.abs(box.width - observedWidth) < 0.5 && Math.abs(box.height - observedHeight) < 0.5) return;
       if (box) { observedWidth = box.width; observedHeight = box.height; }
+      const startsResizeTransaction = runtime.resizeTimerRef.current === null && !runtime.layoutRestoringRef.current;
+      if (stripAnchorReleaseTimer !== null) {
+        window.clearTimeout(stripAnchorReleaseTimer);
+        stripAnchorReleaseTimer = null;
+      }
       runtime.resizeAnchorRef.current ||= isContinuousScroll(runtime.settingsRef.current)
         ? runtime.resourceStripRef.current?.snapshotLocator() as ReadiumLocator | undefined
         : snapshotVisibleTextLocator(navigator, runtime.appliedLayoutSettingsRef.current)
           || runtime.stableViewportAnchorRef.current || snapshotLocator(navigator.currentLocator);
+      if (startsResizeTransaction) {
+        stableStripViewportAnchor = runtime.resourceStripRef.current?.stableTopAnchor() || stableStripViewportAnchor;
+      }
       runtime.layoutRestoringRef.current = true;
       freezeSurface();
       const suppressionRemaining = Math.max(0, runtime.suppressResizeUntilRef.current - performance.now());
@@ -263,6 +282,7 @@ export function useReadiumReaderResize(runtime: ReadiumReaderRuntime, loading: b
     observer.observe(resizeTarget);
     return () => {
       observer.disconnect();
+      if (stripAnchorReleaseTimer !== null) window.clearTimeout(stripAnchorReleaseTimer);
       if (runtime.resizeTimerRef.current !== null) {
         window.clearTimeout(runtime.resizeTimerRef.current);
         runtime.resizeTimerRef.current = null;

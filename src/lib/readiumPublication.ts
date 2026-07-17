@@ -68,6 +68,10 @@ export type ReadiumPublicationLike = {
   prefetchAroundHref: (href: string, radius?: number, direction?: -1 | 0 | 1) => Promise<void>;
   prepareContentAroundHref: (href: string, radius?: number, direction?: -1 | 0 | 1) => Promise<void>;
   prepareResourceWindow: (window: ResourceWindow) => Promise<void>;
+  locatorAtTextOffset?: (offset: number) => ReadiumLocatorLike;
+  locatorAtResourceProgression?: (href: string, progression: number) => ReadiumLocatorLike;
+  textLength?: number;
+  textRangeForHref?: (href: string) => { start: number; end: number } | undefined;
   advancePrefetchGeneration: () => void;
   contentKey: string;
   refinePositions?: (signal: AbortSignal) => Promise<void>;
@@ -78,7 +82,7 @@ export type ReadiumResourceLike = {
   link: () => Promise<ReadiumLink>;
   length: () => Promise<number | undefined>;
   read: () => Promise<Uint8Array | undefined>;
-  readAsString: () => Promise<string | undefined>;
+  readAsString: (signal?: AbortSignal) => Promise<string | undefined>;
   readAsJSON: () => Promise<unknown>;
   readAsXML: () => Promise<Document | undefined>;
   close: () => void;
@@ -168,6 +172,46 @@ export async function createReadiumPublication(resourceId: string, fallbackTitle
         });
       if (signal.aborted) return;
       const refined = createPositionsFromCounts(readingOrder.items, counts);
+      for (const tocLink of toc.items) {
+        if (signal.aborted) return;
+        const fragment = tocLink.locator.locations.fragments?.[0];
+        const resourceLink = readingOrder.findWithHref(tocLink.href);
+        if (!fragment || !resourceLink) continue;
+        try {
+          const source = await resourceManager.sourceText(resourceLink);
+          const document = new DOMParser().parseFromString(source, 'application/xhtml+xml');
+          const element = document.getElementById(fragment);
+          if (!element || !document.body) continue;
+          const allText = document.body.textContent || '';
+          let preceding = 0;
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          while (walker.nextNode()) {
+            if (element.contains(walker.currentNode)) break;
+            preceding += walker.currentNode.textContent?.length || 0;
+          }
+          const progression = Math.max(0, Math.min(1, preceding / Math.max(1, allText.length)));
+          const base = resourceLink.locator;
+          refined.push(base.copyWithLocations({
+            ...base.locations,
+            progression,
+            fragments: [fragment],
+            htmlIdValue: fragment,
+          }));
+        } catch {}
+      }
+      refined.sort((left, right) => {
+        const leftIndex = readingOrder.findIndexWithHref(left.href);
+        const rightIndex = readingOrder.findIndexWithHref(right.href);
+        return leftIndex - rightIndex || (left.locations.progression || 0) - (right.locations.progression || 0);
+      });
+      refined.forEach((locator, index) => {
+        locator.locations.position = index + 1;
+        const resourceIndex = readingOrder.findIndexWithHref(locator.href);
+        const resourceProgression = locator.locations.progression || 0;
+        locator.locations.totalProgression = readingOrder.items.length > 0
+          ? (Math.max(0, resourceIndex) + resourceProgression) / readingOrder.items.length
+          : 0;
+      });
       positions.splice(0, positions.length, ...refined);
       await saveCachedEpubPositionCounts(resourceId, cacheKey, counts);
     },
@@ -211,6 +255,8 @@ export function serializeReadiumLocator(locator: any) {
 }
 
 export function progressionFromLocator(locator: any, publication: ReadiumPublicationLike) {
+  const totalProgression = locator?.locations?.totalProgression;
+  if (typeof totalProgression === 'number') return clamp(totalProgression, 0, 1);
   const total = Math.max(1, publication.positions.length);
   const range = positionRangeForLocator(locator, publication);
   if (!range) return 0;
@@ -270,6 +316,8 @@ export function locatorAtProgress(publication: ReadiumPublicationLike, progress:
 export function pageFromLocator(locator: any, publication: ReadiumPublicationLike) {
   const positions = publication.positions;
   const total = Math.max(1, positions.length);
+  const explicitPosition = locator?.locations?.position;
+  if (typeof explicitPosition === 'number') return { current: Math.max(1, Math.min(total, Math.round(explicitPosition))), total };
   const range = positionRangeForLocator(locator, publication);
   if (!range) return { current: 1, total };
   const local = clamp(typeof locator?.locations?.progression === 'number' ? locator.locations.progression : 0, 0, 1);
