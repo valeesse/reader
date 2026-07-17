@@ -7,7 +7,7 @@ import { currentReadiumFrame, getLiveReadiumIframe } from './readiumNavigatorAda
 import { handleReadiumClick, installImagePreview, installReadiumWheel } from './readiumViewerInteractions';
 import { currentTocItemId, isContinuousScroll, locatorFromVisibleTxtOffset } from './readiumViewerModel';
 import { progressionFromLocator, type ReadiumPublicationLike } from './readiumPublication';
-import { formatProgressLabel, watchReadiumFrameLayout } from './readiumViewerPresentation';
+import { watchReadiumFrameLayout } from './readiumViewerPresentation';
 import type { ReadiumReaderRuntime } from './readiumReaderRuntime';
 
 interface CallbackOptions {
@@ -17,7 +17,6 @@ interface CallbackOptions {
   openPreview: (image: { src: string; name: string }) => void;
   queueProgressSave: (locator: ReadiumLocator) => void;
   schedulePageCounter: (locator?: ReadiumLocator, delay?: number) => void;
-  setPageLabel: (label: string) => void;
 }
 
 export function createNavigatorCallbacks(runtime: ReadiumReaderRuntime, options: CallbackOptions) {
@@ -90,7 +89,6 @@ export function createNavigatorCallbacks(runtime: ReadiumReaderRuntime, options:
       schedulePageCounter(semanticLocator);
       if (Math.abs(progress - runtime.lastEmittedProgressRef.current) >= 0.0001) {
         runtime.lastEmittedProgressRef.current = progress;
-        options.setPageLabel(formatProgressLabel(progress));
         runtime.onProgressChangeRef.current(progress);
       }
       queueProgressSave(semanticLocator);

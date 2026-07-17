@@ -86,7 +86,7 @@ export async function createTxtReadiumPublication(
       return chunk ? { start: chunk.start, end: chunk.end } : undefined;
     },
     advancePrefetchGeneration: () => manager.advanceGeneration(),
-    contentKey: `${resourceId}:${info.totalBytes}:${info.totalChars}:txt-content-v5`,
+    contentKey: `${resourceId}:${info.totalBytes}:${info.totalChars}:txt-content-v6`,
     close: () => {
       manager.close();
       closeTxtBook(resourceId, info.sessionId).catch(() => {});
@@ -316,8 +316,9 @@ function txtWindowToXhtml(text: string, start: number, info: NativeTxtBookInfo) 
   const lines = text.match(/[^\r\n]*(?:\r\n|\r|\n|$)/g)?.filter(Boolean) || [];
   const body = lines.map((segment) => {
     const line = segment.replace(/[\r\n]+$/, '');
+    const trimmedLine = line.trim();
     const chapter = chapterOffsets.get(offset);
-    const content = escapeHtml(line) || '';
+    const content = escapeHtml(trimmedLine) || '';
     const html = chapter
       ? `<h2 id="txt-${chapter.startIndex}" data-txt-start="${offset}">${content}</h2>`
       : content ? `<p id="txt-p-${offset}" data-txt-start="${offset}">${content}</p>` : '';

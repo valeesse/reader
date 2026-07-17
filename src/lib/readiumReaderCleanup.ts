@@ -43,6 +43,7 @@ export function cleanupReadiumReader(runtime: ReadiumReaderRuntime, options: Cle
   }
   runtime.scrollBoundaryGestureLockedRef.current = false;
   runtime.scrollBoundaryPendingDirectionRef.current = 0;
+  runtime.wheelDeltaRef.current = 0;
   runtime.containerRef.current?.classList.remove('zenith-scroll-gesture-locked');
   document.querySelectorAll('.zenith-scroll-transition-snapshot').forEach((snapshot) => snapshot.remove());
   runtime.containerRef.current?.querySelectorAll<HTMLIFrameElement>(

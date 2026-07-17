@@ -1,6 +1,5 @@
 import { EpubNavigator, ReadiumLocator } from '../vendor/readium-navigator';
 import {
-  pageFromLocator,
   progressionFromLocator,
   ReadiumPublicationLike,
 } from './readiumPublication';
@@ -13,19 +12,15 @@ type PageGeometry = {
 };
 const geometryCache = new WeakMap<Document, PageGeometry>();
 
-export function formatProgressLabel(progress: number) {
-  return formatProgressPercent(progress);
-}
 export function formatResourceStripPageCounter(
   locator: ReadiumLocator,
   publication: ReadiumPublicationLike,
   metrics?: { resourceCurrent: number; resourceTotal: number; publicationCurrent: number; publicationTotal: number },
 ) {
-  const page = pageFromLocator(locator, publication);
-  if (!metrics) return `全书位置 ${page.current} / ${page.total} · ${formatProgressPercent(progressionFromLocator(locator, publication))}`;
+  if (!metrics) return formatProgressPercent(progressionFromLocator(locator, publication));
   const progress = progressionFromLocator(locator, publication);
   const chapter = chapterPageFromProgress(publication, progress, { current: metrics.publicationCurrent, total: metrics.publicationTotal });
-  return `本章屏 ${chapter.current} / ${chapter.total} · 全书屏 ${metrics.publicationCurrent} / ${metrics.publicationTotal} · 全书位置 ${page.current} / ${page.total} · ${formatProgressPercent(progress)}`;
+  return `本章屏 ${chapter.current} / ${chapter.total} · 全书屏 ${metrics.publicationCurrent} / ${metrics.publicationTotal} · ${formatProgressPercent(progress)}`;
 }
 export function formatEpubPageCounter(navigator: EpubNavigator, locator: ReadiumLocator, publication: ReadiumPublicationLike) {
   const iframe = getLiveReadiumIframe(currentReadiumFrame(navigator));
@@ -49,14 +44,12 @@ export function formatEpubPageCounter(navigator: EpubNavigator, locator: Readium
   const extent = geometry.horizontal ? geometry.scrollWidth : geometry.scrollHeight;
   const total = Math.max(1, Math.ceil((extent - 1) / geometry.stride));
   const current = Math.max(1, Math.min(total, Math.floor((offset + 1) / geometry.stride) + 1));
-  const end = Math.min(total, current + (geometry.horizontal ? geometry.columnCount : 1) - 1);
-  const page = pageFromLocator(locator, publication);
   const layoutKey = [geometry.viewportWidth, geometry.viewportHeight, geometry.columnCount, geometry.columnGap, geometry.horizontal].join(':');
   const publicationPage = updatePublicationPageMap(publication, locator.href, current, total, layoutKey);
   const progress = progressionFromLocator(locator, publication);
   const chapter = chapterPageFromDocument(publication, locator.href, doc || undefined, geometry, current)
     || { current, total };
-  return `本章${geometry.horizontal ? '页' : '屏'} ${chapter.current} / ${chapter.total} · 全书页 ${publicationPage.current} / ${publicationPage.total}${publicationPage.estimated ? '（估算）' : ''} · 当前资源 ${end > current ? `${current}–${end}` : current} / ${total} · 全书位置 ${page.current} / ${page.total} · ${formatProgressPercent(progress)}`;
+  return `本章${geometry.horizontal ? '页' : '屏'} ${chapter.current} / ${chapter.total} · 全书页 ${publicationPage.current} / ${publicationPage.total}${publicationPage.estimated ? '（估算）' : ''} · ${formatProgressPercent(progress)}`;
 }
 function chapterPageFromDocument(
   publication: ReadiumPublicationLike,
@@ -148,6 +141,29 @@ export function installReadiumFrameStyles(doc: Document) {
       border-radius: 5px !important; cursor: zoom-in !important; display: block;
       height: auto; max-width: 100%; object-fit: contain;
     }
+    :root[data-zenith-book-type="epub"][data-zenith-page-mode="single"] img {
+      box-sizing: border-box !important;
+      break-inside: avoid !important;
+      max-block-size: calc(var(--ZENITH__pageImageMaxHeight, 100vh) - 16px) !important;
+      max-height: calc(var(--ZENITH__pageImageMaxHeight, 100vh) - 16px) !important;
+      object-fit: contain !important;
+      width: auto !important;
+    }
+    :root[data-zenith-book-type="epub"][data-zenith-page-mode="single"] :is(figure, picture):has(img) {
+      break-inside: avoid !important;
+      max-block-size: 100vh !important;
+      max-height: 100vh !important;
+      max-width: 100% !important;
+    }
+    :root[data-zenith-book-type="epub"][data-zenith-page-mode="single"] body > svg,
+    :root[data-zenith-book-type="epub"][data-zenith-page-mode="single"] body > * > svg:only-child {
+      box-sizing: border-box !important;
+      display: block !important;
+      height: calc(var(--ZENITH__pageImageMaxHeight, 100vh) - 16px) !important;
+      max-height: calc(var(--ZENITH__pageImageMaxHeight, 100vh) - 16px) !important;
+      max-width: 100% !important;
+      width: 100% !important;
+    }
     body > img, body > picture, body > svg { margin-inline: auto !important; }
     body:has(img):not(:has(p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote)) {
       align-items: center !important; box-sizing: border-box !important; display: flex !important;
@@ -155,7 +171,9 @@ export function installReadiumFrameStyles(doc: Document) {
       min-height: 100vh !important; padding: 24px !important;
     }
     body:has(img):not(:has(p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote)) img {
-      margin: 0 auto !important; max-height: calc(100vh - 48px) !important; width: auto !important;
+      margin: 0 auto !important;
+      max-height: calc(var(--ZENITH__pageImageMaxHeight, 100vh) - 48px) !important;
+      width: auto !important;
     }
     body:has(img):not(:has(p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote)) > *,
     body:has(img):not(:has(p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote)) :is(div, section, figure) {
@@ -198,7 +216,7 @@ export function createScrollTransitionSnapshot(source: HTMLIFrameElement, contai
   const snapshotDoc = snapshot.contentDocument;
   if (!snapshotDoc) { snapshot.remove(); return undefined; }
   const root = sourceDoc.documentElement.cloneNode(true) as HTMLElement;
-  root.querySelectorAll('script').forEach((script) => script.remove());
+  sanitizeSnapshot(root);
   const base = snapshotDoc.createElement('base');
   base.href = sourceDoc.baseURI;
   (root.querySelector('head') || root).prepend(base);
@@ -212,4 +230,18 @@ export function createScrollTransitionSnapshot(source: HTMLIFrameElement, contai
   };
   sync(); requestAnimationFrame(sync);
   return snapshot;
+}
+
+function sanitizeSnapshot(root: HTMLElement) {
+  root.querySelectorAll('script, iframe, frame, object, embed, portal, meta[http-equiv="refresh"]')
+    .forEach((element) => element.remove());
+  [root, ...Array.from(root.querySelectorAll<HTMLElement>('*'))].forEach((element) => {
+    Array.from(element.attributes).forEach((attribute) => {
+      const name = attribute.name.toLowerCase();
+      const value = attribute.value.trim().toLowerCase();
+      if (name.startsWith('on') || ((name === 'href' || name === 'src' || name === 'xlink:href') && value.startsWith('javascript:'))) {
+        element.removeAttribute(attribute.name);
+      }
+    });
+  });
 }

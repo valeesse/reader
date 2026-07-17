@@ -1,9 +1,14 @@
 import type { EpubNavigator } from '../vendor/readium-navigator';
 import { createScrollTransitionSnapshot, revealReadiumFrames } from './readiumViewerPresentation';
 import { currentReadiumFrame, getLiveReadiumIframe, readiumFrames } from './readiumNavigatorAdapter';
+import { isContinuousScroll } from './readiumViewerModel';
 import type { ReadiumReaderRuntime } from './readiumReaderRuntime';
 
 export function createFrameTransition(runtime: ReadiumReaderRuntime, navigator: EpubNavigator) {
+  // Paged mode already has its own exit/entry animation. Its iframe must stay
+  // under navigator control; cloning it used to create a sandboxed about:blank
+  // frame for every click and made rapid wheel turns race frame replacement.
+  if (!isContinuousScroll(runtime.settingsRef.current)) return () => {};
   const outgoingScrollFrame = getLiveReadiumIframe(currentReadiumFrame(navigator))
     || Array.from(runtime.containerRef.current?.querySelectorAll<HTMLIFrameElement>('.readium-navigator-iframe') || [])
       .find((iframe) => {

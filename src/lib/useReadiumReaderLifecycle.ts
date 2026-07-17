@@ -20,7 +20,7 @@ import { applyReadiumFrameSettingsToNavigator, waitForCurrentFrameReadiness, wai
 import { currentReadiumFrame, getLiveReadiumIframe, isReadiumNavigationReady } from './readiumNavigatorAdapter';
 import { waitUntil } from './readiumViewerNavigation';
 import {
-  formatEpubPageCounter, formatProgressLabel, formatResourceStripPageCounter, revealReadiumFrames,
+  formatEpubPageCounter, formatResourceStripPageCounter, revealReadiumFrames,
 } from './readiumViewerPresentation';
 import type { ReadiumReaderRuntime } from './readiumReaderRuntime';
 import { cleanupReadiumReader } from './readiumReaderCleanup';
@@ -31,7 +31,6 @@ interface LifecycleOptions {
   onTocChange: (items: ReaderTocItem[]) => void;
   setLoading: (value: boolean) => void;
   setLoadError: (value: string) => void;
-  setPageLabel: (value: string) => void;
   setPageCounter: (value: string) => void;
   setPreviewImage: (value: { src: string; name: string } | null) => void;
   setSaveStatus: (value: string) => void;
@@ -115,7 +114,6 @@ export function useReadiumReaderLifecycle(runtime: ReadiumReaderRuntime, options
           if (runtime.resourceStripRef.current !== created || !isContinuousScroll(runtime.settingsRef.current)) return;
           const progress = progressionFromLocator(nextLocator, publication);
           runtime.lastEmittedProgressRef.current = progress;
-          options.setPageLabel(formatProgressLabel(progress));
           options.setPageCounter(formatResourceStripPageCounter(nextLocator, publication, created.pageMetrics));
           runtime.onProgressChangeRef.current(progress);
           runtime.onCurrentTocChangeRef.current(currentTocItemId(nextLocator, publication, created.currentDocument));
@@ -185,7 +183,7 @@ export function useReadiumReaderLifecycle(runtime: ReadiumReaderRuntime, options
         let navigator!: EpubNavigator;
         navigator = new EpubNavigator(
           container, publication,
-          createNavigatorCallbacks(runtime, { book, navigator: () => navigator, publication, openPreview, queueProgressSave, schedulePageCounter, setPageLabel: options.setPageLabel }),
+          createNavigatorCallbacks(runtime, { book, navigator: () => navigator, publication, openPreview, queueProgressSave, schedulePageCounter }),
           publication.positions, initialPosition,
           { preferences: createReadiumPreferences(backingSettings, book.type), defaults: createReadiumDefaults(backingSettings, book.type) },
         );

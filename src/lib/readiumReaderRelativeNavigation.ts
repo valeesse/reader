@@ -14,6 +14,10 @@ import { isContinuousScroll } from './readiumViewerModel';
 import { createFrameTransition } from './readiumReaderTransition';
 import type { ReadiumReaderRuntime } from './readiumReaderRuntime';
 
+const ADJACENT_PREPARATION_TIMEOUT_MS = 650;
+const FRAME_RECOVERY_DELAY_MS = 320;
+const FRAME_RECOVERY_TIMEOUT_MS = 1800;
+
 export function installRelativeNavigation(runtime: ReadiumReaderRuntime) {
   const inspectWarmNavigationPath = (navigator: EpubNavigator, direction: -1 | 1) => {
     const publication = runtime.publicationRef.current;
@@ -46,21 +50,75 @@ export function installRelativeNavigation(runtime: ReadiumReaderRuntime) {
     };
   };
 
+  const recoverPendingNavigationFrame = () => {
+    if (runtime.navigationRetryTimerRef.current !== null) return;
+    runtime.navigationRetryTimerRef.current = window.setTimeout(() => {
+      runtime.navigationRetryTimerRef.current = null;
+      const navigator = runtime.navigatorRef.current;
+      const locator = navigator?.currentLocator;
+      if (!navigator || !locator || runtime.pendingNavigationRef.current === 0
+        || runtime.layoutRestoringRef.current || runtime.navigationLockedRef.current
+        || isReadiumNavigationReady(navigator)) {
+        drainNavigationQueue();
+        return;
+      }
+      runtime.navigationLockedRef.current = true;
+      const token = ++runtime.navigationTokenRef.current;
+      let completed = false;
+      let watchdogId: number | null = null;
+      const finish = () => {
+        if (completed) return;
+        completed = true;
+        if (watchdogId !== null) window.clearTimeout(watchdogId);
+        if (runtime.navigationUnlockTimerRef.current === watchdogId) runtime.navigationUnlockTimerRef.current = null;
+        if (runtime.navigationTokenRef.current !== token) return;
+        runtime.navigationLockedRef.current = false;
+        queueMicrotask(drainNavigationQueue);
+      };
+      watchdogId = window.setTimeout(() => {
+        releaseReadiumNavigationGuard(navigator);
+        finish();
+      }, FRAME_RECOVERY_TIMEOUT_MS);
+      runtime.navigationUnlockTimerRef.current = watchdogId;
+      try {
+        releaseReadiumNavigationGuard(navigator);
+        navigator.go(locator, false, finish);
+      } catch (error) {
+        console.warn('Readium frame recovery failed', error);
+        finish();
+      }
+    }, FRAME_RECOVERY_DELAY_MS);
+  };
+
   const drainNavigationQueue = () => {
     const navigator = runtime.navigatorRef.current;
     const pending = runtime.pendingNavigationRef.current;
-    if (!navigator || pending === 0 || runtime.layoutRestoringRef.current || runtime.navigationLockedRef.current || !isReadiumNavigationReady(navigator)) return;
+    if (!navigator || pending === 0 || runtime.layoutRestoringRef.current || runtime.navigationLockedRef.current) return;
+    if (!isReadiumNavigationReady(navigator)) {
+      recoverPendingNavigationFrame();
+      return;
+    }
     const direction: -1 | 1 = pending > 0 ? 1 : -1;
     const warmNavigation = inspectWarmNavigationPath(navigator, direction);
     const warmPath = warmNavigation.warm;
     if (warmNavigation.detail.crossesResource && !warmPath && runtime.navigationRetryCountRef.current === 0) {
       runtime.navigationLockedRef.current = true;
       runtime.navigationRetryCountRef.current = 1;
+      const token = ++runtime.navigationTokenRef.current;
       const href = navigator.currentLocator?.href || '';
-      void runtime.operations.prepareAdjacentLayouts(href, direction).finally(() => {
+      let released = false;
+      const releasePreparation = () => {
+        if (released) return;
+        released = true;
+        window.clearTimeout(timeoutId);
+        if (runtime.navigationTokenRef.current !== token) return;
         runtime.navigationLockedRef.current = false;
         drainNavigationQueue();
-      });
+      };
+      const timeoutId = window.setTimeout(releasePreparation, ADJACENT_PREPARATION_TIMEOUT_MS);
+      void runtime.operations.prepareAdjacentLayouts(href, direction)
+        .catch((error) => console.warn('Readium adjacent layout preparation failed', error))
+        .finally(releasePreparation);
       return;
     }
     runtime.navigationRetryCountRef.current = 0;
@@ -151,12 +209,14 @@ export function installRelativeNavigation(runtime: ReadiumReaderRuntime) {
     }
   };
 
-  const navigatePage = (direction: -1 | 1) => {
+  const navigatePage = (direction: -1 | 1, coalesce = false) => {
     if (isContinuousScroll(runtime.settingsRef.current) && runtime.resourceStripRef.current) {
       runtime.resourceStripRef.current.turn(direction);
       return;
     }
-    runtime.pendingNavigationRef.current = Math.max(-12, Math.min(12, runtime.pendingNavigationRef.current + direction));
+    runtime.pendingNavigationRef.current = coalesce
+      ? direction
+      : Math.max(-12, Math.min(12, runtime.pendingNavigationRef.current + direction));
     runtime.navigationStartedAtRef.current ??= performance.now();
     if (runtime.deferredDirectionRef.current !== direction) {
       runtime.deferredDirectionRef.current = direction;

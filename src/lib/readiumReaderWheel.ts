@@ -2,8 +2,8 @@ import { normalizeWheelDelta } from './readiumFrameNavigation';
 import { isContinuousScroll } from './readiumViewerModel';
 import type { ReadiumReaderRuntime } from './readiumReaderRuntime';
 
-const WHEEL_PAGE_THRESHOLD = 80;
-const WHEEL_GESTURE_RESET_MS = 180;
+const WHEEL_PAGE_THRESHOLD = 48;
+const WHEEL_GESTURE_RESET_MS = 140;
 
 export function installWheelController(runtime: ReadiumReaderRuntime) {
   const releaseScrollBoundaryGestureAfterQuietPeriod = () => {
@@ -45,7 +45,9 @@ export function installWheelController(runtime: ReadiumReaderRuntime) {
     runtime.wheelDeltaRef.current += dominantDelta;
     if (Math.abs(runtime.wheelDeltaRef.current) < WHEEL_PAGE_THRESHOLD) return;
     runtime.wheelDeltaRef.current = 0;
-    runtime.operations.navigatePage(dominantDelta > 0 ? 1 : -1);
+    // Do not impose a time cooldown. Relative navigation coalesces wheel input
+    // to one pending turn while the navigator/layout is busy.
+    runtime.operations.navigatePage(dominantDelta > 0 ? 1 : -1, true);
   };
 
   const navigateContinuousScrollBoundary = (event: WheelEvent, wnd: Window) => {

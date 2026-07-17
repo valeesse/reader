@@ -8,6 +8,7 @@ import { applyReadiumFrameSettingsToNavigator, waitForLayoutFrames } from './rea
 import { navigateToLocator, waitUntil } from './readiumViewerNavigation';
 import { retargetLocatorViewport, snapshotLocator, snapshotVisibleTextLocator } from './readiumViewerAnchors';
 import { createReadiumPreferences, isContinuousScroll } from './readiumViewerModel';
+import { releaseReadiumNavigationGuard } from './readiumNavigatorAdapter';
 import { invalidateReadiumPageGeometry, revealReadiumFrames } from './readiumViewerPresentation';
 import type { ReadiumReaderRuntime } from './readiumReaderRuntime';
 
@@ -209,6 +210,21 @@ export function useReadiumReaderResize(runtime: ReadiumReaderRuntime, loading: b
           || runtime.resizeAnchorRef.current
           || snapshotVisibleTextLocator(navigator, runtime.appliedLayoutSettingsRef.current)
           || snapshotLocator(navigator.currentLocator);
+        // A resize invalidates the iframe geometry used by an in-flight turn.
+        // Cancel its guard/watchdogs before rebuilding; queued wheel input is
+        // preserved and drained against the resized frame in finally.
+        runtime.navigationTokenRef.current += 1;
+        if (runtime.navigationUnlockTimerRef.current !== null) {
+          window.clearTimeout(runtime.navigationUnlockTimerRef.current);
+          runtime.navigationUnlockTimerRef.current = null;
+        }
+        if (runtime.navigationRetryTimerRef.current !== null) {
+          window.clearTimeout(runtime.navigationRetryTimerRef.current);
+          runtime.navigationRetryTimerRef.current = null;
+        }
+        releaseReadiumNavigationGuard(navigator);
+        runtime.navigationLockedRef.current = false;
+        runtime.navigationRetryCountRef.current = 0;
         runtime.layoutRestoringRef.current = true;
         try {
           runtime.suppressResizeUntilRef.current = performance.now() + 24;

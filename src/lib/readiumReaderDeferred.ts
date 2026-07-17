@@ -2,7 +2,7 @@ import { cancelReaderIdle, scheduleReaderIdle } from './readerScheduler';
 import { readerRuntimePolicy } from './readerRuntimePolicy';
 import { invalidatePublicationPositionRanges, progressionFromLocator } from './readiumPublication';
 import { createReaderLayoutKey } from './readerLayoutCache';
-import { formatEpubPageCounter, formatProgressLabel } from './readiumViewerPresentation';
+import { formatEpubPageCounter } from './readiumViewerPresentation';
 import { isContinuousScroll } from './readiumViewerModel';
 import { applyReadiumFrameSettings, waitForFrameReadiness, waitForLayoutFrames } from './readiumFrameLayout';
 import { isNearResourceBoundary, yieldForReaderPreparation } from './readiumFrameNavigation';
@@ -14,7 +14,6 @@ const STABLE_PREFETCH_RADIUS = readerRuntimePolicy().contentPrefetchRadius;
 export function installDeferredOperations(
   runtime: ReadiumReaderRuntime,
   setPageCounter: (value: string) => void,
-  setPageLabel: (value: string) => void,
 ) {
   const cancelPositionRefinement = () => {
     if (runtime.refinementTimerRef.current !== null) window.clearTimeout(runtime.refinementTimerRef.current);
@@ -137,7 +136,6 @@ export function installDeferredOperations(
               setPageCounter(formatEpubPageCounter(navigator, navigator.currentLocator, publication));
               const progress = progressionFromLocator(navigator.currentLocator, publication);
               runtime.lastEmittedProgressRef.current = progress;
-              setPageLabel(formatProgressLabel(progress));
               runtime.onProgressChangeRef.current(progress);
             }
           }

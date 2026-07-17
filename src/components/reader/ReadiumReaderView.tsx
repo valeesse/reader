@@ -20,7 +20,6 @@ export function ReadiumReaderView({
   loadError,
   loading,
   pageCounter,
-  pageLabel,
   previewImage,
   resourceStripHostRef,
   retry,
@@ -50,12 +49,6 @@ export function ReadiumReaderView({
 
       <NavigationButton direction="backward" chromeVisible={chromeVisible} onClick={goBackward} />
       <NavigationButton direction="forward" chromeVisible={chromeVisible} onClick={goForward} />
-
-      {pageLabel && (
-        <div className={`absolute bottom-8 left-1/2 z-30 -translate-x-1/2 rounded-[5px] border border-black/10 bg-white/70 px-3 py-1.5 text-[11px] font-medium text-black/55 shadow-sm backdrop-blur-xl transition-opacity dark:border-white/10 dark:bg-[#1C1C1E]/70 dark:text-white/55 ${chromeVisible ? 'opacity-100' : 'opacity-0'}`}>
-          {pageLabel}
-        </div>
-      )}
 
       <ReaderPageCounter value={pageCounter} />
       <ImagePreview

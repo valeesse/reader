@@ -43,7 +43,8 @@ export function readiumNavigationInFlight(navigator: EpubNavigator) {
 }
 
 export function releaseReadiumNavigationGuard(navigator: EpubNavigator) {
-  (navigator as InternalNavigator)._isNavigating = false;
+  if (typeof navigator.recoverNavigation === 'function') navigator.recoverNavigation();
+  else (navigator as InternalNavigator)._isNavigating = false;
 }
 
 export function navigatorHasPreparedFrame(navigator: EpubNavigator, href: string) {

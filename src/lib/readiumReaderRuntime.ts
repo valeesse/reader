@@ -18,7 +18,7 @@ export interface ReadiumReaderOperations {
   enqueueLayout: (operation: () => Promise<void>) => void;
   navigateByWheel: (event: WheelEvent) => void;
   navigateContinuousScrollBoundary: (event: WheelEvent, wnd: Window) => void;
-  navigatePage: (direction: -1 | 1) => void;
+  navigatePage: (direction: -1 | 1, coalesce?: boolean) => void;
   prepareAdjacentLayouts: (href: string, direction: ReaderDirection) => Promise<void>;
   scheduleDeferredWork: (href: string, direction: ReaderDirection, restartRefinement: boolean) => void;
   scheduleStableAnchorCapture: (navigator: EpubNavigator, remainingFrames?: number) => void;

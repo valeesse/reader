@@ -25,7 +25,6 @@ export function useReadiumReader({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [reloadToken, setReloadToken] = useState(0);
-  const [pageLabel, setPageLabel] = useState('');
   const [pageCounter, setPageCounter] = useState('');
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
   const [savingImage, setSavingImage] = useState(false);
@@ -36,7 +35,7 @@ export function useReadiumReader({
   runtime.bookType = book.type;
 
   installLayoutOperations(runtime);
-  installDeferredOperations(runtime, setPageCounter, setPageLabel);
+  installDeferredOperations(runtime, setPageCounter);
   installRelativeNavigation(runtime);
   installWheelController(runtime);
   installAbsoluteNavigation(runtime);
@@ -49,7 +48,7 @@ export function useReadiumReader({
   useEffect(() => { runtime.previewImageRef.current = previewImage; }, [previewImage]);
 
   useReadiumReaderLifecycle(runtime, {
-    book, reloadToken, onTocChange, setLoading, setLoadError, setPageLabel,
+    book, reloadToken, onTocChange, setLoading, setLoadError,
     setPageCounter, setPreviewImage, setSaveStatus,
   });
   useReadiumReaderSettingsLayout(runtime, settings);
@@ -89,7 +88,6 @@ export function useReadiumReader({
     loadError,
     loading,
     pageCounter,
-    pageLabel,
     previewImage,
     resourceStripHostRef: runtime.resourceStripHostRef,
     retry: () => setReloadToken((value) => value + 1),
