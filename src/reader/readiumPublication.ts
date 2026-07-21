@@ -5,7 +5,7 @@ import {
   getEpubPositionCounts,
   prefetchEpubResources,
   openEpubBook,
-} from './native';
+} from '../lib/native';
 import { getCachedEpubPositionCounts, saveCachedEpubPositionCounts } from './publicationPositionCache';
 import { EpubResourceManager } from './epubResourceManager';
 import { LinkCollection, ReadiumLink, ReadiumMetadata } from './readiumPublicationModel';

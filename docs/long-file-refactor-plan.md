@@ -13,15 +13,15 @@
 | 原文件 | 拆分结果 |
 | --- | --- |
 | `src/lib/native.ts` | 保留阅读器和桌面桥接；图片导出迁至 `nativeImage.ts`；WebDAV 迁至 `nativeWebDav.ts` |
-| `src/components/Library.tsx` | 保留筛选、排序和列表状态；书籍卡片、系列卡片和系列详情迁至 `LibraryTiles.tsx` |
+| `src/components/library/Library.tsx` | 保留筛选、排序和列表状态；书籍卡片、系列卡片和系列详情迁至 `LibraryTiles.tsx` |
 | `src/store/AppStore.tsx` | 保留 Context 和持久化编排；元数据系列识别迁至 `metadataSeries.ts` |
-| `src/ReaderLayoutNext.tsx` | 保留阅读器壳、目录、进度和面板开关；设置面板及控件迁至两个独立组件 |
+| `src/components/reader/ReaderLayout.tsx` | 保留阅读器壳、目录、进度和面板开关；设置面板及控件迁至两个独立组件 |
 
 上述入口均已降到 300 行以内，并保留原有公开 import。
 
 ## 剩余超长文件
 
-### `src/ReadiumReaderViewer.tsx`
+### `src/components/reader/ReadiumReaderViewer.tsx`
 
 当前职责混合了 publication 生命周期、Readium navigator 生命周期、布局事务、翻页队列、绝对导航、连续模式、进度保存、图片交互、页面计数和 DOM 几何。
 
@@ -37,7 +37,7 @@
 
 最终组件仅负责创建这些 hooks、组合 refs 和渲染加载/错误/图片预览 UI。每个 hook 必须拥有自己的取消令牌，禁止重新引入跨 hook 的隐式 timer/ref 写入。
 
-### `src/lib/readiumPublication.ts`
+### `src/reader/readiumPublication.ts`
 
 建议拆为：
 
@@ -50,7 +50,7 @@
 
 兼容文件 `readiumPublication.ts` 最终只做 re-export，避免一次性修改所有调用方。
 
-### `src/lib/continuousResourceStrip.ts`
+### `src/reader/continuousResourceStrip.ts`
 
 建议拆为：
 
@@ -62,7 +62,7 @@
 
 窗口管理器需要继续保证“插入视口上方时补偿 scrollTop”的原子性，不能改成无状态工具函数。
 
-### `src/components/SettingsView.tsx`
+### `src/components/settings/SettingsView.tsx`
 
 建议拆为：
 

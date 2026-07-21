@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Book } from '../types';
-import { resolveBookCover } from '../lib/backend';
-import { isTauriApp, toLocalAssetUrl } from '../lib/native';
+import { Book } from '../../types';
+import { resolveBookCover } from '../../lib/backend';
+import { isTauriApp, toLocalAssetUrl } from '../../lib/native';
 
 export function BookCover({
   book,

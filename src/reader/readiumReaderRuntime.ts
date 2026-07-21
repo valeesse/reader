@@ -4,7 +4,7 @@ import type { AppSettings, BookType } from '../types';
 import type { ContinuousResourceStrip } from './continuousResourceStrip';
 import type { ReaderLayoutCache } from './readerLayoutCache';
 import type { ReaderLayoutTransactionQueue } from './readerLayoutTransactions';
-import type { ReaderIdleHandle } from './readerScheduler';
+import type { ReaderIdleHandle } from '../lib/readerScheduler';
 import type { ReadiumLocatorLike, ReadiumPublicationLike } from './readiumPublication';
 
 export type Ref<T> = { current: T };

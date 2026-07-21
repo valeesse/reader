@@ -1,15 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Book } from './types';
-import { useAppContext } from './store/AppStore';
-import { Sidebar } from './components/Sidebar';
-import { Library } from './components/Library';
-import { SettingsView } from './components/SettingsView';
-import { WebDavLibrary } from './components/WebDavLibrary';
-import { SeriesView } from './SeriesViewNext';
-import { prewarmLibraryDialogDirectory } from './lib/native';
-import { getLibraryRoot, onScanProgress, pickLibraryRoot, rescanBooks, runtimeCapabilities, setLibraryRoot } from './lib/backend';
-import { cancelReaderIdle, scheduleReaderIdle } from './lib/readerScheduler';
+import { Book } from '../../types';
+import { useAppContext } from '../../store/AppStore';
+import { Sidebar } from './Sidebar';
+import { Library } from '../library/Library';
+import { SettingsView } from '../settings/SettingsView';
+import { WebDavLibrary } from '../library/WebDavLibrary';
+import { SeriesView } from '../library/SeriesView';
+import { prewarmLibraryDialogDirectory } from '../../lib/native';
+import { getLibraryRoot, onScanProgress, pickLibraryRoot, rescanBooks, runtimeCapabilities, setLibraryRoot } from '../../lib/backend';
+import { cancelReaderIdle, scheduleReaderIdle } from '../../lib/readerScheduler';
 
 export function LibraryShell({ onReadBook, onPresentable }: { onReadBook: (book: Book) => void; onPresentable: () => void }) {
   const { addBooks } = useAppContext();

@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react';
-import { runtimeCapabilities } from '../lib/backend';
-import { clearReaderCache, downloadWebDavSnapshot, getReaderCacheStats, ReaderCacheStats, uploadWebDavSnapshot } from '../lib/native';
-import { cancelReaderIdle, ReaderIdleHandle, scheduleReaderIdle } from '../lib/readerScheduler';
-import { applySyncSnapshot, createSyncSnapshot } from '../lib/storage';
-import { useAppContext } from '../store/AppStore';
-import { SyncSnapshot } from '../types';
+import { runtimeCapabilities } from '../../lib/backend';
+import { clearReaderCache, downloadWebDavSnapshot, getReaderCacheStats, ReaderCacheStats, uploadWebDavSnapshot } from '../../lib/native';
+import { cancelReaderIdle, ReaderIdleHandle, scheduleReaderIdle } from '../../lib/readerScheduler';
+import { applySyncSnapshot, createSyncSnapshot } from '../../lib/storage';
+import { useAppContext } from '../../store/AppStore';
+import { SyncSnapshot } from '../../types';
 import {
   AppearanceSettingsSection,
   CacheSettingsSection,
   LibrarySettingsSection,
   ReadingDefaultsSection,
-} from './settings/SettingsSections';
-import { WebDavSettingsSection } from './settings/WebDavSettingsSection';
+} from './SettingsSections';
+import { WebDavSettingsSection } from './WebDavSettingsSection';
 
 export function SettingsView({
   onRescan,

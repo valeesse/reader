@@ -1,5 +1,5 @@
 import { Book } from '../types';
-import { isDesktopRuntime } from './backend';
+import { isDesktopRuntime } from '../lib/backend';
 
 export function prewarmWebReaderOnIntent(book: Book) {
   if (isDesktopRuntime) return;

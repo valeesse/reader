@@ -1,7 +1,7 @@
 import { AppSettings, BookType } from '../types';
 import { ReadiumLocatorLike, ReadiumPublicationLike } from './readiumPublication';
 import { readerThemeColors } from './readerDocumentStyles';
-import { cancelReaderIdle, ReaderIdleHandle, scheduleReaderIdle, yieldReaderTask } from './readerScheduler';
+import { cancelReaderIdle, ReaderIdleHandle, scheduleReaderIdle, yieldReaderTask } from '../lib/readerScheduler';
 import { readerRuntimePolicy } from './readerRuntimePolicy';
 import { clamp, waitForScrollCompletion } from './continuousResourceDom';
 import {

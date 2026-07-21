@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAppContext } from '../store/AppStore';
 import type { ReaderViewerProps } from '../components/reader/ReaderShared';
-import { saveImageFromSource } from './native';
+import { saveImageFromSource } from '../lib/native';
 import { useReadiumReaderRuntime } from './useReadiumReaderRuntime';
 import { installDeferredOperations } from './readiumReaderDeferred';
 import { installLayoutOperations, useReadiumReaderResize, useReadiumReaderSettingsLayout } from './useReadiumReaderLayout';

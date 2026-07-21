@@ -1,4 +1,4 @@
-import { readEpubResource, toLocalAssetUrl } from './native';
+import { readEpubResource, toLocalAssetUrl } from '../lib/native';
 import { estimateStringBytes, ReaderContentCache, ReaderWorkScheduler, adaptiveReaderBudget } from './readerCacheCoordinator';
 import type { ReadiumResourceLike } from './readiumPublication';
 import { ReadiumLink } from './readiumPublicationModel';

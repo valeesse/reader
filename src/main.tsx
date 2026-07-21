@@ -24,8 +24,8 @@ const startup = (window as Window & { __ZENITH_STARTUP__?: StartupState }).__ZEN
 const appModulePromise = import('./App.tsx');
 const resumeWarmupPromise = startup?.resumeBook
   ? Promise.all([
-      import('./ReaderLayoutNext'),
-      import('./lib/readerPublication').then((module) => {
+      import('./components/reader/ReaderLayout'),
+      import('./reader/readerPublication').then((module) => {
         // Start native parsing/index restoration now; ReaderLayout will consume
         // this same promise as soon as it mounts.
         void module.prewarmReaderPublication(startup.resumeBook!).catch(() => {});

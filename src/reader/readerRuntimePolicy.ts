@@ -1,4 +1,4 @@
-import { isDesktopRuntime } from './backend';
+import { isDesktopRuntime } from '../lib/backend';
 
 type NavigatorWithConnection = Navigator & {
   connection?: {

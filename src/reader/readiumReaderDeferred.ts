@@ -1,4 +1,4 @@
-import { cancelReaderIdle, scheduleReaderIdle } from './readerScheduler';
+import { cancelReaderIdle, scheduleReaderIdle } from '../lib/readerScheduler';
 import { readerRuntimePolicy } from './readerRuntimePolicy';
 import { invalidatePublicationPositionRanges, progressionFromLocator } from './readiumPublication';
 import { createReaderLayoutKey } from './readerLayoutCache';

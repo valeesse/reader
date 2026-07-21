@@ -1,5 +1,5 @@
 import { EpubNavigator } from '../vendor/readium-navigator';
-import { yieldReaderTask } from './readerScheduler';
+import { yieldReaderTask } from '../lib/readerScheduler';
 import { currentReadiumFrame, getLiveReadiumIframe, readiumFrames } from './readiumNavigatorAdapter';
 
 export function snapContinuousResourceBoundary(navigator: EpubNavigator, direction: -1 | 1, remainingFrames = 6) {

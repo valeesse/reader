@@ -1,8 +1,8 @@
 import { ArrowLeft, Layers } from 'lucide-react';
 import { motion } from 'motion/react';
-import { Book } from '../types';
-import { displayBookFileName } from '../lib/series';
-import { prewarmWebReaderOnIntent } from '../lib/readerWarmup';
+import { Book } from '../../types';
+import { displayBookFileName } from '../../lib/series';
+import { prewarmWebReaderOnIntent } from '../../reader/readerWarmup';
 import { BookCover } from './BookCover';
 import type { LibraryEntry } from './Library';
 

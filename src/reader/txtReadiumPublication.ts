@@ -1,4 +1,4 @@
-import { closeTxtBook, NativeTxtBookInfo, openTxtBook, readTxtWindow } from './native';
+import { closeTxtBook, NativeTxtBookInfo, openTxtBook, readTxtWindow } from '../lib/native';
 import {
   createLocator,
   LinkCollection,

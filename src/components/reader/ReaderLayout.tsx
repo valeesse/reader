@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Book, ReaderSeekRequest, ReaderTocItem } from './types';
-import { useAppContext } from './store/AppStore';
+import { Book, ReaderSeekRequest, ReaderTocItem } from '../../types';
+import { useAppContext } from '../../store/AppStore';
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.mjs';
 import List from 'lucide-react/dist/esm/icons/list.mjs';
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.mjs';
 import StepForward from 'lucide-react/dist/esm/icons/step-forward.mjs';
 import { AnimatePresence, motion } from 'motion/react';
 import { ReadiumReaderViewer } from './ReadiumReaderViewer';
-import { ReaderSettingsPanel } from './components/reader/ReaderSettingsPanel';
+import { ReaderSettingsPanel } from './ReaderSettingsPanel';
 
 interface ReaderLayoutProps {
   book: Book;

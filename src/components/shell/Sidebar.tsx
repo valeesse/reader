@@ -1,8 +1,8 @@
 import React from 'react';
 import { Book as BookIcon, Cloud, Settings as SettingsIcon, BookOpen, Layers } from 'lucide-react';
-import { cn } from '../lib/utils';
-import { useAppContext } from '../store/AppStore';
-import { runtimeCapabilities } from '../lib/backend';
+import { cn } from '../../lib/utils';
+import { useAppContext } from '../../store/AppStore';
+import { runtimeCapabilities } from '../../lib/backend';
 
 interface SidebarProps {
   currentView: 'library' | 'webdav' | 'series' | 'settings';

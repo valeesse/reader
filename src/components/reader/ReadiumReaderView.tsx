@@ -6,7 +6,7 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.mjs';
 import Download from 'lucide-react/dist/esm/icons/download.mjs';
 import LoaderCircle from 'lucide-react/dist/esm/icons/loader-circle.mjs';
 import X from 'lucide-react/dist/esm/icons/x.mjs';
-import type { useReadiumReader } from '../../lib/useReadiumReader';
+import type { useReadiumReader } from '../../reader/useReadiumReader';
 import { ReaderLoadError, ReaderPageCounter } from './ReaderShared';
 
 type ReadiumReaderViewProps = ReturnType<typeof useReadiumReader>;

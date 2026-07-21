@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { useAppContext } from './store/AppStore';
-import { Book } from './types';
+import { useAppContext } from '../../store/AppStore';
+import { Book } from '../../types';
 import { BookOpen, GitMerge, Layers, Plus, Sparkles, Trash2 } from 'lucide-react';
-import { BookCover } from './components/BookCover';
-import { sortBooksInSeries } from './lib/series';
-import { prewarmWebReaderOnIntent } from './lib/readerWarmup';
+import { BookCover } from './BookCover';
+import { sortBooksInSeries } from '../../lib/series';
+import { prewarmWebReaderOnIntent } from '../../reader/readerWarmup';
 
 export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void }) {
   const { series, books, createSeries, updateSeries, deleteSeries, autoCreateMetadataSeries, mergeSeries } = useAppContext();

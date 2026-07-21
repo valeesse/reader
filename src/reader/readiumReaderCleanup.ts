@@ -1,4 +1,4 @@
-import { cancelReaderIdle, type ReaderIdleHandle } from './readerScheduler';
+import { cancelReaderIdle, type ReaderIdleHandle } from '../lib/readerScheduler';
 import type { ReaderTocItem } from '../types';
 import type { ReadiumReaderRuntime } from './readiumReaderRuntime';
 

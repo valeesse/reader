@@ -47,10 +47,10 @@ Zenith Reader 是一个基于 Rust、Tauri 2、React 19 和 Readium 的桌面/We
 关键模块：
 
 - `src/App.tsx`：应用入口与主视图切换
-- `src/components/Library.tsx`：书库列表、搜索、筛选、排序
-- `src/ReaderLayoutNext.tsx`：阅读器外层布局与阅读设置面板
-- `src/ReadiumReaderViewer.tsx`：EPUB / TXT 统一阅读流程
-- `src/lib/txtReadiumPublication.ts`：TXT 虚拟 Publication 与按需 HTML 分片
+- `src/components/library/Library.tsx`：书库列表、搜索、筛选、排序
+- `src/components/reader/ReaderLayout.tsx`：阅读器外层布局与阅读设置面板
+- `src/components/reader/ReadiumReaderViewer.tsx`：EPUB / TXT 统一阅读流程
+- `src/reader/txtReadiumPublication.ts`：TXT 虚拟 Publication 与按需 HTML 分片
 - `src/store/AppStore.tsx`：全局状态、进度和设置管理
 
 ### 原生层

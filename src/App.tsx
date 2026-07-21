@@ -5,10 +5,10 @@ import { markLastReadBook } from './lib/storage';
 import { cancelReaderIdle, ReaderIdleHandle, scheduleReaderIdle } from './lib/readerScheduler';
 import './reader-overrides.css';
 
-let readerLayoutModulePromise: Promise<typeof import('./ReaderLayoutNext')> | undefined;
-const loadReaderLayout = () => readerLayoutModulePromise ||= import('./ReaderLayoutNext');
+let readerLayoutModulePromise: Promise<typeof import('./components/reader/ReaderLayout')> | undefined;
+const loadReaderLayout = () => readerLayoutModulePromise ||= import('./components/reader/ReaderLayout');
 const ReaderLayout = lazy(() => loadReaderLayout().then((module) => ({ default: module.ReaderLayout })));
-const LibraryShell = lazy(() => import('./LibraryShell').then((module) => ({ default: module.LibraryShell })));
+const LibraryShell = lazy(() => import('./components/shell/LibraryShell').then((module) => ({ default: module.LibraryShell })));
 
 function MainLayout() {
   const { books, settings, isLoading, stateReconciled, lastReadBookId } = useAppContext();

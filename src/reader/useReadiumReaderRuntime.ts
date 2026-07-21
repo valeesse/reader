@@ -4,7 +4,7 @@ import type { AppSettings, Book } from '../types';
 import type { ContinuousResourceStrip } from './continuousResourceStrip';
 import { ReaderLayoutCache, createReaderSettingsLayoutFingerprint } from './readerLayoutCache';
 import { ReaderLayoutTransactionQueue } from './readerLayoutTransactions';
-import type { ReaderIdleHandle } from './readerScheduler';
+import type { ReaderIdleHandle } from '../lib/readerScheduler';
 import type { ReadiumLocatorLike, ReadiumPublicationLike } from './readiumPublication';
 import { createReadiumReaderOperations, type ProgressPayload, type ReadiumReaderRuntime } from './readiumReaderRuntime';
 

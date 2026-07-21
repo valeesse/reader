@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Book, BookType, Series } from '../types';
-import { useAppContext } from '../store/AppStore';
+import { Book, BookType, Series } from '../../types';
+import { useAppContext } from '../../store/AppStore';
 import { ArrowDownAZ, ArrowUpAZ, BookOpen, Clock3, Search } from 'lucide-react';
 import { motion } from 'motion/react';
 import { BookCover } from './BookCover';
-import { displayBookFileName, seriesCoverBook, sortBooksInSeries } from '../lib/series';
-import { prewarmWebReaderOnIntent } from '../lib/readerWarmup';
+import { displayBookFileName, seriesCoverBook, sortBooksInSeries } from '../../lib/series';
+import { prewarmWebReaderOnIntent } from '../../reader/readerWarmup';
 import { BookTile, SeriesDetailView, SeriesTile } from './LibraryTiles';
 
 type SortKey = 'fileName' | 'addedAt' | 'recent';

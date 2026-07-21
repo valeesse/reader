@@ -3,10 +3,10 @@ import { EpubNavigator, type ReadiumLocator } from '../vendor/readium-navigator'
 import type { AppSettings, Book, ReaderTocItem } from '../types';
 import { createReaderPublication } from './readerPublication';
 import { createReaderLayoutKey } from './readerLayoutCache';
-import { cancelReaderIdle, scheduleReaderIdle, type ReaderIdleHandle } from './readerScheduler';
+import { cancelReaderIdle, scheduleReaderIdle, type ReaderIdleHandle } from '../lib/readerScheduler';
 import { recordReaderMetric } from './readerPerformance';
 import { ContinuousResourceStrip } from './continuousResourceStrip';
-import { getProgress, saveProgress } from './storage';
+import { getProgress, saveProgress } from '../lib/storage';
 import {
   deserializeReadiumLocator, progressionFromLocator, serializeReadiumLocator,
   type ReadiumLocatorLike, type ReadiumPublicationLike,
