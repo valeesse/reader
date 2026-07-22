@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
 import { Book } from '../../types';
 
@@ -24,6 +24,7 @@ export function SeriesEditorDialog({
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState(() => new Set(initialBookIds));
   const [submitting, setSubmitting] = useState(false);
+  const dialogRef = useRef<HTMLElement>(null);
   const orderedBooks = useMemo(
     () => [...books].sort((a, b) => (
       (a.fileName || a.title).localeCompare(b.fileName || b.title, 'zh-Hans-CN')
@@ -46,11 +47,27 @@ export function SeriesEditorDialog({
 
   useEffect(() => setPage(1), [query]);
   useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !submitting) onCancel();
+      if (event.key !== 'Tab') return;
+      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled)');
+      if (!focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      previousFocus?.focus();
+    };
   }, [onCancel, submitting]);
 
   const toggleBook = (bookId: string) => {
@@ -93,10 +110,11 @@ export function SeriesEditorDialog({
       }}
     >
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="series-editor-title"
-        className="flex max-h-[min(780px,calc(100vh-1.5rem))] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-black/10 bg-[#FBFAF7] shadow-2xl dark:border-white/10 dark:bg-[#1C1C1E]"
+        className="flex max-h-[min(780px,calc(100vh-1.5rem))] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-black/10 bg-[#FFFDF9] shadow-[0_24px_72px_rgba(0,0,0,0.24)] dark:border-white/10 dark:bg-[#1C1C1E]"
       >
         <header className="flex items-center justify-between border-b border-black/5 px-4 py-3 dark:border-white/10 sm:px-6">
           <div>

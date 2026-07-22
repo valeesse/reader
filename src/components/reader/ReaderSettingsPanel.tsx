@@ -30,8 +30,10 @@ export function ReaderSettingsPanel({
       animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
       exit={{ opacity: 0, x: 8, y: -6, scale: 0.98 }}
       transition={{ type: 'spring', stiffness: 420, damping: 34, mass: 0.7 }}
-      style={{ transformOrigin: 'top right' }}
-      className="reader-settings-panel absolute top-16 right-5 w-[min(410px,calc(100vw-32px))] max-h-[calc(100vh-92px)] overflow-y-auto bg-[#F7F7F5]/94 dark:bg-[#171816]/94 backdrop-blur-2xl border border-black/[0.08] dark:border-white/[0.09] shadow-2xl z-50"
+      style={{ transformOrigin: 'bottom center' }}
+      role="dialog"
+      aria-label="阅读设置"
+      className="reader-settings-panel absolute inset-x-0 bottom-0 z-50 max-h-[82vh] w-full overflow-y-auto rounded-t-3xl border border-black/[0.08] bg-[#F7F7F5]/96 shadow-2xl backdrop-blur-2xl dark:border-white/[0.09] dark:bg-[#171816]/96 sm:inset-x-auto sm:bottom-auto sm:right-5 sm:top-16 sm:max-h-[calc(100vh-92px)] sm:w-[min(410px,calc(100vw-32px))] sm:rounded-2xl"
       onClick={(event) => event.stopPropagation()}
     >
       <div className="sticky top-0 z-20 border-b border-black/[0.06] bg-[#F7F7F5]/90 px-5 py-4 backdrop-blur-xl dark:border-white/[0.07] dark:bg-[#171816]/90">

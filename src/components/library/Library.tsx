@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Book, BookType, Series } from '../../types';
 import { useAppContext } from '../../store/AppStore';
-import { ArrowDownAZ, ArrowUpAZ, BookOpen, Clock3, Search } from 'lucide-react';
+import { ArrowDownAZ, ArrowUpAZ, BookOpen, Clock3, RotateCcw, Search, SearchX, Settings2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { BookCover } from './BookCover';
 import { displayBookFileName, seriesCoverBook, sortBooksInSeries } from '../../lib/series';
 import { prewarmWebReaderOnIntent } from '../../reader/readerWarmup';
 import { BookTile, SeriesDetailView, SeriesTile } from './LibraryTiles';
 import { ScrollToTopButton } from './ScrollToTopButton';
+import { runtimeCapabilities } from '../../lib/backend';
 
 type SortKey = 'fileName' | 'addedAt' | 'recent';
 type SortOrder = 'asc' | 'desc';
@@ -18,7 +19,7 @@ export type LibraryEntry =
 
 const BOOK_BATCH_SIZE = 72;
 
-export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
+export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Book) => void; onOpenSettings: () => void }) {
   const { books, progress, series } = useAppContext();
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
@@ -125,6 +126,7 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
   }, [libraryEntries, query, sortKey, sortOrder, typeFilter]);
 
   const visibleEntries = filteredEntries.slice(0, visibleCount);
+  const filteredBookCount = filteredEntries.reduce((total, entry) => total + (entry.kind === 'series' ? entry.books.length : 1), 0);
   const selectedSeriesEntry = useMemo(
     () => libraryEntries.find((entry): entry is Extract<LibraryEntry, { kind: 'series' }> => entry.kind === 'series' && entry.id === selectedSeriesId) || null,
     [libraryEntries, selectedSeriesId],
@@ -140,6 +142,11 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
     }
   }, [libraryEntries, selectedSeriesId]);
 
+  useEffect(() => {
+    document.documentElement.classList.toggle('series-detail-open', Boolean(selectedSeriesId));
+    return () => document.documentElement.classList.remove('series-detail-open');
+  }, [selectedSeriesId]);
+
   const toggleSortOrder = () => {
     setSortOrder((current) => (current === 'asc' ? 'desc' : 'asc'));
   };
@@ -154,20 +161,36 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
 
   if (books.length === 0) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center text-black/45 dark:text-gray-400 bg-[#FBFAF7]/80 dark:bg-[#171916]/80">
-        <BookOpen className="w-14 h-14 mb-5 opacity-25" strokeWidth={1.3} />
-        <h2 className="text-xl font-medium text-gray-900 dark:text-gray-100 mb-2">暂无书籍</h2>
-        <p className="text-sm">请前往设置中添加本地文件夹以扫描 EPUB 和 TXT 文件。</p>
+      <div className="flex flex-1 flex-col items-center justify-center bg-[#FBFAF7]/80 px-6 text-center dark:bg-[#171916]/80">
+        <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-3xl bg-[#087DF1]/10 text-[#087DF1]">
+          <BookOpen className="h-10 w-10" strokeWidth={1.4} />
+        </div>
+        <h2 className="mb-2 text-xl font-semibold text-gray-900 dark:text-gray-100">建立你的书架</h2>
+        <p className="max-w-md text-sm leading-6 text-black/60 dark:text-white/60">
+          {runtimeCapabilities.mutableLibraryRoot
+            ? '选择本地书库目录，Zenith 会扫描其中的 EPUB 与 TXT。'
+            : '服务器书库当前没有可读取的 EPUB 或 TXT，可前往设置重新建立索引。'}
+        </p>
+        <button onClick={onOpenSettings} className="mt-6 inline-flex h-11 items-center gap-2 rounded-xl bg-[#087DF1] px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#006ED6]">
+          <Settings2 className="h-4 w-4" />
+          前往内容库设置
+        </button>
       </div>
     );
   }
 
   return (
     <div className="flex-1 flex relative overflow-hidden">
-      <div className="flex-1 flex flex-col relative bg-[#FBFAF7]/80 dark:bg-[#171916]/80">
+      <div
+        className={`flex-1 flex flex-col relative bg-[#FBFAF7]/80 dark:bg-[#171916]/80 ${selectedSeriesEntry ? 'pointer-events-none select-none' : ''}`}
+        aria-hidden={selectedSeriesEntry ? true : undefined}
+        inert={selectedSeriesEntry ? true : undefined}
+      >
         <header className="h-14 sm:h-16 border-b border-black/[0.045] dark:border-white/5 flex items-center justify-between px-4 sm:px-8 bg-[#FBFAF7]/85 dark:bg-[#171916]/85 backdrop-blur-md sticky top-0 z-10">
           <h1 className="text-lg font-semibold tracking-[0.06em] text-[#1C1C1E] dark:text-white">所有书籍</h1>
-          <span className="text-xs tabular-nums text-black/40 dark:text-white/40">{filteredEntries.length} 本</span>
+          <span className="text-xs tabular-nums text-black/55 dark:text-white/55">
+            {filteredEntries.length} 个条目 · {filteredBookCount} 本书
+          </span>
         </header>
 
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-3 py-4 min-[380px]:px-4 sm:p-6 lg:p-8" onScroll={handleLibraryScroll}>
@@ -177,26 +200,31 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
                 onPointerDown={() => prewarmWebReaderOnIntent(recentBook)}
                 onFocus={() => prewarmWebReaderOnIntent(recentBook)}
                 onClick={() => onReadBook(recentBook)}
-                className="w-full lg:max-w-4xl text-left rounded-2xl border border-black/[0.055] dark:border-white/10 bg-white/55 dark:bg-white/[0.07] p-3 sm:p-4 hover:bg-white/85 dark:hover:bg-white/10 transition-colors"
+                className="app-card w-full overflow-hidden text-left transition-all hover:-translate-y-0.5 hover:border-[#087DF1]/20 hover:shadow-[0_14px_34px_rgba(35,40,33,0.12)] lg:max-w-4xl"
               >
-                <div className="flex items-center gap-4 sm:gap-5">
-                  <div className="w-14 h-[74px] sm:w-20 sm:h-[106px] rounded-xl overflow-hidden bg-[#e4e5df] dark:bg-[#30332f] shrink-0 shadow-[0_6px_18px_rgba(35,40,33,0.12)]">
+                <div className="flex items-center gap-4 bg-gradient-to-r from-[#087DF1]/[0.075] to-transparent p-3 sm:gap-5 sm:p-4">
+                  <div className="h-[82px] w-[62px] shrink-0 overflow-hidden rounded-xl bg-[#e4e5df] shadow-[0_8px_22px_rgba(35,40,33,0.15)] sm:h-[112px] sm:w-[84px]">
                     <BookCover book={recentBook} className="w-full h-full object-cover" compact />
                   </div>
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-xs font-medium text-[#007AFF]">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-[#087DF1]">
                       <Clock3 className="w-4 h-4" />
                       最近阅读
                     </div>
                     <h2 className="mt-1 text-base sm:text-xl font-semibold text-[#1C1C1E] dark:text-white line-clamp-1">{recentBook.title}</h2>
                     <p className="mt-1 text-sm text-black/50 dark:text-white/50 truncate">{recentBook.author}</p>
+                    {typeof progressByBookId.get(recentBook.id)?.scrollPercentage === 'number' && (
+                      <div className="mt-3 h-1.5 w-36 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                        <div className="h-full rounded-full bg-[#087DF1]" style={{ width: `${Math.round((progressByBookId.get(recentBook.id)?.scrollPercentage || 0) * 100)}%` }} />
+                      </div>
+                    )}
                   </div>
                 </div>
               </button>
             )}
 
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5 sm:gap-3 rounded-2xl border border-black/[0.05] dark:border-white/10 bg-white/45 dark:bg-white/[0.06] p-2.5 sm:p-3">
-              <div className="relative min-w-0 lg:w-80 lg:shrink-0">
+            <div className="app-card flex flex-col gap-2.5 p-2.5 sm:p-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="relative min-w-0 lg:w-96 lg:shrink-0">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-black/35 dark:text-white/35" />
                 <input
                   value={query}
@@ -205,12 +233,13 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
                   className="w-full h-10 rounded-xl bg-black/[0.035] dark:bg-white/10 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-[#007AFF]/35"
                 />
               </div>
-              <div className="flex min-w-0 flex-wrap items-center gap-2 lg:flex-nowrap lg:justify-end">
-                <div className="grid min-w-[11.5rem] flex-1 grid-cols-3 rounded-xl bg-black/5 p-1 dark:bg-white/10 lg:w-[13rem] lg:flex-none">
+              <div className="flex min-w-0 items-center gap-2 lg:justify-end">
+                <div className="grid min-w-0 flex-[1.15] grid-cols-3 gap-2 rounded-xl bg-black/5 p-1 dark:bg-white/10 lg:w-[13rem] lg:flex-none">
                   {(['all', 'epub', 'txt'] as TypeFilter[]).map((value) => (
                     <button
                       key={value}
                       onClick={() => setTypeFilter(value)}
+                      aria-pressed={typeFilter === value}
                       className={`h-8 whitespace-nowrap px-2 sm:px-3 rounded-lg text-xs sm:text-sm transition-colors ${typeFilter === value ? 'bg-white dark:bg-[#2C2C2E] shadow-sm text-[#1C1C1E] dark:text-white' : 'text-black/50 dark:text-white/50'}`}
                     >
                       {value === 'all' ? '全部' : value.toUpperCase()}
@@ -220,7 +249,8 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
                 <select
                   value={sortKey}
                   onChange={(event) => setSortKey(event.target.value as SortKey)}
-                  className="h-10 w-[7.75rem] shrink-0 rounded-xl bg-black/[0.035] dark:bg-white/10 px-2 sm:px-3 text-xs sm:text-sm outline-none focus:ring-2 focus:ring-[#007AFF]/35"
+                  aria-label="排序方式"
+                  className="h-10 min-w-0 flex-1 rounded-xl bg-black/[0.035] px-2 text-xs outline-none focus:ring-2 focus:ring-[#087DF1]/35 dark:bg-white/10 sm:px-3 sm:text-sm lg:w-[7.75rem] lg:flex-none"
                 >
                   <option value="recent">最近阅读</option>
                   <option value="fileName">文件名</option>
@@ -228,7 +258,8 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
                 </select>
                 <button
                   onClick={toggleSortOrder}
-                  className="h-10 w-10 shrink-0 rounded-xl bg-black/5 dark:bg-white/10 flex items-center justify-center hover:bg-black/10 dark:hover:bg-white/15 transition-colors"
+                  aria-label={sortOrder === 'asc' ? '当前升序，点击切换为降序' : '当前降序，点击切换为升序'}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-black/5 transition-colors hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
                   title={sortOrder === 'asc' ? '升序' : '降序'}
                 >
                   {sortOrder === 'asc' ? <ArrowUpAZ className="w-4 h-4" /> : <ArrowDownAZ className="w-4 h-4" />}
@@ -245,6 +276,21 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
                 )
               ))}
             </div>
+
+            {filteredEntries.length === 0 && (
+              <div className="flex min-h-[320px] flex-col items-center justify-center px-6 text-center">
+                <SearchX className="mb-4 h-12 w-12 text-black/20 dark:text-white/20" />
+                <h2 className="text-lg font-semibold text-[#1C1C1E] dark:text-white">没有匹配的书籍</h2>
+                <p className="mt-2 text-sm text-black/55 dark:text-white/55">尝试更换关键词或重置当前筛选条件。</p>
+                <button
+                  onClick={() => { setQuery(''); setTypeFilter('all'); }}
+                  className="mt-5 inline-flex h-10 items-center gap-2 rounded-xl bg-black/5 px-4 text-sm font-medium hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  重置筛选
+                </button>
+              </div>
+            )}
 
             {visibleCount < filteredEntries.length && (
               <button

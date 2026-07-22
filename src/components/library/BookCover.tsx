@@ -80,11 +80,28 @@ export function BookCover({
     );
   }
 
+  const palette = fallbackPalette(book);
+
   return (
     <div ref={hostRef} className={fallbackClassName || className}>
-      <div className={`w-full h-full flex flex-col justify-end relative bg-[#E9E7E1] dark:bg-[#30352f] ${compact ? 'p-1.5' : 'p-4'}`}>
-        <p className={`text-[#3e493f] dark:text-[#edf0e9] font-semibold leading-tight ${compact ? 'text-[10px] line-clamp-3' : 'line-clamp-3'}`}>{book.title}</p>
-        {showMeta && <p className="text-[#3e493f]/60 dark:text-white/55 text-xs mt-1 line-clamp-1">{book.author}</p>}
+      <div
+        className={`relative flex h-full w-full flex-col overflow-hidden text-white ${compact ? 'justify-center p-1.5' : 'justify-between p-4 sm:p-5'}`}
+        style={{ background: `linear-gradient(145deg, ${palette.start}, ${palette.end})` }}
+      >
+        <div aria-hidden="true" className="absolute -right-8 -top-8 h-28 w-28 rounded-full border border-white/20 bg-white/10" />
+        <div aria-hidden="true" className="absolute bottom-0 left-0 h-2/3 w-[5px] bg-black/15" />
+        {!compact && <div aria-hidden="true" className="relative mx-auto h-px w-10 bg-white/45" />}
+        <div className="relative">
+          <div aria-hidden="true" className={`${compact ? 'mb-1 h-3 w-3 text-[8px]' : 'mb-3 h-8 w-8 text-sm'} flex items-center justify-center rounded-full bg-white/16 font-semibold ring-1 ring-white/20`}>
+            {book.title.trim().slice(0, 1).toLocaleUpperCase() || '书'}
+          </div>
+          <p className={`font-semibold leading-tight text-white [text-wrap:balance] ${compact ? 'line-clamp-3 text-[9px]' : 'line-clamp-4 text-sm sm:text-base'}`}>
+            {book.title}
+          </p>
+          {showMeta && book.author && (
+            <p className="mt-2 line-clamp-1 text-[11px] text-white/68">{book.author}</p>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -93,4 +110,22 @@ export function BookCover({
 function coverToSrc(cover: string) {
   if (/^(data:|blob:|https?:|asset:)/i.test(cover)) return cover;
   return readerGateway.fileUrl(cover);
+}
+
+const COVER_PALETTES = [
+  { start: '#315B6B', end: '#172F38' },
+  { start: '#91674B', end: '#493225' },
+  { start: '#6C5B7B', end: '#352E43' },
+  { start: '#52705B', end: '#26392C' },
+  { start: '#80606A', end: '#422E35' },
+  { start: '#4D668A', end: '#29394F' },
+] as const;
+
+function fallbackPalette(book: Book) {
+  let hash = 0;
+  const source = `${book.title}:${book.author}:${book.type}`;
+  for (let index = 0; index < source.length; index += 1) {
+    hash = ((hash << 5) - hash + source.charCodeAt(index)) | 0;
+  }
+  return COVER_PALETTES[Math.abs(hash) % COVER_PALETTES.length];
 }

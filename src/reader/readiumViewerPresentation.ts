@@ -5,6 +5,7 @@ import {
 } from './readiumPublication';
 import { currentReadiumFrame, getLiveReadiumIframe, readiumFrames } from './readiumNavigatorAdapter';
 import { chapterPageFromProgress, updatePublicationPageMap } from './publicationPageMap';
+import { READER_IMAGE_RADIUS } from './readerDocumentStyles';
 
 type PageGeometry = {
   viewportWidth: number; viewportHeight: number; scrollWidth: number; scrollHeight: number;
@@ -127,6 +128,7 @@ export function installReadiumFrameStyles(doc: Document) {
   style.id = 'zenith-readium-frame-style';
   style.textContent = `
     :root {
+      --ZENITH__imageRadius: ${READER_IMAGE_RADIUS};
       -webkit-column-gap: var(--RS__colGap, 0px) !important;
       -moz-column-gap: var(--RS__colGap, 0px) !important;
       column-gap: var(--RS__colGap, 0px) !important;
@@ -138,8 +140,68 @@ export function installReadiumFrameStyles(doc: Document) {
       padding-inline-start: 0 !important;
     }
     :root:not([data-zenith-layout="fixed"]) img {
-      border-radius: 5px !important; cursor: zoom-in !important; display: block;
+      border-radius: var(--ZENITH__imageRadius) !important; cursor: zoom-in !important; display: block !important;
+      clip-path: inset(0 round var(--ZENITH__imageRadius)) !important;
       height: auto; max-width: 100%; object-fit: contain;
+    }
+    :root[data-zenith-layout="reflowable"][data-zenith-book-type="epub"] :is(img, svg:has(image)) {
+      border-radius: var(--ZENITH__imageRadius) !important;
+      clear: both !important;
+      clip-path: inset(0 round var(--ZENITH__imageRadius)) !important;
+      display: block !important;
+      float: none !important;
+      margin-inline: auto !important;
+      max-width: 100% !important;
+    }
+    :root[data-zenith-layout="reflowable"][data-zenith-book-type="epub"] :is(figure, picture):has(img, svg) {
+      border-radius: var(--ZENITH__imageRadius) !important;
+      clear: both !important;
+      clip-path: inset(0 round var(--ZENITH__imageRadius)) !important;
+      float: none !important;
+      margin-inline: auto !important;
+      max-width: 100% !important;
+      text-align: center !important;
+    }
+    :root[data-zenith-layout="reflowable"][data-zenith-book-type="epub"] picture {
+      display: block !important;
+    }
+    :root[data-zenith-layout="reflowable"][data-zenith-book-type="epub"][data-zenith-media-only="true"]:not([data-zenith-page-mode="scroll"]) [data-zenith-media-page]:not(img):not(svg) {
+      align-items: center !important;
+      block-size: calc(var(--ZENITH__pageImageMaxHeight, 100vh) - 16px) !important;
+      box-sizing: border-box !important;
+      break-inside: avoid !important;
+      display: flex !important;
+      flex-direction: column !important;
+      height: calc(var(--ZENITH__pageImageMaxHeight, 100vh) - 16px) !important;
+      justify-content: center !important;
+      margin: 0 auto !important;
+      max-height: calc(var(--ZENITH__pageImageMaxHeight, 100vh) - 16px) !important;
+      max-width: 100% !important;
+      padding: 8px !important;
+      width: 100% !important;
+    }
+    :root[data-zenith-layout="reflowable"][data-zenith-book-type="epub"][data-zenith-media-only="true"]:not([data-zenith-page-mode="scroll"]) [data-zenith-media-page]:is(img, svg) {
+      block-size: calc(var(--ZENITH__pageImageMaxHeight, 100vh) - 16px) !important;
+      box-sizing: border-box !important;
+      break-inside: avoid !important;
+      display: block !important;
+      height: calc(var(--ZENITH__pageImageMaxHeight, 100vh) - 16px) !important;
+      margin: 0 auto !important;
+      max-height: calc(var(--ZENITH__pageImageMaxHeight, 100vh) - 16px) !important;
+      max-width: 100% !important;
+      object-fit: contain !important;
+      padding: 8px !important;
+      width: 100% !important;
+    }
+    :root[data-zenith-layout="reflowable"][data-zenith-book-type="epub"][data-zenith-media-only="true"]:not([data-zenith-page-mode="scroll"]) [data-zenith-media-page] > :is(img, svg),
+    :root[data-zenith-layout="reflowable"][data-zenith-book-type="epub"][data-zenith-media-only="true"]:not([data-zenith-page-mode="scroll"]) [data-zenith-media-page] > * > :is(img, svg):only-child {
+      display: block !important;
+      height: 100% !important;
+      margin: auto !important;
+      max-height: 100% !important;
+      max-width: 100% !important;
+      object-fit: contain !important;
+      width: 100% !important;
     }
     :root[data-zenith-layout="reflowable"][data-zenith-book-type="epub"][data-zenith-page-mode="single"] img {
       box-sizing: border-box !important;

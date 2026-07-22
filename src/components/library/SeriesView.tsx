@@ -7,6 +7,8 @@ import { sortBooksInSeries } from '../../lib/series';
 import { prewarmWebReaderOnIntent } from '../../reader/readerWarmup';
 import { SeriesEditorDialog } from './SeriesEditorDialog';
 import { ScrollToTopButton } from './ScrollToTopButton';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { SeriesMergeDialog } from './SeriesMergeDialog';
 
 export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void }) {
   const { series, books, createSeries, updateSeries, deleteSeries, autoCreateMetadataSeries, mergeSeries } = useAppContext();
@@ -16,6 +18,8 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
   const [autoCreateMessage, setAutoCreateMessage] = useState('');
   const [query, setQuery] = useState('');
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const [deleteCandidateId, setDeleteCandidateId] = useState<string>();
+  const [mergeSourceId, setMergeSourceId] = useState<string>();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const editingSeries = typeof editorSeriesId === 'string'
     ? series.find((item) => item.id === editorSeriesId)
@@ -83,18 +87,21 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
 
   return (
     <div className="glass-surface flex-1 flex flex-col relative">
-      <header className="h-14 border-b border-black/5 dark:border-white/5 flex items-center justify-between px-8 bg-white/80 dark:bg-[#121212]/80 backdrop-blur-md sticky top-0 z-10">
-        <h1 className="text-lg font-bold text-[#1C1C1E] dark:text-white">系列</h1>
-        <div className="flex items-center gap-3">
+      <header className="min-h-14 border-b border-black/5 dark:border-white/5 flex items-center justify-between gap-3 px-4 py-2 sm:px-8 bg-white/80 dark:bg-[#121212]/80 backdrop-blur-md sticky top-0 z-10">
+        <div>
+          <h1 className="text-lg font-semibold text-[#1C1C1E] dark:text-white">系列</h1>
+          <p className="hidden text-xs text-black/55 dark:text-white/55 sm:block">整理多卷作品，保持连续阅读顺序</p>
+        </div>
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           {autoCreateMessage && (
-            <span className="text-xs text-black/45 dark:text-white/45" role="status">
+            <span className="hidden max-w-xs truncate text-xs text-black/60 dark:text-white/60 sm:block" role="status">
               {autoCreateMessage}
             </span>
           )}
           <button
             type="button"
             onClick={() => setEditorSeriesId(null)}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-[5px] bg-black/5 text-[#1C1C1E] transition-colors hover:bg-black/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-black/5 text-[#1C1C1E] transition-colors hover:bg-black/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
             title="创建系列"
             aria-label="创建系列"
           >
@@ -105,12 +112,12 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
               type="button"
               onClick={handleAutoCreateSeries}
               disabled={isAutoCreating}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-[5px] bg-[#007AFF] text-white transition-colors hover:bg-blue-600 disabled:cursor-wait disabled:opacity-60"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[#087DF1] text-white transition-colors hover:bg-[#006ED6] disabled:cursor-wait disabled:opacity-60"
               aria-label="自动创建系列"
             >
               <Sparkles className={`h-4 w-4 ${isAutoCreating ? 'animate-pulse' : ''}`} />
             </button>
-            <div className="pointer-events-none absolute right-0 top-11 z-20 w-72 rounded-[5px] bg-[#1C1C1E] px-3 py-2 text-xs leading-relaxed text-white opacity-0 shadow-xl transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:bg-white dark:text-[#1C1C1E]">
+            <div className="pointer-events-none absolute right-0 top-12 z-20 w-72 rounded-xl bg-[#1C1C1E] px-3 py-2 text-xs leading-relaxed text-white opacity-0 shadow-xl transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:bg-white dark:text-[#1C1C1E]">
               仅识别同一文件夹中的「&lt;系列名&gt; &lt;系列序号&gt; &lt;标题、其他文本&gt;.txt/.epub」；按系列名分组、序号排序，其他文件不处理。
             </div>
           </div>
@@ -119,13 +126,13 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
 
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto p-4 sm:p-8"
+        className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8"
         onScroll={(event) => setShowScrollTop(event.currentTarget.scrollTop > 480)}
       >
         <div className="space-y-5">
-          <div className="flex flex-col gap-2 rounded-2xl border border-black/[0.05] bg-white/45 p-2.5 dark:border-white/10 dark:bg-white/[0.06] sm:flex-row sm:items-center sm:justify-between sm:p-3">
+          <div className="app-card flex flex-col gap-2 p-2.5 sm:flex-row sm:items-center sm:justify-between sm:p-3">
             <div className="relative w-full sm:max-w-sm">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/35 dark:text-white/35" />
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/45 dark:text-white/45" />
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -133,19 +140,21 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
                 className="h-10 w-full rounded-xl bg-black/[0.035] pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-[#007AFF]/35 dark:bg-white/10"
               />
             </div>
-            <span className="px-1 text-xs tabular-nums text-black/40 dark:text-white/40">{filteredSeries.length} 个系列</span>
+            <span className="px-1 text-xs tabular-nums text-black/55 dark:text-white/55">{filteredSeries.length} 个系列 · {filteredSeries.reduce((count, item) => count + item.bookIds.length, 0)} 本书</span>
           </div>
           {series.length === 0 ? (
-            <div className="min-h-[360px] flex flex-col items-center justify-center text-gray-500 dark:text-gray-400">
-              <Layers className="w-16 h-16 mb-4 opacity-20" />
-              <h2 className="text-xl font-medium text-gray-900 dark:text-gray-100 mb-2">暂无系列</h2>
-              <p className="text-sm">选择多本书，创建连续阅读的多卷小说系列。</p>
+            <div className="flex min-h-[360px] flex-col items-center justify-center px-6 text-center text-gray-500 dark:text-gray-400">
+              <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-3xl bg-[#087DF1]/10 text-[#087DF1]"><Layers className="h-10 w-10" /></div>
+              <h2 className="mb-2 text-xl font-semibold text-gray-900 dark:text-gray-100">创建第一个系列</h2>
+              <p className="max-w-sm text-sm leading-6">把多卷作品整理在一起，Zenith 会按卷序衔接阅读。</p>
+              <button onClick={() => setEditorSeriesId(null)} className="mt-6 inline-flex h-11 items-center gap-2 rounded-xl bg-[#087DF1] px-5 text-sm font-semibold text-white hover:bg-[#006ED6]"><Plus className="h-4 w-4" />创建系列</button>
             </div>
           ) : filteredSeries.length === 0 ? (
             <div className="flex min-h-[300px] flex-col items-center justify-center text-gray-500 dark:text-gray-400">
               <Search className="mb-4 h-12 w-12 opacity-20" />
               <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100">没有匹配的系列</h2>
               <p className="mt-2 text-sm">请尝试其他系列名或书籍关键词。</p>
+              <button onClick={() => setQuery('')} className="mt-5 rounded-xl bg-black/5 px-4 py-2 text-sm font-medium hover:bg-black/10 dark:bg-white/10">清除搜索</button>
             </div>
           ) : (
             filteredSeries.map((item) => {
@@ -160,7 +169,7 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
                 <section
                   key={item.id}
                   draggable
-                  className={`relative rounded-[5px] bg-[#F2F2F7]/80 dark:bg-[#1C1C1E]/80 border p-5 shadow-sm transition-colors ${
+                  className={`app-card relative p-4 transition-colors sm:p-5 ${
                     isDropTarget
                       ? 'border-[#007AFF]/60 bg-[#007AFF]/8'
                       : 'border-black/5 dark:border-white/5'
@@ -174,7 +183,7 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
                 >
                   {isDropTarget && (
                     <div
-                      className="absolute inset-0 z-10 rounded-[5px] border-2 border-dashed border-[#007AFF]/70 bg-[#007AFF]/8"
+                      className="absolute inset-0 z-10 rounded-xl border-2 border-dashed border-[#007AFF]/70 bg-[#007AFF]/8"
                       onDragEnter={(event) => {
                         if (!canAcceptMerge(mergeSourceIdFor(event), item.id)) return;
                         event.preventDefault();
@@ -198,23 +207,34 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
                     </div>
                     <div className="relative z-20 flex gap-2">
                       {isDropTarget && (
-                        <div className="flex h-8 items-center gap-1 rounded-[5px] bg-[#007AFF]/10 px-2 text-xs text-[#007AFF]">
+                        <div className="flex h-8 items-center gap-1 rounded-lg bg-[#007AFF]/10 px-2 text-xs text-[#007AFF]">
                           <GitMerge className="h-3.5 w-3.5" />
                           合并到此
                         </div>
                       )}
+                      {series.length > 1 && (
+                        <button
+                          onClick={() => setMergeSourceId(item.id)}
+                          className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/80 text-black/55 transition-colors hover:bg-white hover:text-[#087DF1] dark:bg-white/10 dark:text-white/60 dark:hover:bg-white/15"
+                          title="合并系列"
+                          aria-label={`合并系列 ${item.name}`}
+                        >
+                          <GitMerge className="h-4 w-4" />
+                        </button>
+                      )}
                       <button
                         onClick={() => setEditorSeriesId(item.id)}
-                        className="flex h-8 w-8 items-center justify-center rounded-[5px] bg-white/70 transition-colors hover:bg-white dark:bg-white/10 dark:hover:bg-white/15"
+                        className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/80 transition-colors hover:bg-white dark:bg-white/10 dark:hover:bg-white/15"
                         title="编辑系列"
                         aria-label="编辑系列"
                       >
                         <Pencil className="h-4 w-4" />
                       </button>
                       <button
-                        onClick={() => deleteSeries(item.id)}
-                        className="w-8 h-8 flex items-center justify-center rounded-[5px] text-red-500 bg-white/70 dark:bg-white/10 hover:bg-red-500 hover:text-white transition-colors"
+                        onClick={() => setDeleteCandidateId(item.id)}
+                        className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/80 text-red-500 transition-colors hover:bg-red-500 hover:text-white dark:bg-white/10"
                         title="删除系列"
+                        aria-label={`删除系列 ${item.name}`}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -227,7 +247,7 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
                         onPointerDown={() => prewarmWebReaderOnIntent(book)}
                         onFocus={() => prewarmWebReaderOnIntent(book)}
                         onClick={() => onReadBook(book)}
-                        className="text-left flex items-center gap-3 rounded-[5px] bg-white/70 dark:bg-white/10 hover:bg-white dark:hover:bg-white/15 p-3 transition-colors"
+                        className="flex items-center gap-3 rounded-xl bg-white/75 p-3 text-left transition-all hover:-translate-y-0.5 hover:bg-white hover:shadow-sm dark:bg-white/10 dark:hover:bg-white/15"
                       >
                         <div className="w-8 h-10 rounded-[5px] bg-[#e4e5df] dark:bg-[#30332f] shrink-0 overflow-hidden">
                           <BookCover book={book} className="w-full h-full object-cover" compact />
@@ -258,6 +278,30 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
           mode={editingSeries ? 'edit' : 'create'}
           onCancel={() => setEditorSeriesId(undefined)}
           onSubmit={submitEditor}
+        />
+      )}
+      {deleteCandidateId && (
+        <ConfirmDialog
+          title="删除系列关系？"
+          description={`“${series.find((item) => item.id === deleteCandidateId)?.name || '该系列'}”将从系列列表中移除，书籍原文件和阅读进度不会被删除。`}
+          confirmLabel="删除系列"
+          onCancel={() => setDeleteCandidateId(undefined)}
+          onConfirm={async () => {
+            await deleteSeries(deleteCandidateId);
+            setDeleteCandidateId(undefined);
+          }}
+        />
+      )}
+      {mergeSourceId && series.find((item) => item.id === mergeSourceId) && (
+        <SeriesMergeDialog
+          source={series.find((item) => item.id === mergeSourceId)!}
+          series={series}
+          onCancel={() => setMergeSourceId(undefined)}
+          onMerge={async (targetId) => {
+            await mergeSeries(mergeSourceId, targetId);
+            setMergeSourceId(undefined);
+            setAutoCreateMessage('系列合并完成。');
+          }}
         />
       )}
     </div>

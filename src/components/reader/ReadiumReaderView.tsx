@@ -76,10 +76,12 @@ function NavigationButton({
   return (
     <div className={`pointer-events-none absolute ${backward ? 'left-3' : 'right-3'} top-1/2 z-40 -translate-y-1/2`}>
       <button
-        className={`pointer-events-auto flex h-11 w-11 items-center justify-center rounded-[5px] border border-black/10 bg-white/75 shadow-lg backdrop-blur-xl transition-all hover:scale-105 active:scale-95 dark:border-white/10 dark:bg-[#1C1C1E]/75 ${chromeVisible ? 'opacity-0 group-hover:opacity-100' : 'opacity-0'}`}
+        className={`flex h-11 w-11 items-center justify-center rounded-xl border border-black/10 bg-white/82 shadow-lg backdrop-blur-xl transition-all hover:scale-105 active:scale-95 dark:border-white/10 dark:bg-[#1C1C1E]/82 ${chromeVisible ? 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100' : 'pointer-events-none opacity-0'}`}
         onClick={onClick}
         onPointerDown={(event) => event.stopPropagation()}
         title={backward ? '上一页' : '下一页'}
+        aria-hidden={!chromeVisible}
+        tabIndex={chromeVisible ? 0 : -1}
       >
         <Icon className="h-5 w-5" />
       </button>
@@ -121,7 +123,7 @@ function ImagePreview({
             <img
               src={image.src}
               alt={image.name}
-              className="max-h-[86vh] max-w-[96vw] rounded-[5px] object-contain shadow-2xl"
+              className="max-h-[86vh] max-w-[96vw] rounded-xl object-contain shadow-2xl"
               draggable={false}
             />
             <div className="absolute right-3 top-3 flex items-center gap-2">

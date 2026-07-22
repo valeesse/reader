@@ -1,5 +1,6 @@
 import { readEpubResource, toLocalAssetUrl } from '../lib/readerClient';
 import { estimateStringBytes, ReaderContentCache, ReaderWorkScheduler, adaptiveReaderBudget } from './readerCacheCoordinator';
+import { READER_IMAGE_RADIUS } from './readerDocumentStyles';
 import type { ReadiumResourceLike } from './readiumPublication';
 import { ReadiumLink } from './readiumPublicationModel';
 import {
@@ -137,10 +138,11 @@ export class EpubResourceManager {
     });
     await rewriteUrlAttributes(doc, dirname(href), (resourceHref) => this.blobUrlFor(resourceHref));
     installPublicationCsp(doc);
-    doc.querySelectorAll('img, picture, figure, svg image').forEach((element) => {
+    doc.querySelectorAll('img, picture, figure, svg, svg image').forEach((element) => {
       const htmlElement = element as HTMLElement;
-      htmlElement.style.setProperty('border-radius', '5px', 'important');
-      htmlElement.style.setProperty('clip-path', 'inset(0 round 5px)', 'important');
+      if (htmlElement.tagName.toLowerCase() === 'svg' && !htmlElement.querySelector('image')) return;
+      htmlElement.style.setProperty('border-radius', READER_IMAGE_RADIUS, 'important');
+      htmlElement.style.setProperty('clip-path', `inset(0 round ${READER_IMAGE_RADIUS})`, 'important');
       if (htmlElement.tagName.toLowerCase() === 'img') htmlElement.style.setProperty('cursor', 'zoom-in', 'important');
     });
     return new XMLSerializer().serializeToString(doc);

@@ -6,6 +6,7 @@ import { invalidateReadiumDocumentGeometry } from './readiumViewerPresentation';
 import { isContinuousScroll } from './readiumViewerModel';
 
 const fittedEpubMedia = new WeakMap<Document, Map<HTMLElement, Map<string, { value: string; priority: string }>>>();
+const MEDIA_PAGE_ATTRIBUTE = 'data-zenith-media-page';
 const FITTED_MEDIA_PROPERTIES = [
   'block-size', 'break-inside', 'display', 'height', 'margin-inline', 'max-block-size',
   'max-height', 'max-width', 'min-block-size', 'min-height', 'min-width', 'object-fit', 'width',
@@ -68,6 +69,7 @@ export function applyReadiumFrameSettings(
   root.dataset.zenithPageMode = isContinuousScroll(settings) ? 'scroll' : settings.pageMode;
   root.dataset.zenithBookType = bookType;
   root.dataset.zenithLayout = layout || 'reflowable';
+  markMediaOnlyEpubPages(doc, bookType, layout);
   applyReaderDocumentProperties(doc, settings, bookType);
   const viewportHeight = Math.max(1, doc.defaultView?.innerHeight || root.clientHeight || 1);
   const viewportWidth = Math.max(1, doc.defaultView?.innerWidth || root.clientWidth || 1);
@@ -94,6 +96,67 @@ export function applyReadiumFrameSettings(
   const layoutChanged = before !== frameLayoutFingerprint(root);
   if (layoutChanged) invalidateReadiumDocumentGeometry(doc);
   return layoutChanged;
+}
+
+function markMediaOnlyEpubPages(
+  doc: Document,
+  bookType: 'epub' | 'txt',
+  layout?: EpubNavigator['layout'],
+) {
+  const body = doc.body;
+  const existingPages = Array.from(doc.querySelectorAll<HTMLElement>(`[${MEDIA_PAGE_ATTRIBUTE}]`));
+  const clearMediaPages = () => {
+    existingPages.forEach((element) => element.removeAttribute(MEDIA_PAGE_ATTRIBUTE));
+    delete doc.documentElement.dataset.zenithMediaOnly;
+  };
+  if (!body || bookType !== 'epub' || layout === 'fixed' || hasMeaningfulBodyText(doc)) {
+    clearMediaPages();
+    return;
+  }
+
+  const media = Array.from(body.querySelectorAll<HTMLElement>('img, svg'));
+  if (media.length === 0) {
+    clearMediaPages();
+    return;
+  }
+
+  const pages = new Set<HTMLElement>();
+  const semanticPages = Array.from(body.querySelectorAll<HTMLElement>('figure, picture'))
+    .filter((element) => element.querySelector('img, svg'))
+    .filter((element) => !element.parentElement?.closest('figure, picture'));
+  semanticPages.forEach((element) => pages.add(element));
+
+  media.forEach((element) => {
+    if (semanticPages.some((page) => page.contains(element))) return;
+    let page: HTMLElement = element;
+    let parent = element.parentElement;
+    while (parent && parent !== body && parent.querySelectorAll('img, svg').length === 1) {
+      page = parent;
+      parent = parent.parentElement;
+    }
+    pages.add(page);
+  });
+
+  existingPages.forEach((element) => {
+    if (!pages.has(element)) element.removeAttribute(MEDIA_PAGE_ATTRIBUTE);
+  });
+  pages.forEach((element) => {
+    if (!element.hasAttribute(MEDIA_PAGE_ATTRIBUTE)) element.setAttribute(MEDIA_PAGE_ATTRIBUTE, '');
+  });
+  if (doc.documentElement.dataset.zenithMediaOnly !== 'true') {
+    doc.documentElement.dataset.zenithMediaOnly = 'true';
+  }
+}
+
+function hasMeaningfulBodyText(doc: Document) {
+  const walker = doc.createTreeWalker(doc.body, 4 /* NodeFilter.SHOW_TEXT */);
+  let node = walker.nextNode();
+  while (node) {
+    const parent = node.parentElement;
+    if (parent && !parent.closest('svg, script, style, noscript') && node.textContent?.trim()) return true;
+    node = walker.nextNode();
+  }
+  return false;
 }
 
 function fitSinglePageEpubMedia(
@@ -188,6 +251,7 @@ function numericCssValue(value?: string) {
 
 function frameLayoutFingerprint(root: HTMLElement) {
   return [
+    root.dataset.zenithMediaOnly || '',
     '--USER__fontFamily', '--USER__fontSize', '--USER__lineHeight', '--USER__paraSpacing',
     '--USER__letterSpacing', '--USER__colCount', '--RS__colCount', '--RS__colGap',
     '--RS__colWidth', '--RS__pageGutter', '--RS__scrollPaddingTop', '--RS__scrollPaddingRight',

@@ -6,6 +6,7 @@ const READIUM_DEFAULT_STYLE_ID = 'zenith-reader-readium-default';
 const READIUM_AFTER_STYLE_ID = 'zenith-reader-readium-after';
 const TEXT_FINISH_STYLE_ID = 'zenith-reader-text-finish';
 const TXT_FONT_SCALE_BASE = 15.75;
+export const READER_IMAGE_RADIUS = '12px';
 const BUNDLED_READER_FONTS = [
   { family: 'Zenith LXGW WenKai', path: '/fonts/LXGWWenKaiGBScreen.ttf' },
   { family: 'Zenith LXGW 975 Yuan', path: '/fonts/LXGW975YuanSC-400W.ttf' },

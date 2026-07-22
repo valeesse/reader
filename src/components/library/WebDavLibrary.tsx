@@ -83,9 +83,9 @@ export function WebDavLibrary({ onReadBook: _onReadBook }: { onReadBook: (book: 
 
   return (
     <div className="flex-1 flex flex-col relative bg-white/70 dark:bg-[#121212]/70">
-      <header className="h-14 border-b border-black/5 dark:border-white/5 flex items-center justify-between px-8 bg-white/80 dark:bg-[#121212]/80 backdrop-blur-md sticky top-0 z-10">
+      <header className="min-h-14 border-b border-black/5 dark:border-white/5 flex items-center justify-between gap-3 px-4 py-2 sm:px-8 bg-white/80 dark:bg-[#121212]/80 backdrop-blur-md sticky top-0 z-10">
         <div className="min-w-0">
-          <h1 className="text-lg font-bold text-[#1C1C1E] dark:text-white">WebDAV 书库</h1>
+          <h1 className="text-lg font-semibold text-[#1C1C1E] dark:text-white">WebDAV 书库</h1>
         </div>
         <button
           onClick={loadBooks}
@@ -97,8 +97,8 @@ export function WebDavLibrary({ onReadBook: _onReadBook }: { onReadBook: (book: 
         </button>
       </header>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 rounded-2xl border border-black/5 dark:border-white/10 bg-white/65 dark:bg-white/10 p-3">
+      <div className="flex-1 overflow-y-auto space-y-6 p-4 sm:p-6">
+        <div className="app-card flex flex-col justify-between gap-3 p-3 xl:flex-row xl:items-center">
           <div className="relative min-w-0 xl:w-96">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-black/35 dark:text-white/35" />
             <input
@@ -115,7 +115,7 @@ export function WebDavLibrary({ onReadBook: _onReadBook }: { onReadBook: (book: 
         </div>
 
         {status && (
-          <p className="text-sm text-black/50 dark:text-white/50">{status}</p>
+          <p className="text-sm text-black/60 dark:text-white/60" role="status">{status}</p>
         )}
 
         {filteredBooks.length === 0 ? (

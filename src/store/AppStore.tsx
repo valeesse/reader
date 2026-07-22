@@ -39,6 +39,7 @@ interface AppContextType {
   lastReadBookId?: string;
   isLoading: boolean;
   stateReconciled: boolean;
+  stateError?: string;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -52,11 +53,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [lastReadBookId, setLastReadBookId] = useState<string | undefined>(() => startupSnapshot?.lastReadBookId);
   const [isLoading, setIsLoading] = useState(!startupSnapshot);
   const [stateReconciled, setStateReconciled] = useState(false);
+  const [stateError, setStateError] = useState<string>();
   const settingsRef = useRef(settings);
   const pendingSettingsSaveRef = useRef<AppSettings | null>(null);
   const settingsSaveTimerRef = useRef<number | undefined>(undefined);
 
   const reloadState = async () => {
+    setStateError(undefined);
     if (!startupSnapshot) {
       setIsLoading(true);
     }
@@ -86,6 +89,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       loadProgressInIdle();
     } catch (error) {
       console.warn('Failed to reconcile persisted application state', error);
+      setStateError(error instanceof Error ? error.message : '无法连接到书库服务，请稍后重试。');
     } finally {
       setStateReconciled(true);
       setIsLoading(false);
@@ -245,7 +249,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AppContext.Provider value={{ books, series, progress, settings, addBook, addBooks, createSeries, updateSeries, deleteSeries, autoCreateMetadataSeries, mergeSeries, reloadState, refreshProgress, updateSettings, lastReadBookId, isLoading, stateReconciled }}>
+    <AppContext.Provider value={{ books, series, progress, settings, addBook, addBooks, createSeries, updateSeries, deleteSeries, autoCreateMetadataSeries, mergeSeries, reloadState, refreshProgress, updateSettings, lastReadBookId, isLoading, stateReconciled, stateError }}>
       {children}
     </AppContext.Provider>
   );

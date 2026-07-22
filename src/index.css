@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @font-face {
   font-family: "Zenith LXGW WenKai";
   src: url("/fonts/LXGWWenKaiGBScreen.ttf") format("truetype");
@@ -21,7 +23,19 @@
 }
 
 :root {
-  --app-radius: 5px;
+  --color-canvas: #f7f5f0;
+  --color-surface: #fffefa;
+  --color-surface-muted: #f1efe9;
+  --color-ink: #1c1c1e;
+  --color-secondary: rgba(28, 28, 30, 0.66);
+  --color-tertiary: rgba(28, 28, 30, 0.5);
+  --color-border: rgba(60, 60, 67, 0.1);
+  --color-accent: #087df1;
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-panel: 16px;
+  --shadow-card: 0 8px 24px rgba(48, 43, 35, 0.07);
+  --shadow-float: 0 20px 56px rgba(32, 29, 24, 0.16);
 }
 
 html,
@@ -31,8 +45,8 @@ body,
   height: 100%;
   margin: 0;
   background:
-    radial-gradient(circle at 88% 88%, rgba(205, 181, 135, 0.045), transparent 34%),
-    #fbfaf7;
+    radial-gradient(circle at 88% 88%, rgba(205, 181, 135, 0.07), transparent 34%),
+    var(--color-canvas);
   overscroll-behavior: none;
 }
 
@@ -51,21 +65,52 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
-[class*="rounded"] {
-  border-radius: var(--app-radius) !important;
+html.dark,
+html.dark body,
+html.dark #root {
+  background: #111210;
+}
+
+:where(button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 72%, white) !important;
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: not-allowed;
 }
 
 .glass-surface {
-  background: rgba(255, 255, 253, 0.78);
-  border: 1px solid rgba(60, 60, 67, 0.08);
-  box-shadow: 0 12px 36px rgba(45, 42, 36, 0.055);
-  backdrop-filter: blur(22px) saturate(1.08);
+  background: rgba(255, 254, 250, 0.86);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 14px 40px rgba(45, 42, 36, 0.065);
+  backdrop-filter: blur(22px) saturate(1.06);
 }
 
 .dark .glass-surface {
   background: rgba(24, 26, 23, 0.76);
   border-color: rgba(255, 255, 255, 0.08);
   box-shadow: 0 16px 42px rgba(0, 0, 0, 0.24);
+}
+
+.app-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: rgba(255, 254, 250, 0.88);
+  box-shadow: var(--shadow-card);
+}
+
+.dark .app-card {
+  border-color: rgba(255, 255, 255, 0.09);
+  background: rgba(37, 39, 35, 0.88);
+}
+
+.app-muted-label {
+  color: var(--color-tertiary);
+}
+
+.dark .app-muted-label {
+  color: rgba(255, 255, 255, 0.52);
 }
 
 .app-sidebar {
@@ -101,6 +146,20 @@ button {
 @media (min-width: 1280px) {
   .library-grid {
     grid-template-columns: repeat(auto-fill, minmax(170px, 220px));
+  }
+}
+
+@media (max-width: 639px) {
+  .glass-surface {
+    backdrop-filter: blur(16px) saturate(1.04);
+  }
+
+  html.series-detail-open .app-sidebar {
+    display: none;
+  }
+
+  html.series-detail-open .app-main-shell {
+    padding-bottom: 0;
   }
 }
 
@@ -207,8 +266,8 @@ iframe.zenith-scroll-transition-snapshot {
 .readium-container img,
 .readium-container picture,
 .readium-container figure {
-  border-radius: var(--app-radius) !important;
-  clip-path: inset(0 round var(--app-radius)) !important;
+  border-radius: var(--radius-card) !important;
+  clip-path: inset(0 round var(--radius-card)) !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

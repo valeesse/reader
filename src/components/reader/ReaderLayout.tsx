@@ -30,6 +30,7 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
   const seekRequestIdRef = useRef(0);
   const seekReleaseTimerRef = useRef<number | null>(null);
   const tocItemRefs = useRef(new Map<string, HTMLButtonElement>());
+  const readerRootRef = useRef<HTMLDivElement>(null);
   const currentSeries = series.find((item) => item.bookIds.includes(book.id));
   const currentIndex = currentSeries ? currentSeries.bookIds.indexOf(book.id) : -1;
   const nextBook = currentSeries && currentIndex >= 0
@@ -45,6 +46,10 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
     setTocTarget(null);
     setReadingProgress(0);
     setSeekRequest(null);
+  }, [book.id]);
+
+  useEffect(() => {
+    readerRootRef.current?.focus();
   }, [book.id]);
 
   useEffect(() => {
@@ -97,7 +102,13 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
   };
 
   return (
-    <div className={`fixed inset-0 z-50 flex flex-col transition-colors duration-500 ${
+    <div
+      ref={readerRootRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`正在阅读 ${book.title}`}
+      tabIndex={-1}
+      className={`fixed inset-0 z-50 flex flex-col outline-none transition-colors duration-500 ${
       settings.theme === 'dark' ? 'bg-[#121212] text-gray-200' :
       settings.theme === 'sepia' ? 'bg-[#FDFCF8] text-[#333333]' :
       'bg-[#FBFAF7] text-[#1C1C1E]'
@@ -109,7 +120,7 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
             animate={{ y: 0 }}
             exit={{ y: -100 }}
             transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
-            className="absolute top-0 left-0 right-0 h-14 flex items-center justify-between px-6 border-b border-black/5 dark:border-white/5 backdrop-blur-xl bg-[#FBFAF7]/80 dark:bg-[#121212]/80 z-40"
+            className="absolute left-0 right-0 top-0 z-40 flex h-14 items-center justify-between border-b border-black/5 bg-[#FBFAF7]/88 px-2 backdrop-blur-xl dark:border-white/5 dark:bg-[#121212]/88 sm:px-6"
           >
             <div className="flex items-center gap-1">
               <button
@@ -130,7 +141,7 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
                 <List className="w-5 h-5" />
               </button>
             </div>
-            <div className="font-medium text-sm truncate max-w-md">{book.title}</div>
+            <div className="min-w-0 flex-1 truncate px-2 text-center text-sm font-medium sm:max-w-md sm:px-4">{book.title}</div>
             <div className="flex items-center gap-2">
               {nextBook && (
                 <button
