@@ -2,7 +2,8 @@ static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Default)]
 struct ReaderState {
-    reader: Mutex<Option<Arc<reader_core::ReaderService>>>,
+    application: Mutex<Option<Arc<reader_application::ReaderApplication>>>,
+    state: Mutex<Option<Arc<reader_state::StateRepository>>>,
     export_paths: Mutex<HashMap<String, String>>,
 }
 
@@ -16,7 +17,9 @@ struct NativeBook {
     #[serde(rename = "type")]
     book_type: String,
     resource_id: String,
+    content_id: String,
     file_name: String,
+    relative_path: String,
     series_name: Option<String>,
     series_index: Option<f64>,
     added_at: u64,

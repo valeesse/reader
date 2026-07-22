@@ -2,7 +2,7 @@ import { get, keys, set } from 'idb-keyval';
 import {
   getWebProgress,
   getWebState,
-  isDesktopRuntime,
+  runtimeCapabilities,
   listBooks,
   putWebReadingState,
   putWebStateSection,
@@ -34,6 +34,8 @@ export const KEYS = {
   STARTUP_SNAPSHOT: 'zenith_startup_snapshot_v2',
 };
 
+const SESSION_WEBDAV_PASSWORD = 'zenith_session_webdav_password';
+
 type WebState = {
   progress?: Record<string, ReadingProgress>;
   settings?: AppSettings;
@@ -56,15 +58,19 @@ export async function getBooks(): Promise<Book[]> {
   const cached = ((await get<Book[]>(KEYS.BOOKS)) || []).filter(isCurrentBook);
   const cachedById = new Map(cached.map((book) => [book.resourceId, book]));
   try {
-    const books = (await listBooks()).map((book) => ({
-      ...cachedById.get(book.resourceId),
-      ...book,
-      seriesId: cachedById.get(book.resourceId)?.seriesId,
-    }));
+    const books = (await listBooks()).map((book) => {
+      const cachedBook = cachedById.get(book.resourceId);
+      return {
+        ...cachedBook,
+        ...book,
+        seriesName: book.seriesName ?? cachedBook?.seriesName,
+        seriesIndex: book.seriesIndex ?? cachedBook?.seriesIndex,
+      };
+    });
     await set(KEYS.BOOKS, books.map(stripBookCover));
     return books;
   } catch (error) {
-    if (!isDesktopRuntime) throw error;
+    if (!runtimeCapabilities.desktopShell) throw error;
     return cached.map(stripBookCover);
   }
 }
@@ -80,16 +86,16 @@ export async function getBookCover(bookId: string): Promise<string | undefined> 
 export async function saveSeries(series: Series[]) {
   updateStartupSnapshot({ series });
   await set(KEYS.SERIES, series);
-  if (!isDesktopRuntime) await putWebStateSection('series', series);
+  if (runtimeCapabilities.remoteState) await putWebStateSection('series', series);
 }
 
 export async function getSeries(): Promise<Series[]> {
-  if (!isDesktopRuntime) return (await loadWebState()).series || [];
+  if (runtimeCapabilities.remoteState) return (await loadWebState()).series || [];
   return (await get<Series[]>(KEYS.SERIES)) || [];
 }
 
 export function saveProgress(progress: ReadingProgress, options?: { urgent?: boolean }) {
-  if (options?.urgent && !isDesktopRuntime) {
+  if (options?.urgent && runtimeCapabilities.remoteState) {
     void putWebReadingState({
       progress,
       lastRead: { bookId: progress.bookId, updatedAt: progress.updatedAt },
@@ -114,7 +120,7 @@ async function saveProgressInOrder(progress: ReadingProgress) {
     ]);
     updateStartupSnapshot({ lastReadBookId: progress.bookId });
   }
-  if (!isDesktopRuntime) {
+  if (runtimeCapabilities.remoteState) {
     await putWebReadingState({
       progress,
       lastRead: becomesLastRead ? { bookId: progress.bookId, updatedAt: progress.updatedAt } : undefined,
@@ -126,7 +132,7 @@ async function saveProgressInOrder(progress: ReadingProgress) {
 }
 
 export async function getProgress(bookId: string): Promise<ReadingProgress | undefined> {
-  if (!isDesktopRuntime) {
+  if (runtimeCapabilities.remoteState) {
     const local = await get<ReadingProgress>(`${KEYS.PROGRESS}${bookId}`);
     const remotePromise = getWebProgress<ReadingProgress | null>(bookId)
       .then(async (remote) => {
@@ -147,7 +153,7 @@ export async function getProgress(bookId: string): Promise<ReadingProgress | und
 }
 
 export async function getAllProgress(): Promise<ReadingProgress[]> {
-  if (!isDesktopRuntime) {
+  if (runtimeCapabilities.remoteState) {
     const progress = Object.values((await loadWebState()).progress || {});
     await Promise.all(progress.map((item) => set(`${KEYS.PROGRESS}${item.bookId}`, item)));
     return progress;
@@ -159,7 +165,7 @@ export async function getAllProgress(): Promise<ReadingProgress[]> {
 }
 
 export async function getLastReadBookId(): Promise<string | undefined> {
-  if (!isDesktopRuntime) {
+  if (runtimeCapabilities.remoteState) {
     const lastRead = (await loadWebState()).lastRead;
     return typeof lastRead === 'string' ? lastRead : lastRead?.bookId;
   }
@@ -180,6 +186,9 @@ export function markLastReadBook(bookId: string) {
   return Promise.all([
     set(KEYS.LAST_READ, bookId),
     set(KEYS.LAST_READ_UPDATED_AT, updatedAt),
+    runtimeCapabilities.remoteState
+      ? putWebStateSection('lastRead', { bookId, updatedAt })
+      : Promise.resolve(),
   ]).then(() => undefined);
 }
 
@@ -189,14 +198,18 @@ export function getLastReadBookIdSync() {
 
 export async function saveSettings(settings: AppSettings) {
   const normalized = normalizeSettings(settings);
-  updateStartupSnapshot({ settings: normalized });
-  await set(KEYS.SETTINGS, normalized);
-  if (!isDesktopRuntime) await putWebStateSection('settings', normalized);
+  persistSessionPassword(normalized.webDavConfig.password);
+  const durable = withoutSecrets(normalized);
+  updateStartupSnapshot({ settings: durable });
+  await set(KEYS.SETTINGS, durable);
+  if (runtimeCapabilities.remoteState) await putWebStateSection('settings', durable);
 }
 
 export async function getSettings(): Promise<AppSettings> {
-  if (!isDesktopRuntime) return normalizeSettings((await loadWebState()).settings);
-  return normalizeSettings(await get<AppSettings>(KEYS.SETTINGS));
+  const durable = runtimeCapabilities.remoteState
+    ? normalizeSettings((await loadWebState()).settings)
+    : normalizeSettings(await get<AppSettings>(KEYS.SETTINGS));
+  return withSessionPassword(durable);
 }
 
 export function getStartupSnapshotSync(): StartupSnapshot | undefined {
@@ -261,6 +274,26 @@ function normalizeSettings(settings?: Partial<AppSettings>): AppSettings {
   };
 }
 
+function withoutSecrets(settings: AppSettings): AppSettings {
+  return { ...settings, webDavConfig: { ...settings.webDavConfig, password: undefined } };
+}
+
+function persistSessionPassword(password?: string) {
+  try {
+    if (password) window.sessionStorage.setItem(SESSION_WEBDAV_PASSWORD, password);
+    else window.sessionStorage.removeItem(SESSION_WEBDAV_PASSWORD);
+  } catch {}
+}
+
+function withSessionPassword(settings: AppSettings): AppSettings {
+  try {
+    const password = window.sessionStorage.getItem(SESSION_WEBDAV_PASSWORD) || undefined;
+    return password ? { ...settings, webDavConfig: { ...settings.webDavConfig, password } } : settings;
+  } catch {
+    return settings;
+  }
+}
+
 function isCurrentBook(book: Book) {
   return Boolean(book?.resourceId && book.id === book.resourceId);
 }
@@ -285,7 +318,10 @@ function updateStartupSnapshot(partial: Partial<Omit<StartupSnapshot, 'version' 
 
 function writeStartupSnapshot(snapshot: StartupSnapshot) {
   try {
-    window.localStorage.setItem(KEYS.STARTUP_SNAPSHOT, JSON.stringify(snapshot));
+    window.localStorage.setItem(KEYS.STARTUP_SNAPSHOT, JSON.stringify({
+      ...snapshot,
+      settings: withoutSecrets(snapshot.settings),
+    }));
   } catch (error) {
     console.warn('Failed to write startup snapshot', error);
   }

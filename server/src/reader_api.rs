@@ -9,67 +9,12 @@ use axum::{
     http::{StatusCode, header},
     response::Response,
 };
-use serde::Deserialize;
+use reader_contracts::{
+    EpubOpenRequest, EpubPrefetchRequest, EpubReadRequest, ResourceRequest, SessionRequest,
+    TxtPreviewRequest, TxtWindowRequest,
+};
 use std::path::PathBuf;
 use tokio_util::io::ReaderStream;
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ResourceRequest {
-    resource_id: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct SessionRequest {
-    resource_id: String,
-    session_id: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct TxtPreviewRequest {
-    resource_id: String,
-    max_chars: usize,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct TxtWindowRequest {
-    resource_id: String,
-    session_id: String,
-    start: usize,
-    end: usize,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct EpubOpenRequest {
-    resource_id: String,
-    fallback_title: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct EpubReadRequest {
-    resource_id: String,
-    session_id: String,
-    href: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct EpubPrefetchRequest {
-    resource_id: String,
-    session_id: String,
-    hrefs: Vec<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CoverRequest {
-    resource_id: String,
-}
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,36 +29,28 @@ pub(crate) async fn txt_open(
     State(s): State<AppState>,
     Json(r): Json<ResourceRequest>,
 ) -> Result<Json<reader_core::TxtBookInfo>, ApiError> {
-    Ok(Json(run(move || s.reader.open_txt(&r.resource_id)).await?))
+    Ok(Json(run(move || s.application.open_txt(&r)).await?))
 }
 
 pub(crate) async fn txt_preview(
     State(s): State<AppState>,
     Json(r): Json<TxtPreviewRequest>,
 ) -> Result<Json<reader_core::TxtPreview>, ApiError> {
-    Ok(Json(
-        run(move || s.reader.txt_preview(&r.resource_id, r.max_chars)).await?,
-    ))
+    Ok(Json(run(move || s.application.txt_preview(&r)).await?))
 }
 
 pub(crate) async fn txt_read(
     State(s): State<AppState>,
     Json(r): Json<TxtWindowRequest>,
 ) -> Result<Json<reader_core::TxtTextWindow>, ApiError> {
-    Ok(Json(
-        run(move || {
-            s.reader
-                .read_txt_window(&r.resource_id, &r.session_id, r.start, r.end)
-        })
-        .await?,
-    ))
+    Ok(Json(run(move || s.application.read_txt(&r)).await?))
 }
 
 pub(crate) async fn txt_close(
     State(s): State<AppState>,
     Json(r): Json<SessionRequest>,
 ) -> Result<StatusCode, ApiError> {
-    s.reader.close_txt(&r.resource_id, &r.session_id)?;
+    s.application.close_txt(&r)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -121,9 +58,7 @@ pub(crate) async fn epub_open(
     State(s): State<AppState>,
     Json(r): Json<EpubOpenRequest>,
 ) -> Result<Json<reader_core::EpubOpenResult>, ApiError> {
-    Ok(Json(
-        run(move || s.reader.open_epub(&r.resource_id, &r.fallback_title)).await?,
-    ))
+    Ok(Json(run(move || s.application.open_epub(&r)).await?))
 }
 
 pub(crate) async fn epub_read(
@@ -133,11 +68,7 @@ pub(crate) async fn epub_read(
     let resource_id = r.resource_id.clone();
     let session_id = r.session_id.clone();
     let href = r.href.clone();
-    let payload = run(move || {
-        s.reader
-            .read_epub_resource(&r.resource_id, &r.session_id, &r.href)
-    })
-    .await?;
+    let payload = run(move || s.application.read_epub(&r)).await?;
     let binary_url = payload
         .file_path
         .as_ref()
@@ -154,11 +85,7 @@ pub(crate) async fn epub_binary(
     State(s): State<AppState>,
     Query(r): Query<EpubReadRequest>,
 ) -> Result<Response, ApiError> {
-    let resource = run(move || {
-        s.reader
-            .epub_binary_resource(&r.resource_id, &r.session_id, &r.href)
-    })
-    .await?;
+    let resource = run(move || s.application.epub_binary(&r)).await?;
     stream_file(
         resource.path,
         &resource.media_type,
@@ -169,9 +96,9 @@ pub(crate) async fn epub_binary(
 
 pub(crate) async fn cover(
     State(s): State<AppState>,
-    Query(r): Query<CoverRequest>,
+    Query(r): Query<ResourceRequest>,
 ) -> Result<Response, ApiError> {
-    let cover = run(move || s.reader.cover(&r.resource_id)).await?;
+    let cover = run(move || s.application.cover(&r.resource_id)).await?;
     stream_file(
         cover.path,
         &cover.media_type,
@@ -184,11 +111,7 @@ pub(crate) async fn epub_prefetch(
     State(s): State<AppState>,
     Json(r): Json<EpubPrefetchRequest>,
 ) -> Result<StatusCode, ApiError> {
-    run(move || {
-        s.reader
-            .prefetch_epub_resources(&r.resource_id, &r.session_id, r.hrefs)
-    })
-    .await?;
+    run(move || s.application.prefetch_epub(r)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -196,27 +119,25 @@ pub(crate) async fn epub_positions(
     State(s): State<AppState>,
     Json(r): Json<SessionRequest>,
 ) -> Result<Json<Vec<reader_core::EpubPositionCount>>, ApiError> {
-    Ok(Json(
-        run(move || s.reader.epub_position_counts(&r.resource_id, &r.session_id)).await?,
-    ))
+    Ok(Json(run(move || s.application.epub_positions(&r)).await?))
 }
 
 pub(crate) async fn epub_close(
     State(s): State<AppState>,
     Json(r): Json<SessionRequest>,
 ) -> Result<StatusCode, ApiError> {
-    s.reader.close_epub(&r.resource_id, &r.session_id)?;
+    s.application.close_epub(&r)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 pub(crate) async fn cache_stats(
     State(s): State<AppState>,
 ) -> Result<Json<reader_core::ReaderCacheStats>, ApiError> {
-    Ok(Json(run(move || s.reader.cache_stats()).await?))
+    Ok(Json(run(move || s.application.cache_stats()).await?))
 }
 
 pub(crate) async fn clear_cache(State(s): State<AppState>) -> Result<StatusCode, ApiError> {
-    run(move || s.reader.clear_cache()).await?;
+    run(move || s.application.clear_cache()).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

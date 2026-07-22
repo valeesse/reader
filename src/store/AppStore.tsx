@@ -159,7 +159,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ...existingBook,
         ...book,
         id: book.resourceId,
-        seriesId: existingBook?.seriesId,
         addedAt: existingBook?.addedAt ?? book.addedAt,
         cover: book.cover ?? existingBook?.cover,
         seriesName: book.seriesName ?? existingBook?.seriesName,
@@ -181,32 +180,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       bookIds,
     };
     const updatedSeries = [...series, newSeries];
-    const assignedBooks = books.map((book) => (
-      bookIds.includes(book.id) ? { ...book, seriesId: newSeries.id } : book
-    ));
     setSeries(updatedSeries);
-    setBooks(assignedBooks);
-    await Promise.all([saveSeries(updatedSeries), saveBooks(assignedBooks)]);
+    await saveSeries(updatedSeries);
   };
 
   const updateSeries = async (nextSeries: Series) => {
     const updatedSeries = series.map((item) => item.id === nextSeries.id ? nextSeries : item);
-    const updatedBooks = books.map((book) => {
-      if (nextSeries.bookIds.includes(book.id)) return { ...book, seriesId: nextSeries.id };
-      if (book.seriesId === nextSeries.id) return { ...book, seriesId: undefined };
-      return book;
-    });
     setSeries(updatedSeries);
-    setBooks(updatedBooks);
-    await Promise.all([saveSeries(updatedSeries), saveBooks(updatedBooks)]);
+    await saveSeries(updatedSeries);
   };
 
   const deleteSeries = async (seriesId: string) => {
     const updatedSeries = series.filter((item) => item.id !== seriesId);
-    const updatedBooks = books.map((book) => book.seriesId === seriesId ? { ...book, seriesId: undefined } : book);
     setSeries(updatedSeries);
-    setBooks(updatedBooks);
-    await Promise.all([saveSeries(updatedSeries), saveBooks(updatedBooks)]);
+    await saveSeries(updatedSeries);
   };
 
   const autoCreateMetadataSeries = async () => {
@@ -227,15 +214,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const updatedSeries = series
       .filter((item) => item.id !== sourceSeriesId)
       .map((item) => item.id === targetSeriesId ? { ...item, bookIds: mergedBookIds } : item);
-    const updatedBooks = books.map((book) => (
-      source.bookIds.includes(book.id) || target.bookIds.includes(book.id)
-        ? { ...book, seriesId: targetSeriesId }
-        : book
-    ));
-
     setSeries(updatedSeries);
-    setBooks(updatedBooks);
-    await Promise.all([saveSeries(updatedSeries), saveBooks(updatedBooks)]);
+    await saveSeries(updatedSeries);
   };
 
   const scheduleSettingsSave = (nextSettings: AppSettings) => {

@@ -1,6 +1,6 @@
-import { Database, Folder, LoaderCircle, Monitor, Moon, Sun, Trash2 } from 'lucide-react';
+import { Database, FilePlus2, Folder, LoaderCircle, Monitor, Moon, Sun, Trash2 } from 'lucide-react';
 import { AppSettings } from '../../types';
-import { ReaderCacheStats } from '../../lib/native';
+import type { ReaderCacheStats } from '../../lib/backend';
 import { READER_FONT_OPTIONS, READING_SETTING_LIMITS } from '../../lib/readingSettings';
 import { runtimeCapabilities } from '../../lib/backend';
 
@@ -9,11 +9,13 @@ type UpdateSettings = (settings: Partial<AppSettings>) => void;
 export function LibrarySettingsSection({
   onRescan,
   onChangeLibraryRoot,
+  onImportBooks,
   scanMessage,
   isScanning,
 }: {
   onRescan: () => Promise<void>;
   onChangeLibraryRoot: () => Promise<void>;
+  onImportBooks: () => Promise<void>;
   scanMessage?: string;
   isScanning?: boolean;
 }) {
@@ -23,12 +25,13 @@ export function LibrarySettingsSection({
         <div className="flex items-center gap-3">
           <SectionIcon><Folder className="w-5 h-5" /></SectionIcon>
           <div>
-            <h4 className="font-medium text-sm text-[#1C1C1E] dark:text-white">{runtimeCapabilities.libraryRootMutable ? '本地书库' : '服务器书库'}</h4>
-            <p className="text-xs text-black/50 dark:text-white/50">{runtimeCapabilities.libraryRootMutable ? '选择书库目录并重新建立索引' : '目录由服务器固定配置，可重新建立索引'}</p>
+            <h4 className="font-medium text-sm text-[#1C1C1E] dark:text-white">{runtimeCapabilities.mutableLibraryRoot ? '本地书库' : '服务器书库'}</h4>
+            <p className="text-xs text-black/50 dark:text-white/50">{runtimeCapabilities.mutableLibraryRoot ? '选择书库目录并重新建立索引' : '目录由服务器固定配置，可重新建立索引'}</p>
           </div>
         </div>
         <div className="flex shrink-0 gap-2">
-          {runtimeCapabilities.libraryRootMutable && <ActionButton onClick={onChangeLibraryRoot} disabled={isScanning}><Folder className="w-4 h-4" />更改目录</ActionButton>}
+          {runtimeCapabilities.librarySources.includes('managed') && <ActionButton onClick={onImportBooks} disabled={isScanning}><FilePlus2 className="w-4 h-4" />导入</ActionButton>}
+          {runtimeCapabilities.mutableLibraryRoot && <ActionButton onClick={onChangeLibraryRoot} disabled={isScanning}><Folder className="w-4 h-4" />更改目录</ActionButton>}
           <ActionButton onClick={onRescan} disabled={isScanning}>
             {isScanning ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Folder className="w-4 h-4" />}重新扫描
           </ActionButton>

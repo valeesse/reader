@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Book, WebDavBook } from '../../types';
 import { useAppContext } from '../../store/AppStore';
-import { downloadWebDavBook, listWebDavBooks } from '../../lib/native';
+import { downloadWebDavBook, listWebDavBooks } from '../../lib/backend';
 import { Cloud, Download, FolderTree, LoaderCircle, RefreshCw, Search } from 'lucide-react';
 
 export function WebDavLibrary({ onReadBook: _onReadBook }: { onReadBook: (book: Book) => void }) {

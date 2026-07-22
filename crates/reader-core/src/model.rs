@@ -23,12 +23,14 @@ pub enum CoreError {
 pub struct Book {
     pub id: String,
     pub resource_id: String,
+    pub content_id: String,
     pub fingerprint: String,
     pub title: String,
     pub author: String,
     #[serde(rename = "type")]
     pub book_type: String,
     pub file_name: String,
+    pub relative_path: String,
     pub len: u64,
     pub modified_at: u64,
     #[serde(skip_serializing_if = "Option::is_none")]

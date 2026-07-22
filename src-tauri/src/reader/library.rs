@@ -43,16 +43,46 @@ fn set_library_root(
         &library_config_path(&app)?,
         &serde_json::to_vec(&config).map_err(|error| error.to_string())?,
     )?;
-    *state.reader.lock().map_err(|_| "阅读服务被占用".to_string())? = Some(reader);
+    let application = Arc::new(reader_application::ReaderApplication::new(reader));
+    *state.application.lock().map_err(|_| "阅读服务被占用".to_string())? = Some(application);
     Ok(())
+}
+
+#[tauri::command]
+async fn import_managed_books(
+    app: AppHandle,
+    state: tauri::State<'_, ReaderState>,
+    paths: Vec<String>,
+) -> Result<Vec<NativeBook>, String> {
+    let managed_root = app.path().app_data_dir().map_err(|error| error.to_string())?.join("managed-library");
+    let sources = paths.into_iter().map(PathBuf::from).collect::<Vec<_>>();
+    let root_for_import = managed_root.clone();
+    tauri::async_runtime::spawn_blocking(move || reader_application::import_books(root_for_import, &sources))
+        .await.map_err(|error| error.to_string())?.map_err(|error| error.to_string())?;
+
+    let state_dir = library_state_dir(&app)?;
+    let registry = reader_core::LibraryRegistry::open(&managed_root, &state_dir)
+        .map_err(|error| format!("初始化受管书库失败: {error}"))?;
+    let reader = Arc::new(reader_core::ReaderService::new(
+        registry,
+        &state_dir,
+        app.path().app_cache_dir().map_err(|error| error.to_string())?.join("reader-core"),
+    ).map_err(|error| error.to_string())?);
+    let application = Arc::new(reader_application::ReaderApplication::new(reader));
+    let config = LibraryConfig { root: managed_root.to_string_lossy().into_owned() };
+    write_atomic(&library_config_path(&app)?, &serde_json::to_vec(&config).map_err(|error| error.to_string())?)?;
+    *state.application.lock().map_err(|_| "阅读服务被占用".to_string())? = Some(application.clone());
+    let books = tauri::async_runtime::spawn_blocking(move || application.scan(|_| {})).await
+        .map_err(|error| error.to_string())?.map_err(|error| error.to_string())?;
+    Ok(books.into_iter().map(native_book_from_core).collect())
 }
 
 #[tauri::command]
 async fn scan_library(app: AppHandle) -> Result<Vec<NativeBook>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<ReaderState>();
-        let reader = reader_service(&state)?;
-        let books = reader
+        let application = reader_application(&state)?;
+        let books = application
             .scan(|progress| {
                 let _ = app.emit(
                     "library-scan://progress",
@@ -70,7 +100,7 @@ async fn scan_library(app: AppHandle) -> Result<Vec<NativeBook>, String> {
 
 #[tauri::command]
 fn reader_books(state: tauri::State<'_, ReaderState>) -> Result<Vec<NativeBook>, String> {
-    Ok(reader_service(&state)?
+    Ok(reader_application(&state)?
         .books()
         .map_err(|error| error.to_string())?
         .into_iter()
@@ -83,8 +113,8 @@ async fn reader_cover(
     state: tauri::State<'_, ReaderState>,
     resource_id: String,
 ) -> Result<String, String> {
-    let reader = reader_service(&state)?;
-    tauri::async_runtime::spawn_blocking(move || reader.cover(&resource_id))
+    let application = reader_application(&state)?;
+    tauri::async_runtime::spawn_blocking(move || application.cover(&resource_id))
         .await
         .map_err(|error| format!("封面加载任务中断: {error}"))?
         .map(|cover| cover.path.to_string_lossy().into_owned())
@@ -99,7 +129,9 @@ fn native_book_from_core(book: reader_core::Book) -> NativeBook {
         cover: book.cover,
         book_type: book.book_type,
         resource_id: book.resource_id,
+        content_id: book.content_id,
         file_name: book.file_name,
+        relative_path: book.relative_path,
         series_name: book.series_name,
         series_index: book.series_index,
         added_at: book.modified_at,
@@ -118,7 +150,8 @@ fn initialize_library(app: &AppHandle, state: &ReaderState) -> Result<(), String
         &state_dir,
         app.path().app_cache_dir().map_err(|error| error.to_string())?.join("reader-core"),
     ).map_err(|error| format!("初始化阅读服务失败: {error}"))?);
-    *state.reader.lock().map_err(|_| "阅读服务被占用".to_string())? = Some(reader);
+    let application = Arc::new(reader_application::ReaderApplication::new(reader));
+    *state.application.lock().map_err(|_| "阅读服务被占用".to_string())? = Some(application);
     Ok(())
 }
 

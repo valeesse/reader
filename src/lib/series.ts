@@ -9,31 +9,6 @@ export function sortBooksInSeries(books: Book[]) {
   });
 }
 
-export function inferBookSeries(book: Book): { name: string; index: number } | undefined {
-  const fileName = preferredBookFileStem(book);
-  const normalized = fileName
-    .replace(/[（(][^)）]*[)）]\s*$/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const patterns = [
-    /^(.*?)(?:\s*[【\[][^】\]]+[】\]])?\s+(\d+(?:\.\d+)?)\s*$/u,
-    /^(.*?)(?:\s*[-_]\s*)?(?:第\s*)?(\d+(?:\.\d+)?)\s*(?:卷|巻|册|冊|集|话|話|部|章|篇|弹|冊目|卷特装版)?\s*$/iu,
-    /^(.*?)(?:\s*[-_]\s*)?(?:vol(?:ume)?|v|episode|ep|part|book)\.?\s*(\d+(?:\.\d+)?)\s*$/iu,
-    /^(.*?)(?:\s*[-_]\s*)?0*(\d{1,3}(?:\.\d+)?)\s*$/u,
-  ];
-
-  for (const pattern of patterns) {
-    const match = normalized.match(pattern);
-    if (!match) continue;
-    const name = cleanSeriesName(match[1]);
-    const index = Number(match[2]);
-    if (name.length < 2 || !Number.isFinite(index)) continue;
-    return { name, index };
-  }
-
-  return undefined;
-}
-
 export function seriesCoverBook(series: Series, books: Book[]) {
   const seriesBooks = sortBooksInSeries(
     series.bookIds
@@ -53,13 +28,6 @@ export function displayBookFileName(book: Book) {
 
 export function preferredBookFileName(book: Book) {
   return book.fileName || book.title;
-}
-
-function cleanSeriesName(value: string) {
-  return value
-    .replace(/[\s._-]+$/g, '')
-    .replace(/[（(]\s*(?:完|全|番外|特典)\s*[)）]$/iu, '')
-    .trim();
 }
 
 function preferredBookFileStem(book: Book) {

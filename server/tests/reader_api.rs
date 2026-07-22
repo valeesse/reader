@@ -18,6 +18,7 @@ fn app(temp: &TempDir) -> axum::Router {
         state_dir: temp.path().join("state"),
         cache_dir: temp.path().join("cache"),
         dist_dir: temp.path().join("dist"),
+        auth_token: None,
     })
     .unwrap()
 }
@@ -242,27 +243,19 @@ async fn older_last_read_cannot_overwrite_newer_value() {
 }
 
 #[tokio::test]
-async fn non_object_persisted_state_returns_error_without_panicking() {
+async fn sqlite_state_rejects_invalid_payload_without_panicking() {
     let temp = TempDir::new().unwrap();
-    let state_dir = temp.path().join("state");
-    fs::create_dir_all(&state_dir).unwrap();
-    fs::write(state_dir.join("web-state-v1.json"), "[]").unwrap();
     let app = app(&temp);
 
     assert_eq!(
         request(&app, "GET", "/api/state", Value::Null).await.0,
-        StatusCode::INTERNAL_SERVER_ERROR
+        StatusCode::OK
     );
     assert_eq!(
-        request(
-            &app,
-            "PUT",
-            "/api/state/progress",
-            json!({"book": {"updatedAt": 1}}),
-        )
-        .await
-        .0,
-        StatusCode::INTERNAL_SERVER_ERROR
+        request(&app, "PUT", "/api/state/progress", json!([]),)
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
     );
 }
 

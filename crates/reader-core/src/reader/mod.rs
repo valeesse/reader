@@ -46,6 +46,7 @@ impl ReaderService {
     /// an active reader command is opening or reading it.
     pub fn maintain_disk_cache(&self) -> Result<(), ReaderError> {
         let _maintenance = self.maintenance.write().map_err(|_| ReaderError::Busy)?;
+        self.prune_expired_sessions()?;
         cache::trim_disk(&self.config.cache_dir, model::reader_disk_cache_max_bytes())
     }
 
@@ -61,11 +62,12 @@ impl ReaderService {
     where
         F: FnMut(ScanProgress),
     {
-        let mut books = self
-            .registry
-            .lock()
-            .map_err(|_| ReaderError::Busy)?
-            .scan(progress)?;
+        // Scan a detached registry snapshot so active reads can continue to
+        // resolve paths from the last committed index. Publish atomically only
+        // after the new index is complete.
+        let mut next_registry = self.registry.lock().map_err(|_| ReaderError::Busy)?.clone();
+        let mut books = next_registry.scan(progress)?;
+        *self.registry.lock().map_err(|_| ReaderError::Busy)? = next_registry;
         for book in &mut books {
             if book.book_type == "epub"
                 && let Ok(metadata) = epub::scan_epub_metadata(self, &book.resource_id, &book.title)
@@ -178,7 +180,21 @@ impl ReaderService {
     }
     pub fn clear_cache(&self) -> Result<(), ReaderError> {
         let _maintenance = self.maintenance.write().map_err(|_| ReaderError::Busy)?;
+        self.prune_expired_sessions()?;
         cache::clear(self)
+    }
+
+    fn prune_expired_sessions(&self) -> Result<(), ReaderError> {
+        let now = model::now_millis();
+        {
+            let mut books = self.txt_books.lock().map_err(|_| ReaderError::Busy)?;
+            lifecycle::prune_sessions(&mut books, now);
+        }
+        {
+            let mut books = self.epub_books.lock().map_err(|_| ReaderError::Busy)?;
+            lifecycle::prune_sessions(&mut books, now);
+        }
+        Ok(())
     }
 
     fn resolve(

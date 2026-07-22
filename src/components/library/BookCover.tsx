@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Book } from '../../types';
-import { resolveBookCover } from '../../lib/backend';
-import { isTauriApp, toLocalAssetUrl } from '../../lib/native';
+import { readerGateway, resolveBookCover } from '../../lib/backend';
 
 export function BookCover({
   book,
@@ -93,5 +92,5 @@ export function BookCover({
 
 function coverToSrc(cover: string) {
   if (/^(data:|blob:|https?:|asset:)/i.test(cover)) return cover;
-  return isTauriApp() ? toLocalAssetUrl(cover) : cover;
+  return readerGateway.fileUrl(cover);
 }

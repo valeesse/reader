@@ -1,10 +1,12 @@
 import { ArrowLeft, Layers } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useRef, useState } from 'react';
 import { Book } from '../../types';
 import { displayBookFileName } from '../../lib/series';
 import { prewarmWebReaderOnIntent } from '../../reader/readerWarmup';
 import { BookCover } from './BookCover';
 import type { LibraryEntry } from './Library';
+import { ScrollToTopButton } from './ScrollToTopButton';
 
 export function SeriesTile({
   entry,
@@ -72,6 +74,8 @@ export function SeriesDetailView({
   onReadBook: (book: Book) => void;
 }) {
   const uniqueAuthors = Array.from(new Set(entry.books.map((book) => book.author).filter(Boolean)));
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   return (
     <div className="glass-surface absolute inset-0 z-20 flex flex-col">
       <header className="h-14 border-b border-black/5 dark:border-white/5 flex items-center gap-3 px-4 sm:px-8 bg-white/80 dark:bg-[#121212]/80 backdrop-blur-md sticky top-0 z-10">
@@ -80,7 +84,11 @@ export function SeriesDetailView({
         </button>
         <h1 className="min-w-0 truncate text-lg font-bold text-[#1C1C1E] dark:text-white">{entry.title}</h1>
       </header>
-      <div className="flex-1 overflow-y-auto p-3 min-[380px]:p-4 sm:p-6 space-y-6 sm:space-y-8">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto p-3 min-[380px]:p-4 sm:p-6 space-y-6 sm:space-y-8"
+        onScroll={(event) => setShowScrollTop(event.currentTarget.scrollTop > 480)}
+      >
         <section className="grid gap-4 sm:gap-6 lg:grid-cols-[220px_minmax(0,1fr)] rounded-3xl border border-black/5 dark:border-white/10 bg-white/75 dark:bg-white/10 p-4 sm:p-6 shadow-sm">
           <div className="w-full max-w-[160px] sm:max-w-[220px] mx-auto lg:mx-0">
             <div className="aspect-[3/4] overflow-hidden rounded-2xl bg-[#e4e5df] dark:bg-[#30332f] shadow-[0_10px_30px_rgba(35,40,33,0.14)]">
@@ -121,6 +129,10 @@ export function SeriesDetailView({
           </div>
         </section>
       </div>
+      <ScrollToTopButton
+        visible={showScrollTop}
+        onClick={() => scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+      />
     </div>
   );
 }

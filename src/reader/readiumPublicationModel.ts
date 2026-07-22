@@ -1,4 +1,4 @@
-import type { NativeEpubBookInfo } from '../lib/native';
+import type { NativeEpubBookInfo } from '../lib/readerClient';
 import type { ReadiumResourceLike } from './readiumPublication';
 import {
   createLocator,

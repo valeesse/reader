@@ -9,11 +9,12 @@ mod tests;
 use axum::{
     Router,
     body::Body,
-    http::{HeaderValue, Request, header},
+    http::{HeaderValue, Request, StatusCode, header},
     middleware::{self, Next},
     response::Response,
     routing::{delete, get, post, put},
 };
+use reader_application::ReaderApplication;
 use reader_core::{LibraryRegistry, ReaderService};
 use state::AppState;
 use std::{fs, path::PathBuf, sync::Arc};
@@ -29,6 +30,7 @@ pub struct ServerConfig {
     pub state_dir: PathBuf,
     pub cache_dir: PathBuf,
     pub dist_dir: PathBuf,
+    pub auth_token: Option<String>,
 }
 
 pub fn build_router(config: ServerConfig) -> Result<Router, Box<dyn std::error::Error>> {
@@ -44,7 +46,13 @@ pub fn build_router(config: ServerConfig) -> Result<Router, Box<dyn std::error::
     if reader.books()?.is_empty() {
         reader.scan(|_| {})?;
     }
-    let state = AppState::new(reader, config.state_dir.join("web-state-v1.json"));
+    let application = Arc::new(ReaderApplication::new(reader));
+    let state = AppState::new(
+        application,
+        config.state_dir.join("reader-state-v1.sqlite3"),
+        config.auth_token.is_some(),
+    )?;
+    let auth_token = config.auth_token.clone().map(Arc::new);
     Ok(Router::new()
         .route("/api/capabilities", get(library_api::capabilities))
         .route("/api/library/config", get(library_api::library_config))
@@ -75,10 +83,60 @@ pub fn build_router(config: ServerConfig) -> Result<Router, Box<dyn std::error::
             ServeDir::new(&config.dist_dir)
                 .not_found_service(ServeFile::new(config.dist_dir.join("index.html"))),
         )
+        .layer(middleware::from_fn(move |request, next| {
+            api_auth(request, next, auth_token.clone())
+        }))
         .layer(middleware::from_fn(static_cache_headers))
         .layer(CompressionLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state))
+}
+
+async fn api_auth(request: Request<Body>, next: Next, token: Option<Arc<String>>) -> Response {
+    let Some(token) = token else {
+        return next.run(request).await;
+    };
+    if !request.uri().path().starts_with("/api/") {
+        return next.run(request).await;
+    }
+    let bearer = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    let alternate = request
+        .headers()
+        .get("x-zenith-token")
+        .and_then(|value| value.to_str().ok());
+    let cookie = request
+        .headers()
+        .get(header::COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            value
+                .split(';')
+                .map(str::trim)
+                .find_map(|part| part.strip_prefix("zenith_token="))
+        })
+        .and_then(|value| {
+            url::form_urlencoded::parse(format!("token={value}").as_bytes())
+                .next()
+                .map(|(_, value)| value.into_owned())
+        });
+    if bearer == Some(token.as_str())
+        || alternate == Some(token.as_str())
+        || cookie.as_deref() == Some(token.as_str())
+    {
+        next.run(request).await
+    } else {
+        Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"code":"PERMISSION_DENIED","error":"authentication required"}"#,
+            ))
+            .expect("static unauthorized response")
+    }
 }
 
 async fn static_cache_headers(request: Request<Body>, next: Next) -> Response {

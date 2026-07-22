@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { runtimeCapabilities } from '../../lib/backend';
-import { clearReaderCache, downloadWebDavSnapshot, getReaderCacheStats, ReaderCacheStats, uploadWebDavSnapshot } from '../../lib/native';
+import { clearCache, downloadWebDavSnapshot, getCacheStats, runtimeCapabilities, type ReaderCacheStats, uploadWebDavSnapshot } from '../../lib/backend';
 import { cancelReaderIdle, ReaderIdleHandle, scheduleReaderIdle } from '../../lib/readerScheduler';
 import { applySyncSnapshot, createSyncSnapshot } from '../../lib/storage';
 import { useAppContext } from '../../store/AppStore';
@@ -16,11 +15,13 @@ import { WebDavSettingsSection } from './WebDavSettingsSection';
 export function SettingsView({
   onRescan,
   onChangeLibraryRoot,
+  onImportBooks,
   scanMessage,
   isScanning,
 }: {
   onRescan: () => Promise<void>;
   onChangeLibraryRoot: () => Promise<void>;
+  onImportBooks: () => Promise<void>;
   scanMessage?: string;
   isScanning?: boolean;
 }) {
@@ -33,7 +34,7 @@ export function SettingsView({
   useEffect(() => {
     let idleId: ReaderIdleHandle | undefined;
     const timerId = window.setTimeout(() => {
-      idleId = scheduleReaderIdle(() => getReaderCacheStats().then(setCacheStats).catch(() => {}), { timeout: 1500 });
+      idleId = scheduleReaderIdle(() => getCacheStats().then(setCacheStats).catch(() => {}), { timeout: 1500 });
     }, 4000);
     return () => {
       window.clearTimeout(timerId);
@@ -66,8 +67,8 @@ export function SettingsView({
     setClearingCache(true);
     setCacheStatus('');
     try {
-      await clearReaderCache();
-      setCacheStats(await getReaderCacheStats());
+      await clearCache();
+      setCacheStats(await getCacheStats());
       setCacheStatus('阅读缓存已清理；书籍原文件不会被删除。');
     } catch (error) {
       setCacheStatus(error instanceof Error ? error.message : '缓存清理失败。');
@@ -83,11 +84,11 @@ export function SettingsView({
         <h1 className="text-lg font-bold text-[#1C1C1E] dark:text-white">偏好设置</h1>
       </header>
       <div className="flex-1 overflow-y-auto p-8 max-w-2xl mx-auto w-full space-y-8">
-        <LibrarySettingsSection {...{ onRescan, onChangeLibraryRoot, scanMessage, isScanning }} />
+        <LibrarySettingsSection {...{ onRescan, onChangeLibraryRoot, onImportBooks, scanMessage, isScanning }} />
         <CacheSettingsSection stats={cacheStats} status={cacheStatus} clearing={clearingCache} onClear={clearCache} />
         <AppearanceSettingsSection settings={settings} updateSettings={updateSettings} />
         <ReadingDefaultsSection settings={settings} updateSettings={updateSettings} />
-        {runtimeCapabilities.webDav && (
+        {runtimeCapabilities.librarySources.includes('webdav') && (
           <WebDavSettingsSection
             settings={settings}
             updateSettings={updateSettings}

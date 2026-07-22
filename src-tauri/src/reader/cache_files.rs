@@ -2,8 +2,8 @@
 async fn reader_cache_stats(
     state: tauri::State<'_, ReaderState>,
 ) -> Result<reader_core::ReaderCacheStats, String> {
-    let reader = reader_service(&state)?;
-    tauri::async_runtime::spawn_blocking(move || reader.cache_stats())
+    let application = reader_application(&state)?;
+    tauri::async_runtime::spawn_blocking(move || application.cache_stats())
         .await
         .map_err(|error| format!("阅读缓存统计任务中断: {error}"))?
         .map_err(|error| error.to_string())
@@ -11,8 +11,8 @@ async fn reader_cache_stats(
 
 #[tauri::command]
 async fn clear_reader_cache(state: tauri::State<'_, ReaderState>) -> Result<(), String> {
-    let reader = reader_service(&state)?;
-    tauri::async_runtime::spawn_blocking(move || reader.clear_cache())
+    let application = reader_application(&state)?;
+    tauri::async_runtime::spawn_blocking(move || application.clear_cache())
         .await
         .map_err(|error| format!("阅读缓存清理任务中断: {error}"))?
         .map_err(|error| error.to_string())

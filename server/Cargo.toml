@@ -1,6 +1,6 @@
 [package]
 name = "zenith-reader-server"
-version = "0.1.0"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.96"
 
@@ -11,6 +11,9 @@ path = "src/main.rs"
 [dependencies]
 axum = "0.8"
 reader-core = { path = "../crates/reader-core" }
+reader-application = { path = "../crates/reader-application" }
+reader-contracts = { path = "../crates/reader-contracts" }
+reader-state = { path = "../crates/reader-state" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "sync"] }

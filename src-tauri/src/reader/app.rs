@@ -8,6 +8,7 @@ pub fn run() {
         .manage(ReaderState::default())
         .setup(move |app| {
             let library_started_at = std::time::Instant::now();
+            initialize_state(app.handle(), &app.state::<ReaderState>())?;
             initialize_library(app.handle(), &app.state::<ReaderState>())?;
             eprintln!(
                 "[startup] native library ready in {} ms; process elapsed {} ms",
@@ -18,10 +19,10 @@ pub fn run() {
             // Cache trimming walks every cached file and can take seconds on a
             // large library. It is maintenance work, never a window-creation
             // prerequisite, so run it after the WebView has started loading.
-            if let Ok(reader) = reader_service(&app.state::<ReaderState>()) {
+            if let Ok(application) = reader_application(&app.state::<ReaderState>()) {
                 tauri::async_runtime::spawn_blocking(move || {
                     let started_at = std::time::Instant::now();
-                    match reader.maintain_disk_cache() {
+                    match application.maintain_disk_cache() {
                         Ok(()) => eprintln!(
                             "[startup] background cache maintenance finished in {} ms",
                             started_at.elapsed().as_millis(),
@@ -36,6 +37,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             startup_shell_ready,
             scan_library,
+            import_managed_books,
             reader_books,
             reader_cover,
             get_library_root,
@@ -52,6 +54,10 @@ pub fn run() {
             close_epub_book,
             reader_cache_stats,
             clear_reader_cache,
+            state_get,
+            state_get_progress,
+            state_put_section,
+            state_put_reading,
             authorize_export_path,
             write_binary_file,
             webdav_upload_snapshot,

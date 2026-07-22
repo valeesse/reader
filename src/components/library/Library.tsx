@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Book, BookType, Series } from '../../types';
 import { useAppContext } from '../../store/AppStore';
 import { ArrowDownAZ, ArrowUpAZ, BookOpen, Clock3, Search } from 'lucide-react';
@@ -7,6 +7,7 @@ import { BookCover } from './BookCover';
 import { displayBookFileName, seriesCoverBook, sortBooksInSeries } from '../../lib/series';
 import { prewarmWebReaderOnIntent } from '../../reader/readerWarmup';
 import { BookTile, SeriesDetailView, SeriesTile } from './LibraryTiles';
+import { ScrollToTopButton } from './ScrollToTopButton';
 
 type SortKey = 'fileName' | 'addedAt' | 'recent';
 type SortOrder = 'asc' | 'desc';
@@ -25,6 +26,8 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [visibleCount, setVisibleCount] = useState(BOOK_BATCH_SIZE);
   const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const progressByBookId = useMemo(
     () => new Map(progress.map((item) => [item.bookId, item])),
@@ -143,6 +146,7 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
 
   const handleLibraryScroll = (event: React.UIEvent<HTMLDivElement>) => {
     const target = event.currentTarget;
+    setShowScrollTop(target.scrollTop > 480);
     if (target.scrollTop + target.clientHeight >= target.scrollHeight - 420) {
       setVisibleCount((current) => Math.min(filteredEntries.length, current + BOOK_BATCH_SIZE));
     }
@@ -166,7 +170,7 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
           <span className="text-xs tabular-nums text-black/40 dark:text-white/40">{filteredEntries.length} 本</span>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-3 py-4 min-[380px]:px-4 sm:p-6 lg:p-8" onScroll={handleLibraryScroll}>
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-3 py-4 min-[380px]:px-4 sm:p-6 lg:p-8" onScroll={handleLibraryScroll}>
           <div className="mx-auto w-full max-w-[1800px] space-y-5 sm:space-y-7">
             {recentBook && (
               <button
@@ -252,6 +256,10 @@ export function Library({ onReadBook }: { onReadBook: (book: Book) => void }) {
             )}
           </div>
         </div>
+        <ScrollToTopButton
+          visible={showScrollTop}
+          onClick={() => scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+        />
       </div>
       {selectedSeriesEntry && (
         <SeriesDetailView

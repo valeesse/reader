@@ -1,8 +1,8 @@
 import { Book } from '../types';
-import { isDesktopRuntime } from '../lib/backend';
+import { runtimeCapabilities } from '../lib/backend';
 
 export function prewarmWebReaderOnIntent(book: Book) {
-  if (isDesktopRuntime) return;
+  if (runtimeCapabilities.resourceTransport === 'asset-url') return;
   void import('./readerPublication')
     .then(({ prewarmReaderPublication }) => prewarmReaderPublication(book))
     .catch(() => {});

@@ -16,8 +16,9 @@ export function createRecord(environment: StripRecordEnvironment, index: number)
   wrapper.style.height = `${environment.estimatedHeight(index)}px`;
   const iframe = document.createElement('iframe');
   iframe.className = 'zenith-resource-strip-frame';
-  // Executable publication content is stripped by the resource manager. Keeping
-  // same-origin frames avoids two WebView diagnostics for every warm resource.
+  // Publication content remains DOM-readable for layout and locator mapping,
+  // but the sandbox never grants script execution or navigation privileges.
+  iframe.setAttribute('sandbox', 'allow-same-origin');
   iframe.setAttribute('scrolling', 'no');
   iframe.setAttribute('aria-label', publication.readingOrder.items[index]?.title || `资源 ${index + 1}`);
   wrapper.appendChild(iframe);

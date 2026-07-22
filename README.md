@@ -36,7 +36,7 @@ Zenith Reader 是一个基于 Rust、Tauri 2、React 19 和 Readium 的桌面/We
 - 前端：React 19 + TypeScript + Vite
 - 样式：Tailwind CSS 4
 - EPUB / TXT 渲染：Readium navigator
-- 前端存储：IndexedDB + localStorage 启动快照
+- 状态存储：共享 SQLite repository；IndexedDB + localStorage 仅作为客户端缓存和启动快照
 
 ## 架构概览
 
@@ -71,9 +71,9 @@ Rust 侧负责更适合放在原生环境里的工作：
 
 - 桌面端通过原生目录选择器配置一个书库根目录，之后只扫描该目录。
 - Web 端通过 `ZENITH_LIBRARY_DIR` 配置固定目录，浏览器不会接触服务器路径。
-- 两端使用完整文件 SHA-256 作为稳定书籍 ID，因此在书库内移动或重命名文件后，阅读进度仍可保留。
+- 两端使用持久化逻辑 `BookId` 作为书籍 ID，完整文件 SHA-256 作为 `ContentId`；移动、重命名和内容匹配不再混用同一个标识。
 - EPUB/TXT 解析、流式 TXT 索引、资源缓存和会话管理由 `crates/reader-core` 共用。
-- 桌面状态保存在本机；Web 状态保存在服务器，仅在 Web 设备之间同步。
+- 桌面状态保存在本机 SQLite，Web 状态保存在服务器 SQLite；两端复用相同的 schema、事务与冲突规则。
 
 ## 性能设计
 
@@ -170,12 +170,13 @@ pnpm dev
 默认 Compose 将仓库下的 `./books` 只读挂载为服务器书库：
 
 ```bash
+$env:ZENITH_AUTH_TOKEN = "请替换为随机长令牌" # PowerShell
 docker compose up --build -d
 ```
 
 打开 `http://服务器地址:8080`。状态与阅读缓存分别保存在 `zenith-state` 和 `zenith-cache` 卷中。部署到其他位置时，修改 `docker-compose.yml` 中 `./books:/data/books:ro` 左侧的宿主机目录即可。
 
-当前 Web 服务不包含鉴权，适合可信局域网部署，不应直接暴露到公网。
+Web 服务默认只监听 `127.0.0.1`。Docker/LAN 部署必须设置 `ZENITH_AUTH_TOKEN`，浏览器首次访问 API 时会要求输入令牌；即使启用鉴权，也不建议直接暴露到公网。
 
 ## 常用命令
 

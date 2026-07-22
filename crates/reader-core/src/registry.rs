@@ -6,7 +6,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fs::{self, File},
     io::{self, Write},
     path::{Component, Path, PathBuf},
@@ -15,11 +15,12 @@ use std::{
 use support::{modified_ns, normalized_relative_path, supported_extension};
 use walkdir::WalkDir;
 
-const INDEX_VERSION: u8 = 1;
+const INDEX_VERSION: u8 = 2;
 static INDEX_TEMP_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CachedFile {
+    book_id: String,
     relative_path: String,
     len: u64,
     modified_ns: u64,
@@ -43,6 +44,7 @@ impl Default for StoredIndex {
     }
 }
 
+#[derive(Clone)]
 pub struct LibraryRegistry {
     root: PathBuf,
     state_dir: PathBuf,
@@ -126,20 +128,47 @@ impl LibraryRegistry {
             });
         }
         candidates.sort_by(|a, b| a.0.cmp(&b.0));
+        let current_paths = candidates
+            .iter()
+            .map(|candidate| candidate.0.clone())
+            .collect::<HashSet<_>>();
+        let reserved_ids = self
+            .index
+            .files
+            .iter()
+            .filter(|file| current_paths.contains(&file.relative_path))
+            .map(|file| file.book_id.clone())
+            .collect::<HashSet<_>>();
+        let mut previous_by_content: HashMap<String, Vec<String>> = HashMap::new();
+        for file in &self.index.files {
+            previous_by_content
+                .entry(file.fingerprint.clone())
+                .or_default()
+                .push(file.book_id.clone());
+        }
         let mut resources = BTreeMap::new();
         let mut files = Vec::new();
         let mut books = Vec::new();
         for (relative_path, book_type, len, modified_ns, fingerprint) in candidates {
+            let book_id = cached
+                .get(&relative_path)
+                .map(|file| file.book_id.clone())
+                .or_else(|| {
+                    previous_by_content.get(&fingerprint).and_then(|ids| {
+                        ids.iter()
+                            .find(|id| !reserved_ids.contains(*id) && !resources.contains_key(*id))
+                            .cloned()
+                    })
+                })
+                .unwrap_or_else(|| new_book_id(&fingerprint, &relative_path));
             files.push(CachedFile {
+                book_id: book_id.clone(),
                 relative_path: relative_path.clone(),
                 len,
                 modified_ns,
                 fingerprint: fingerprint.clone(),
             });
-            if resources.contains_key(&fingerprint) {
-                continue;
-            }
-            resources.insert(fingerprint.clone(), relative_path.clone());
+            resources.insert(book_id.clone(), relative_path.clone());
             let file_name = Path::new(&relative_path)
                 .file_name()
                 .and_then(|value| value.to_str())
@@ -151,13 +180,15 @@ impl LibraryRegistry {
                 .unwrap_or("Unknown Title")
                 .to_string();
             books.push(Book {
-                id: fingerprint.clone(),
-                resource_id: fingerprint.clone(),
+                id: book_id.clone(),
+                resource_id: book_id,
+                content_id: fingerprint.clone(),
                 fingerprint,
                 title,
                 author: "Unknown Author".into(),
                 book_type: book_type.into(),
                 file_name,
+                relative_path,
                 len,
                 modified_at: modified_ns / 1_000_000,
                 cover: None,
@@ -197,11 +228,13 @@ impl LibraryRegistry {
                 Some(Book {
                     id: id.clone(),
                     resource_id: id.clone(),
-                    fingerprint: id.clone(),
+                    content_id: file.fingerprint.clone(),
+                    fingerprint: file.fingerprint.clone(),
                     title,
                     author: "Unknown Author".into(),
                     book_type: book_type.into(),
                     file_name,
+                    relative_path: relative.clone(),
                     len: file.len,
                     modified_at: file.modified_ns / 1_000_000,
                     cover: None,
@@ -255,6 +288,26 @@ impl LibraryRegistry {
         crate::replace_file(&temp, &target)?;
         Ok(())
     }
+}
+
+fn new_book_id(fingerprint: &str, relative_path: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(fingerprint.as_bytes());
+    hasher.update([0]);
+    hasher.update(relative_path.as_bytes());
+    hasher.update(
+        INDEX_TEMP_COUNTER
+            .fetch_add(1, Ordering::Relaxed)
+            .to_le_bytes(),
+    );
+    hasher.update(std::process::id().to_le_bytes());
+    let value = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("{}:{value}", crate::BOOK_ID_VERSION)
 }
 
 #[cfg(test)]

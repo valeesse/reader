@@ -1,23 +1,11 @@
 import {
-  clearCache,
   desktopFileSrc,
   desktopInvoke,
   epubCommand,
-  getCacheStats,
   isDesktopRuntime,
-  ReaderCacheStats,
   txtCommand,
 } from './backend';
 export { saveImageFromSource } from './nativeImage';
-export {
-  cacheWebDavBook,
-  downloadWebDavBook,
-  downloadWebDavSnapshot,
-  listWebDavBooks,
-  uploadWebDavSnapshot,
-} from './nativeWebDav';
-
-let fallbackDialogDirectoryPromise: Promise<string> | undefined;
 
 export interface NativeTxtChapter {
   id: string;
@@ -85,8 +73,6 @@ export interface NativeEpubResource {
   binaryUrl?: string | null;
 }
 
-export type { ReaderCacheStats } from './backend';
-
 export function isTauriApp() {
   return isDesktopRuntime;
 }
@@ -103,37 +89,6 @@ export async function showMainWindow() {
       console.warn('Failed to show main window', error, fallbackError);
     }
   }
-}
-
-export async function selectLibraryDirectory(): Promise<string | undefined> {
-  const defaultPath = await libraryDialogDirectory();
-  try {
-    const selected = await desktopInvoke<string | null>('pick_library_directory_fast');
-    return selected || undefined;
-  } catch (error) {
-    console.info('Fast directory picker unavailable; using Tauri dialog', error);
-  }
-  const { open } = await import('@tauri-apps/plugin-dialog');
-  const selected = await open({
-    directory: true,
-    multiple: false,
-    title: '选择本地书库文件夹',
-    defaultPath,
-  });
-
-  if (typeof selected !== 'string') return undefined;
-  return selected;
-}
-
-export function prewarmLibraryDialogDirectory() {
-  void libraryDialogDirectory();
-}
-
-async function libraryDialogDirectory() {
-  fallbackDialogDirectoryPromise ||= import('@tauri-apps/api/path')
-    .then(({ homeDir }) => homeDir())
-    .catch(() => '');
-  return fallbackDialogDirectoryPromise;
 }
 
 export async function openTxtBook(resourceId: string): Promise<NativeTxtBookInfo> {
@@ -200,12 +155,4 @@ export async function closeEpubBook(resourceId: string, sessionId: string) {
 
 export function toLocalAssetUrl(path: string) {
   return desktopFileSrc(path);
-}
-
-export async function getReaderCacheStats() {
-  return getCacheStats();
-}
-
-export async function clearReaderCache() {
-  await clearCache();
 }

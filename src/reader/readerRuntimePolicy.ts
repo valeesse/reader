@@ -1,4 +1,4 @@
-import { isDesktopRuntime } from '../lib/backend';
+import { runtimeCapabilities } from '../lib/backend';
 
 type NavigatorWithConnection = Navigator & {
   connection?: {
@@ -29,19 +29,20 @@ export function readerRuntimePolicy(): ReaderRuntimePolicy {
     || connection?.effectiveType === '2g'
     || connection?.effectiveType === 'slow-2g',
   );
-  const constrained = !isDesktopRuntime && (
+  const localTransport = runtimeCapabilities.resourceTransport === 'asset-url';
+  const constrained = !localTransport && (
     saveData
     || highLatency
     || (runtimeNavigator.deviceMemory !== undefined && runtimeNavigator.deviceMemory <= 4)
   );
   return {
-    desktop: isDesktopRuntime,
+    desktop: runtimeCapabilities.desktopShell,
     constrained,
     saveData,
     highLatency,
-    contentPrefetchRadius: isDesktopRuntime ? 3 : constrained ? 1 : 2,
-    continuousResourceRadius: isDesktopRuntime ? 3 : constrained ? 1 : 2,
-    continuousResourceLimit: isDesktopRuntime ? 12 : constrained ? 5 : 9,
-    framePreparationConcurrency: isDesktopRuntime ? 2 : constrained ? 1 : 2,
+    contentPrefetchRadius: localTransport ? 3 : constrained ? 1 : 2,
+    continuousResourceRadius: localTransport ? 3 : constrained ? 1 : 2,
+    continuousResourceLimit: localTransport ? 12 : constrained ? 5 : 9,
+    framePreparationConcurrency: constrained ? 1 : 2,
   };
 }

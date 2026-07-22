@@ -1,6 +1,6 @@
 [package]
 name = "zenith-reader"
-version = "0.1.0"
+version = "1.1.0"
 description = "A glassmorphic cross-platform EPUB/TXT reader"
 authors = ["Zenith Reader"]
 edition = "2024"
@@ -19,20 +19,18 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 base64 = "0.22"
-encoding_rs = "0.8"
-encoding_rs_io = "0.1.7"
-mime_guess = "2"
 percent-encoding = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 reader-core = { path = "../crates/reader-core" }
+reader-application = { path = "../crates/reader-application" }
+reader-contracts = { path = "../crates/reader-contracts" }
+reader-state = { path = "../crates/reader-state" }
 roxmltree = "0.20"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
-walkdir = "2"
-zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

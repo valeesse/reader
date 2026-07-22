@@ -7,6 +7,9 @@ services:
     user: "1000:1001"
     ports:
       - "8080:8080"
+    environment:
+      ZENITH_BIND: 0.0.0.0:8080
+      ZENITH_AUTH_TOKEN: ${ZENITH_AUTH_TOKEN:?Set ZENITH_AUTH_TOKEN before starting the service}
     volumes:
       - /vol2/1000/Media/Book/轻小说:/data/books/light-novels:ro
       - /vol2/1000/Media/Book/纯文本小说:/data/books/plain-text:ro

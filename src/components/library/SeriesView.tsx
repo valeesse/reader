@@ -1,66 +1,61 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useAppContext } from '../../store/AppStore';
 import { Book } from '../../types';
-import { BookOpen, GitMerge, Layers, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { GitMerge, Layers, Pencil, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
 import { BookCover } from './BookCover';
 import { sortBooksInSeries } from '../../lib/series';
 import { prewarmWebReaderOnIntent } from '../../reader/readerWarmup';
+import { SeriesEditorDialog } from './SeriesEditorDialog';
+import { ScrollToTopButton } from './ScrollToTopButton';
 
 export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void }) {
   const { series, books, createSeries, updateSeries, deleteSeries, autoCreateMetadataSeries, mergeSeries } = useAppContext();
-  const [name, setName] = useState('');
-  const [selectedBookIds, setSelectedBookIds] = useState<string[]>([]);
-  const [editingSeriesId, setEditingSeriesId] = useState<string | undefined>();
+  const [editorSeriesId, setEditorSeriesId] = useState<string | null | undefined>();
   const [draggingSeriesId, setDraggingSeriesId] = useState<string | undefined>();
   const [isAutoCreating, setIsAutoCreating] = useState(false);
   const [autoCreateMessage, setAutoCreateMessage] = useState('');
-  const editingSeries = series.find((item) => item.id === editingSeriesId);
-  const orderedBooks = useMemo(
-    () => [...books].sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN')),
-    [books],
-  );
-
-  const toggleBook = (bookId: string) => {
-    setSelectedBookIds((current) => (
-      current.includes(bookId)
-        ? current.filter((id) => id !== bookId)
-        : [...current, bookId]
+  const [query, setQuery] = useState('');
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const editingSeries = typeof editorSeriesId === 'string'
+    ? series.find((item) => item.id === editorSeriesId)
+    : undefined;
+  const filteredSeries = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase();
+    if (!normalized) return series;
+    const booksById = new Map(books.map((book) => [book.id, book]));
+    return series.filter((item) => (
+      item.name.toLocaleLowerCase().includes(normalized)
+      || item.bookIds.some((bookId) => {
+        const book = booksById.get(bookId);
+        return book
+          ? [book.title, book.author, book.fileName, book.relativePath]
+            .filter(Boolean)
+            .some((value) => value!.toLocaleLowerCase().includes(normalized))
+          : false;
+      })
     ));
-  };
+  }, [books, query, series]);
 
-  const startEdit = (seriesId: string) => {
-    const target = series.find((item) => item.id === seriesId);
-    if (!target) return;
-    setEditingSeriesId(target.id);
-    setName(target.name);
-    setSelectedBookIds(target.bookIds);
-  };
-
-  const resetForm = () => {
-    setEditingSeriesId(undefined);
-    setName('');
-    setSelectedBookIds([]);
-  };
-
-  const submit = async () => {
+  const submitEditor = async (name: string, selectedBookIds: string[]) => {
     if (editingSeries) {
-      await updateSeries({ ...editingSeries, name: name.trim(), bookIds: selectedBookIds });
+      await updateSeries({ ...editingSeries, name, bookIds: selectedBookIds });
     } else {
       await createSeries(name, selectedBookIds);
     }
-    resetForm();
+    setEditorSeriesId(undefined);
   };
 
   const handleAutoCreateSeries = async () => {
     if (isAutoCreating) return;
     setIsAutoCreating(true);
-    setAutoCreateMessage('正在分析书籍元数据和文件名...');
+    setAutoCreateMessage('正在按路径和文件名规则分析...');
     try {
       const result = await autoCreateMetadataSeries();
       if (result.createdCount > 0 || result.updatedCount > 0) {
         setAutoCreateMessage(`已创建 ${result.createdCount} 个系列，更新 ${result.updatedCount} 个系列。`);
       } else if (result.eligibleGroups === 0) {
-        setAutoCreateMessage('没有找到可自动归类的系列信息。');
+        setAutoCreateMessage('没有找到符合指定文件名格式的书籍。');
       } else {
         setAutoCreateMessage('系列已是最新。');
       }
@@ -96,6 +91,15 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
               {autoCreateMessage}
             </span>
           )}
+          <button
+            type="button"
+            onClick={() => setEditorSeriesId(null)}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-[5px] bg-black/5 text-[#1C1C1E] transition-colors hover:bg-black/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
+            title="创建系列"
+            aria-label="创建系列"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
           <div className="group relative">
             <button
               type="button"
@@ -106,23 +110,45 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
             >
               <Sparkles className={`h-4 w-4 ${isAutoCreating ? 'animate-pulse' : ''}`} />
             </button>
-            <div className="pointer-events-none absolute right-0 top-11 z-20 w-max max-w-[220px] rounded-[5px] bg-[#1C1C1E] px-3 py-2 text-xs leading-relaxed text-white opacity-0 shadow-xl transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:bg-white dark:text-[#1C1C1E]">
-              通过 EPUB 元数据或书名卷号自动创建系列
+            <div className="pointer-events-none absolute right-0 top-11 z-20 w-72 rounded-[5px] bg-[#1C1C1E] px-3 py-2 text-xs leading-relaxed text-white opacity-0 shadow-xl transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:bg-white dark:text-[#1C1C1E]">
+              仅识别同一文件夹中的「&lt;系列名&gt; &lt;系列序号&gt; &lt;标题、其他文本&gt;.txt/.epub」；按系列名分组、序号排序，其他文件不处理。
             </div>
           </div>
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto p-8 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-8 content-start">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto p-4 sm:p-8"
+        onScroll={(event) => setShowScrollTop(event.currentTarget.scrollTop > 480)}
+      >
         <div className="space-y-5">
+          <div className="flex flex-col gap-2 rounded-2xl border border-black/[0.05] bg-white/45 p-2.5 dark:border-white/10 dark:bg-white/[0.06] sm:flex-row sm:items-center sm:justify-between sm:p-3">
+            <div className="relative w-full sm:max-w-sm">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/35 dark:text-white/35" />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="搜索系列或系列内书籍"
+                className="h-10 w-full rounded-xl bg-black/[0.035] pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-[#007AFF]/35 dark:bg-white/10"
+              />
+            </div>
+            <span className="px-1 text-xs tabular-nums text-black/40 dark:text-white/40">{filteredSeries.length} 个系列</span>
+          </div>
           {series.length === 0 ? (
             <div className="min-h-[360px] flex flex-col items-center justify-center text-gray-500 dark:text-gray-400">
               <Layers className="w-16 h-16 mb-4 opacity-20" />
               <h2 className="text-xl font-medium text-gray-900 dark:text-gray-100 mb-2">暂无系列</h2>
               <p className="text-sm">选择多本书，创建连续阅读的多卷小说系列。</p>
             </div>
+          ) : filteredSeries.length === 0 ? (
+            <div className="flex min-h-[300px] flex-col items-center justify-center text-gray-500 dark:text-gray-400">
+              <Search className="mb-4 h-12 w-12 opacity-20" />
+              <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100">没有匹配的系列</h2>
+              <p className="mt-2 text-sm">请尝试其他系列名或书籍关键词。</p>
+            </div>
           ) : (
-            series.map((item) => {
+            filteredSeries.map((item) => {
               const seriesBooks = sortBooksInSeries(
                 item.bookIds
                   .map((bookId) => books.find((book) => book.id === bookId))
@@ -178,10 +204,12 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
                         </div>
                       )}
                       <button
-                        onClick={() => startEdit(item.id)}
-                        className="px-3 py-1.5 rounded-[5px] text-sm bg-white/70 dark:bg-white/10 hover:bg-white dark:hover:bg-white/15 transition-colors"
+                        onClick={() => setEditorSeriesId(item.id)}
+                        className="flex h-8 w-8 items-center justify-center rounded-[5px] bg-white/70 transition-colors hover:bg-white dark:bg-white/10 dark:hover:bg-white/15"
+                        title="编辑系列"
+                        aria-label="编辑系列"
                       >
-                        编辑
+                        <Pencil className="h-4 w-4" />
                       </button>
                       <button
                         onClick={() => deleteSeries(item.id)}
@@ -205,7 +233,7 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
                           <BookCover book={book} className="w-full h-full object-cover" compact />
                         </div>
                         <div className="min-w-0">
-                          <div className="text-[11px] text-black/40 dark:text-white/40">第 {index + 1} 卷</div>
+                          <div className="text-[11px] text-black/40 dark:text-white/40">第 {book.seriesIndex ?? index + 1} 卷</div>
                           <div className="text-sm font-medium truncate text-[#1C1C1E] dark:text-white">{book.title}</div>
                         </div>
                       </button>
@@ -216,58 +244,22 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
             })
           )}
         </div>
-
-        <aside className="rounded-[5px] bg-[#F2F2F7]/90 dark:bg-[#1C1C1E]/90 border border-black/5 dark:border-white/5 p-5 shadow-sm h-fit sticky top-20">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="p-2 rounded-[5px] bg-[#007AFF]/10 text-[#007AFF]">
-              <Plus className="w-4 h-4" />
-            </div>
-            <h2 className="font-semibold text-[#1C1C1E] dark:text-white">{editingSeries ? '编辑系列' : '创建系列'}</h2>
-          </div>
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="系列名称"
-            className="w-full bg-white/80 dark:bg-white/10 border border-transparent rounded-[5px] px-3 py-2 text-sm focus:ring-2 focus:ring-[#007AFF] outline-none"
-          />
-
-          <div className="mt-4 max-h-[420px] overflow-y-auto space-y-1 pr-1">
-            {orderedBooks.map((book) => (
-              <label
-                key={book.id}
-                className="flex items-center gap-3 p-2 rounded-[5px] hover:bg-white/70 dark:hover:bg-white/10 transition-colors cursor-pointer"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedBookIds.includes(book.id)}
-                  onChange={() => toggleBook(book.id)}
-                  className="accent-[#007AFF]"
-                />
-                <BookOpen className="w-4 h-4 text-black/35 dark:text-white/35 shrink-0" />
-                <span className="text-sm truncate text-[#1C1C1E] dark:text-white">{book.title}</span>
-              </label>
-            ))}
-          </div>
-
-          <div className="mt-4 flex gap-3">
-            <button
-              onClick={submit}
-              disabled={!name.trim() || selectedBookIds.length === 0}
-              className="flex-1 py-2 rounded-[5px] bg-[#007AFF] text-white text-sm font-medium disabled:opacity-40 hover:bg-blue-600 disabled:hover:bg-[#007AFF] transition-colors"
-            >
-              {editingSeries ? '保存' : '创建'}
-            </button>
-            {editingSeries && (
-              <button
-                onClick={resetForm}
-                className="px-4 py-2 rounded-[5px] bg-black/5 dark:bg-white/10 text-sm hover:bg-black/10 dark:hover:bg-white/15 transition-colors"
-              >
-                取消
-              </button>
-            )}
-          </div>
-        </aside>
       </div>
+      <ScrollToTopButton
+        visible={showScrollTop}
+        onClick={() => scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+      />
+      {editorSeriesId !== undefined && (
+        <SeriesEditorDialog
+          key={editingSeries?.id || 'create'}
+          books={books}
+          initialName={editingSeries?.name}
+          initialBookIds={editingSeries?.bookIds}
+          mode={editingSeries ? 'edit' : 'create'}
+          onCancel={() => setEditorSeriesId(undefined)}
+          onSubmit={submitEditor}
+        />
+      )}
     </div>
   );
 }

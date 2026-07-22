@@ -1,7 +1,7 @@
 {
   "name": "zenith-reader",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.1.0",
   "packageManager": "pnpm@11.9.0",
   "type": "module",
   "scripts": {
@@ -12,6 +12,7 @@
     "server:dev": "cargo run -p zenith-reader-server",
     "docker:up": "docker compose up --build",
     "build": "tsc --noEmit && vite build",
+    "test:unit": "node --test scripts/metadata-series.test.mjs",
     "test:reader:real": "node scripts/reader-real-scenario.mjs",
     "vendor:react": "rimraf src/vendor/prebuilt-react && esbuild scripts/vendor/react.mjs scripts/vendor/react-jsx-runtime.mjs scripts/vendor/react-jsx-dev-runtime.mjs scripts/vendor/react-dom-client.mjs --bundle --splitting --minify --format=esm --platform=browser --outdir=src/vendor/prebuilt-react --chunk-names=shared/[name]-[hash] --define:process.env.NODE_ENV=\\\"development\\\"",
     "preview": "vite preview",

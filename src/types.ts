@@ -3,14 +3,15 @@ export type BookType = 'epub' | 'txt';
 export interface Book {
   id: string;
   resourceId: string;
+  contentId: string;
   title: string;
   author: string;
   cover?: string; // base64 or blob URL
   type: BookType;
   fileName?: string;
+  relativePath?: string;
   seriesName?: string;
   seriesIndex?: number;
-  seriesId?: string;
   addedAt: number;
 }
 

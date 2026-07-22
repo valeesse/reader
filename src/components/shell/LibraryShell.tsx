@@ -7,8 +7,7 @@ import { Library } from '../library/Library';
 import { SettingsView } from '../settings/SettingsView';
 import { WebDavLibrary } from '../library/WebDavLibrary';
 import { SeriesView } from '../library/SeriesView';
-import { prewarmLibraryDialogDirectory } from '../../lib/native';
-import { getLibraryRoot, onScanProgress, pickLibraryRoot, rescanBooks, runtimeCapabilities, setLibraryRoot } from '../../lib/backend';
+import { getLibraryRoot, importBooks, pickLibraryRoot, prewarmLibraryPicker, rescanBooks, runtimeCapabilities, setLibraryRoot } from '../../lib/backend';
 import { cancelReaderIdle, scheduleReaderIdle } from '../../lib/readerScheduler';
 
 export function LibraryShell({ onReadBook, onPresentable }: { onReadBook: (book: Book) => void; onPresentable: () => void }) {
@@ -19,16 +18,15 @@ export function LibraryShell({ onReadBook, onPresentable }: { onReadBook: (book:
 
   useEffect(() => {
     onPresentable();
-    const idleId = scheduleReaderIdle(prewarmLibraryDialogDirectory, { timeout: 1800 });
+    const idleId = scheduleReaderIdle(prewarmLibraryPicker, { timeout: 1800 });
     return () => cancelReaderIdle(idleId);
   }, [onPresentable]);
 
   const scanLibrary = async (changeRoot: boolean) => {
-    let unlistenProgress: (() => void) | undefined;
     try {
       setIsScanning(true);
-      const needsRoot = runtimeCapabilities.libraryRootMutable && !(await getLibraryRoot());
-      if (runtimeCapabilities.libraryRootMutable && (changeRoot || needsRoot)) {
+      const needsRoot = runtimeCapabilities.mutableLibraryRoot && !(await getLibraryRoot());
+      if (runtimeCapabilities.mutableLibraryRoot && (changeRoot || needsRoot)) {
         setScanMessage('正在打开文件夹选择器...');
         await nextPaint();
         const root = await pickLibraryRoot();
@@ -36,17 +34,30 @@ export function LibraryShell({ onReadBook, onPresentable }: { onReadBook: (book:
         await setLibraryRoot(root);
       }
       setScanMessage('正在准备扫描 EPUB / TXT...');
-      unlistenProgress = await onScanProgress((progress) => {
+      const scannedBooks = await rescanBooks((progress) => {
         const fileName = progress.currentPath.split(/[\\/]/).pop();
         setScanMessage(`正在扫描：已检查 ${progress.visited} 项，发现 ${progress.matched} 本${fileName ? `，当前 ${fileName}` : ''}`);
       });
-      const scannedBooks = await rescanBooks();
       await addBooks(scannedBooks);
       setScanMessage(`扫描完成，发现 ${scannedBooks.length} 本书。`);
     } catch (error) {
       setScanMessage(error instanceof Error ? error.message : '扫描失败，请检查路径权限。');
     } finally {
-      unlistenProgress?.();
+      setIsScanning(false);
+    }
+  };
+
+  const importManagedBooks = async () => {
+    try {
+      setIsScanning(true);
+      setScanMessage('正在导入到受管书库...');
+      const imported = await importBooks();
+      if (imported.length === 0) return setScanMessage('未选择书籍。');
+      await addBooks(imported);
+      setScanMessage(`已导入并扫描 ${imported.length} 本书。`);
+    } catch (error) {
+      setScanMessage(error instanceof Error ? error.message : '导入失败。');
+    } finally {
       setIsScanning(false);
     }
   };
@@ -65,12 +76,13 @@ export function LibraryShell({ onReadBook, onPresentable }: { onReadBook: (book:
             className="flex-1 flex min-w-0"
           >
             {currentView === 'library' && <Library onReadBook={onReadBook} />}
-            {currentView === 'webdav' && runtimeCapabilities.webDav && <WebDavLibrary onReadBook={onReadBook} />}
+            {currentView === 'webdav' && runtimeCapabilities.librarySources.includes('webdav') && <WebDavLibrary onReadBook={onReadBook} />}
             {currentView === 'series' && <SeriesView onReadBook={onReadBook} />}
             {currentView === 'settings' && (
               <SettingsView
                 onRescan={() => scanLibrary(false)}
                 onChangeLibraryRoot={() => scanLibrary(true)}
+                onImportBooks={importManagedBooks}
                 scanMessage={scanMessage}
                 isScanning={isScanning}
               />

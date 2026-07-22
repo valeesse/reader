@@ -1,4 +1,4 @@
-import { readEpubResource, toLocalAssetUrl } from '../lib/native';
+import { readEpubResource, toLocalAssetUrl } from '../lib/readerClient';
 import { estimateStringBytes, ReaderContentCache, ReaderWorkScheduler, adaptiveReaderBudget } from './readerCacheCoordinator';
 import type { ReadiumResourceLike } from './readiumPublication';
 import { ReadiumLink } from './readiumPublicationModel';
@@ -120,14 +120,23 @@ export class EpubResourceManager {
   private async rewriteHtml(html: string, href: string) {
     const doc = parseXml(html, 'application/xhtml+xml');
     if (doc.querySelector('parsererror')) return html;
-    doc.querySelectorAll('script').forEach((script) => script.remove());
+    doc.querySelectorAll('script, iframe, frame, object, embed, portal, base, form, meta[http-equiv="refresh"]')
+      .forEach((element) => element.remove());
     doc.querySelectorAll('*').forEach((element) => Array.from(element.attributes).forEach((attribute) => {
-      if (attribute.name.toLowerCase().startsWith('on')) element.removeAttribute(attribute.name);
+      const name = attribute.name.toLowerCase();
+      const value = attribute.value.trim();
+      if (
+        name.startsWith('on')
+        || name === 'srcdoc'
+        || name === 'formaction'
+        || ((name === 'href' || name === 'src' || name === 'xlink:href') && /^(?:javascript:|data:text\/html)/i.test(value))
+      ) element.removeAttribute(attribute.name);
     }));
     doc.querySelectorAll('a[href]').forEach((anchor) => {
       if (/^\s*javascript:/i.test(anchor.getAttribute('href') || '')) anchor.setAttribute('href', '#');
     });
     await rewriteUrlAttributes(doc, dirname(href), (resourceHref) => this.blobUrlFor(resourceHref));
+    installPublicationCsp(doc);
     doc.querySelectorAll('img, picture, figure, svg image').forEach((element) => {
       const htmlElement = element as HTMLElement;
       htmlElement.style.setProperty('border-radius', '5px', 'important');
@@ -145,7 +154,8 @@ export class EpubResourceManager {
       parts.push(css.slice(lastIndex, match.index));
       const quote = match[1] || '';
       const rawUrl = String(match[2] || '').trim();
-      if (!rawUrl || isExternalUrl(rawUrl)) parts.push(match[0]);
+      if (!rawUrl) parts.push(match[0]);
+      else if (isExternalUrl(rawUrl)) parts.push('url("")');
       else {
         const [pathPart, suffix = ''] = rawUrl.split(/(?=[?#])/);
         const resolved = resolveZipPath(baseDir, pathPart);
@@ -160,4 +170,17 @@ export class EpubResourceManager {
     parts.push(css.slice(lastIndex));
     return parts.join('');
   }
+}
+
+function installPublicationCsp(doc: XMLDocument) {
+  const head = doc.querySelector('head');
+  if (!head) return;
+  head.querySelectorAll('meta[http-equiv="Content-Security-Policy" i]').forEach((element) => element.remove());
+  const meta = doc.createElementNS(doc.documentElement.namespaceURI, 'meta');
+  meta.setAttribute('http-equiv', 'Content-Security-Policy');
+  meta.setAttribute(
+    'content',
+    "default-src 'none'; img-src blob: data:; font-src blob: data:; style-src 'unsafe-inline' blob:; media-src blob: data:; script-src 'none'; frame-src 'none'; object-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none'",
+  );
+  head.prepend(meta);
 }

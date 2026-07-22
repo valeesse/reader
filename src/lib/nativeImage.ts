@@ -1,4 +1,4 @@
-import { desktopInvoke, isDesktopRuntime } from './backend';
+import { desktopInvoke, runtimeCapabilities } from './backend';
 
 export async function saveImageFromSource(src: string, suggestedName = 'image') {
   const response = await fetch(src);
@@ -8,7 +8,7 @@ export async function saveImageFromSource(src: string, suggestedName = 'image') 
   const extension = extensionFromMime(blob.type) || extensionFromUrl(src) || 'png';
   const fileName = `${sanitizeFileName(suggestedName)}.${extension}`;
 
-  if (!isDesktopRuntime) {
+  if (!runtimeCapabilities.nativeExport) {
     const objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = objectUrl;

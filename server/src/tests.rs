@@ -31,6 +31,7 @@ fn test_config(temp: &TempDir) -> ServerConfig {
         state_dir,
         cache_dir,
         dist_dir,
+        auth_token: None,
     }
 }
 
@@ -136,4 +137,30 @@ async fn static_assets_are_immutable_and_compressed_while_html_revalidates() {
         html.headers().get(header::CACHE_CONTROL).unwrap(),
         "no-cache"
     );
+}
+
+#[tokio::test]
+async fn configured_api_token_protects_reader_routes() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut config = test_config(&temp);
+    config.auth_token = Some("test-token".into());
+    let app = build_router(config).unwrap();
+
+    let unauthorized = app
+        .clone()
+        .oneshot(Request::get("/api/books").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+    let authorized = app
+        .oneshot(
+            Request::get("/api/books")
+                .header(header::AUTHORIZATION, "Bearer test-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(authorized.status(), StatusCode::OK);
 }

@@ -11,10 +11,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         state_dir: env_path("ZENITH_STATE_DIR", "/data/state"),
         cache_dir: env_path("ZENITH_CACHE_DIR", "/data/cache"),
         dist_dir: env_path("ZENITH_DIST_DIR", "dist"),
+        auth_token: env::var("ZENITH_AUTH_TOKEN")
+            .ok()
+            .filter(|value| !value.is_empty()),
     };
     let app = build_router(config)?;
     let address: SocketAddr = env::var("ZENITH_BIND")
-        .unwrap_or_else(|_| "0.0.0.0:8080".into())
+        .unwrap_or_else(|_| "127.0.0.1:8080".into())
         .parse()?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     tracing::info!(%address, "server listening");

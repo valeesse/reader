@@ -46,7 +46,7 @@ export function Sidebar({ currentView, onChangeView }: SidebarProps) {
           )}>{books.length}</span>
         </button>
 
-        {runtimeCapabilities.webDav && <button
+        {runtimeCapabilities.librarySources.includes('webdav') && <button
           onClick={() => onChangeView('webdav')}
           className={cn(
             "flex-1 h-11 sm:w-full sm:h-10 flex items-center justify-center min-[1100px]:justify-start sm:gap-3 px-1 sm:px-3 text-[13px] sm:text-sm rounded-lg transition-colors",
