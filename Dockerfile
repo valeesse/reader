@@ -25,7 +25,9 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=server-builder /app/target/release/zenith-reader-server /usr/local/bin/zenith-reader-server
 COPY --from=web-builder /app/dist ./dist
-COPY --chmod=755 scripts/docker-entrypoint.sh /usr/local/bin/zenith-reader-entrypoint
+COPY scripts/docker-entrypoint.sh /usr/local/bin/zenith-reader-entrypoint
+RUN sed -i 's/\r$//' /usr/local/bin/zenith-reader-entrypoint \
+    && chmod 755 /usr/local/bin/zenith-reader-entrypoint
 ENV ZENITH_LIBRARY_DIR=/data/books \
     ZENITH_STATE_DIR=/data/state \
     ZENITH_CACHE_DIR=/data/cache \
