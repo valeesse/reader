@@ -4,15 +4,15 @@ RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY index.html tsconfig.json vite.config.ts ./
-COPY src ./src
+COPY packages/reader-ui ./packages/reader-ui
 RUN pnpm build
 
 FROM rust:1.96-bookworm AS server-builder
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-COPY server ./server
-COPY src-tauri ./src-tauri
+COPY apps/server ./apps/server
+COPY apps/desktop/src-tauri ./apps/desktop/src-tauri
 RUN cargo build --release -p zenith-reader-server
 
 FROM debian:bookworm-slim
@@ -20,18 +20,18 @@ RUN apt-get update \
     && apt-get install --no-install-recommends -y ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 zenith \
-    && mkdir -p /app/dist /data/books /data/state /data/cache \
+    && mkdir -p /app/target/dist /data/books /data/state /data/cache \
     && chown -R zenith:zenith /app /data/state /data/cache
 WORKDIR /app
 COPY --from=server-builder /app/target/release/zenith-reader-server /usr/local/bin/zenith-reader-server
-COPY --from=web-builder /app/dist ./dist
-COPY scripts/docker-entrypoint.sh /usr/local/bin/zenith-reader-entrypoint
+COPY --from=web-builder /app/target/dist ./target/dist
+COPY tools/scripts/docker-entrypoint.sh /usr/local/bin/zenith-reader-entrypoint
 RUN sed -i 's/\r$//' /usr/local/bin/zenith-reader-entrypoint \
     && chmod 755 /usr/local/bin/zenith-reader-entrypoint
 ENV ZENITH_LIBRARY_DIR=/data/books \
     ZENITH_STATE_DIR=/data/state \
     ZENITH_CACHE_DIR=/data/cache \
-    ZENITH_DIST_DIR=/app/dist \
+    ZENITH_DIST_DIR=/app/target/dist \
     ZENITH_BIND=0.0.0.0:8080 \
     RUST_LOG=zenith_reader_server=info,tower_http=info
 USER zenith

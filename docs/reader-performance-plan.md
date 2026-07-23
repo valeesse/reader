@@ -130,7 +130,7 @@ These are product acceptance thresholds, not assumptions. They must be measured 
 
 ### Packaged-build verification (2026-07-13)
 
-The CDP scenario in `scripts/reader-real-scenario.mjs` opens the catalog entries,
+The CDP scenario in `tools/scripts/reader-real-scenario.mjs` opens the catalog entries,
 navigates through the real Readium frames, validates decoded images, and drives
 rapid forward/backward keyboard turns at 20 ms intervals. On the packaged x64
 Tauri build used for this verification:
@@ -278,7 +278,7 @@ of truth and the live L0/L1/L2/L3/L4 hierarchy is unchanged.
 Development serves the 13.9 KiB shell through a pre-transform middleware. The
 application module request starts after DOMContentLoaded. React, JSX runtime,
 and ReactDOM are maintained as a checked-in split ESM development runtime, so
-an empty `node_modules/.vite` cache performs no first-run dependency prebundle.
+an empty `target/node_modules/.vite` cache performs no first-run dependency prebundle.
 Production builds keep the normal Vite dependency graph and use Tauri's
 `custom-protocol` feature; a packaged executable must never point at port 3000.
 
@@ -355,7 +355,7 @@ Web persistence and delivery remove avoidable round trips:
 - `pnpm build` passes; Tauri-only APIs appear as separate dynamic chunks.
 - `cargo test --workspace` passes (24 executed tests, 2 real-book probes
   intentionally ignored).
-- `cargo check --manifest-path src-tauri/Cargo.toml` passes.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml` passes.
 - `cargo clippy --workspace --all-targets -- -D warnings` passes.
 - Server regression tests verify atomic/stale reading-state behavior,
   per-book progress, immutable static caching, Gzip delivery, and the Web EPUB

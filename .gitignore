@@ -2,9 +2,9 @@ node_modules/
 build/
 dist/
 coverage/
-books/
-src-tauri/target/
+apps/desktop/src-tauri/target/
 target/
+.books/
 .vite/
 .turbo/
 .DS_Store

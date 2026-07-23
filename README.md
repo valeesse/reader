@@ -46,12 +46,12 @@ Zenith Reader 是一个基于 Rust、Tauri 2、React 19 和 Readium 的桌面/We
 
 关键模块：
 
-- `src/App.tsx`：应用入口与主视图切换
-- `src/components/library/Library.tsx`：书库列表、搜索、筛选、排序
-- `src/components/reader/ReaderLayout.tsx`：阅读器外层布局与阅读设置面板
-- `src/components/reader/ReadiumReaderViewer.tsx`：EPUB / TXT 统一阅读流程
-- `src/reader/txtReadiumPublication.ts`：TXT 虚拟 Publication 与按需 HTML 分片
-- `src/store/AppStore.tsx`：全局状态、进度和设置管理
+- `packages/reader-ui/App.tsx`：应用入口与主视图切换
+- `packages/reader-ui/components/library/Library.tsx`：书库列表、搜索、筛选、排序
+- `packages/reader-ui/features/reader/ui/ReaderLayout.tsx`：阅读器外层布局与阅读设置面板
+- `packages/reader-ui/features/reader/ui/ReadiumReaderViewer.tsx`：EPUB / TXT 统一阅读流程
+- `packages/reader-ui/features/reader/runtime/txtReadiumPublication.ts`：TXT 虚拟 Publication 与按需 HTML 分片
+- `packages/reader-ui/store/AppStore.tsx`：全局状态、进度和设置管理
 
 ### 原生层
 
@@ -65,7 +65,7 @@ Rust 侧负责更适合放在原生环境里的工作：
 
 对应目录：
 
-- `src-tauri/src/lib.rs`
+- `apps/desktop/src-tauri/src/lib.rs`
 
 ### 双端运行模型
 
@@ -184,9 +184,9 @@ Web 服务默认只监听 `127.0.0.1`。Docker/LAN 部署未设置 `ZENITH_AUTH_
 pnpm lint
 pnpm build
 pnpm test:reader:real # packaged app must be running with CDP enabled
-cargo fmt --check --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path src-tauri/Cargo.toml
+cargo fmt --check --manifest-path apps/desktop/src-tauri/Cargo.toml
+cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 pnpm tauri:build
 pnpm clean
 ```
@@ -194,28 +194,30 @@ pnpm clean
 ## 项目结构
 
 ```text
-src/
-  App.tsx
-  ReaderLayoutNext.tsx
-  ReadiumReaderViewer.tsx
-  components/
-  store/
-  lib/
+apps/
+  desktop/
+    src-tauri/             # Tauri、窗口、原生命令与打包配置
+  server/                  # Web / 自部署 API 服务
 
-src-tauri/
-  src/
-  Cargo.toml
-  tauri.conf.json
+packages/
+  reader-ui/               # React UI、阅读器、状态与网关适配
 
-crates/reader-core/
-  src/
+crates/
+  reader-core/             # 阅读解析、书库等领域核心
+  reader-application/      # 用例编排
+  reader-contracts/        # 跨端 DTO 与契约
+  reader-state/            # 状态持久化
 
-server/
-  src/
+tools/
+  scripts/                 # 构建、测试与开发辅助
 
 Dockerfile
 docker-compose.yml
 ```
+
+根目录保留为 workspace 编排层：统一管理 Node/Rust 依赖、Vite 构建与容器配置。应用层只负责运行时装配，`packages/reader-ui` 不依赖 Tauri，`crates/*` 不依赖任何传输或界面适配器。这个划分既维持当前桌面端与 Web 服务的边界，也允许未来加入独立 Web、移动端或浏览器扩展而无需复制阅读 UI 或领域逻辑。
+
+可再生构建输出集中在 `target/`：Rust 产物位于 `target/debug` 或 `target/release`，前端产物位于 `target/dist`。pnpm 依赖保留在根 `node_modules`，以兼容 Node 的标准模块解析。
 
 ## 适合继续演进的方向
 

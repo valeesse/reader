@@ -4,19 +4,21 @@ import fs from 'node:fs';
 import path from 'path';
 import {defineConfig} from 'vite';
 
+const uiRoot = path.resolve(__dirname, 'packages/reader-ui');
+
 export default defineConfig(({ command }) => {
   const developmentReactAliases = command === 'serve' ? [
-    { find: /^react$/, replacement: path.resolve(__dirname, 'src/vendor/prebuilt-react/react.js') },
-    { find: /^react\/jsx-runtime$/, replacement: path.resolve(__dirname, 'src/vendor/prebuilt-react/react-jsx-runtime.js') },
-    { find: /^react\/jsx-dev-runtime$/, replacement: path.resolve(__dirname, 'src/vendor/prebuilt-react/react-jsx-dev-runtime.js') },
-    { find: /^react-dom\/client$/, replacement: path.resolve(__dirname, 'src/vendor/prebuilt-react/react-dom-client.js') },
+    { find: /^react$/, replacement: path.join(uiRoot, 'vendor/prebuilt-react/react.js') },
+    { find: /^react\/jsx-runtime$/, replacement: path.join(uiRoot, 'vendor/prebuilt-react/react-jsx-runtime.js') },
+    { find: /^react\/jsx-dev-runtime$/, replacement: path.join(uiRoot, 'vendor/prebuilt-react/react-jsx-dev-runtime.js') },
+    { find: /^react-dom\/client$/, replacement: path.join(uiRoot, 'vendor/prebuilt-react/react-dom-client.js') },
   ] : [];
   return {
     plugins: [instantStartupHtml(), ...reactWithPrebuiltRuntime(), tailwindcss()],
     resolve: {
       alias: [
         ...developmentReactAliases,
-        { find: '@', replacement: path.resolve(__dirname, '.') },
+        { find: '@', replacement: uiRoot },
       ],
     },
     server: {
@@ -45,6 +47,10 @@ export default defineConfig(({ command }) => {
       exclude: ['react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom/client'],
       holdUntilCrawlEnd: false,
     },
+    build: {
+      outDir: path.resolve(__dirname, 'target/dist'),
+      emptyOutDir: true,
+    },
     clearScreen: false,
     envPrefix: ['VITE_', 'TAURI_'],
   };
@@ -63,11 +69,11 @@ function instantStartupHtml() {
     configureServer(server: import('vite').ViteDevServer) {
       server.middlewares.use((request, response, next) => {
         const pathname = request.url?.split('?', 1)[0];
-        const vendorPrefix = '/src/vendor/prebuilt-react/';
+        const vendorPrefix = '/packages/reader-ui/vendor/prebuilt-react/';
         if (pathname?.startsWith(vendorPrefix)) {
           const relativePath = pathname.slice(vendorPrefix.length);
           if (!/^[a-zA-Z0-9_./-]+\.js$/.test(relativePath) || relativePath.includes('..')) return next();
-          const vendorPath = path.resolve(__dirname, 'src/vendor/prebuilt-react', relativePath);
+          const vendorPath = path.join(uiRoot, 'vendor/prebuilt-react', relativePath);
           response.statusCode = 200;
           response.setHeader('Content-Type', 'text/javascript; charset=utf-8');
           response.setHeader('Cache-Control', 'no-cache');
@@ -82,7 +88,7 @@ function instantStartupHtml() {
             setTimeout(function () {
               var script = document.createElement('script');
               script.type = 'module';
-              script.src = '/src/dev-entry.ts';
+              script.src = '/packages/reader-ui/dev-entry.ts';
               document.head.appendChild(script);
             }, 0);
           </script>`,

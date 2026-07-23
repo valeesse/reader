@@ -17,21 +17,21 @@
     "jsx": "react-jsx",
     "paths": {
       "@/*": [
-        "./*"
+        "./packages/reader-ui/*"
       ]
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
   "include": [
-    "src/**/*.ts",
-    "src/**/*.tsx",
-    "src/**/*.d.ts",
+    "packages/reader-ui/**/*.ts",
+    "packages/reader-ui/**/*.tsx",
+    "packages/reader-ui/**/*.d.ts",
     "vite.config.ts"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "src-tauri/target"
+    "apps/desktop/src-tauri/target"
   ]
 }

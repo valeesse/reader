@@ -1,3 +1,3 @@
 [workspace]
-members = ["crates/reader-core", "crates/reader-contracts", "crates/reader-application", "crates/reader-state", "server", "src-tauri"]
+members = ["crates/reader-core", "crates/reader-contracts", "crates/reader-application", "crates/reader-state", "apps/server", "apps/desktop/src-tauri"]
 resolver = "2"

@@ -6,7 +6,7 @@
 - `reader-contracts` is the transport-neutral wire contract used by Axum and Tauri.
 - `reader-application` owns reader use cases and managed-library imports.
 - `reader-state` owns versioned SQLite state and conflict-safe reading updates.
-- `server` and `src-tauri` are adapters. They must not duplicate reader semantics.
+- `apps/server` and `apps/desktop/src-tauri` are adapters. They must not duplicate reader semantics.
 - React code talks through `ReaderGateway`; feature and reader modules must not call `fetch` or Tauri `invoke` directly.
 
 ## Platform model
