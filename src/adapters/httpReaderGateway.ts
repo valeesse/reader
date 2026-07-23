@@ -90,21 +90,26 @@ export class HttpReaderGateway implements ReaderGateway {
   }
 
   private async http<T>(url: string, init?: RequestInit): Promise<T> {
-    const request = () => fetch(url, {
+    const request = (token: string) => fetch(url, {
       ...init,
       headers: {
         ...(init?.body ? { 'content-type': 'application/json' } : {}),
-        ...(this.apiToken ? { authorization: `Bearer ${this.apiToken}` } : {}),
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
         ...init?.headers,
       },
     });
-    let response = await request();
+    const requestedToken = this.apiToken;
+    let response = await request(requestedToken);
     if (response.status === 401 && typeof window !== 'undefined') {
-      const supplied = window.prompt('请输入 Zenith Reader 服务访问令牌')?.trim();
-      if (supplied) {
-        this.apiToken = supplied;
-        persistApiToken(supplied);
-        response = await request();
+      if (this.apiToken !== requestedToken) {
+        response = await request(this.apiToken);
+      } else {
+        const supplied = window.prompt('请输入 Zenith Reader 服务访问令牌')?.trim();
+        if (supplied) {
+          this.apiToken = supplied;
+          persistApiToken(supplied);
+          response = await request(supplied);
+        }
       }
     }
     return readJson<T>(response);
