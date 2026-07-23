@@ -32,6 +32,31 @@ export interface ReaderCacheStats {
   maxBytes: number;
 }
 
+export interface ReaderFontPack {
+  id: string;
+  label: string;
+  family: string;
+  version: string;
+  source: string;
+  installed: boolean;
+  bytes: number;
+  css?: string;
+  rootPath?: string;
+}
+
+export interface FileAssociationFormatStatus {
+  extension: 'epub' | 'txt';
+  registered: boolean;
+  isDefault: boolean;
+}
+
+export interface FileAssociationStatus {
+  platform: 'windows' | 'macos' | 'linux' | 'web' | 'unknown';
+  supported: boolean;
+  canManage: boolean;
+  formats: FileAssociationFormatStatus[];
+}
+
 export interface ReaderGateway {
   readonly capabilities: Capabilities;
   getCapabilities(): Promise<Capabilities>;
@@ -48,6 +73,11 @@ export interface ReaderGateway {
   readerCommand<T>(kind: 'txt' | 'epub', route: string, command: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T>;
   getCacheStats(): Promise<ReaderCacheStats>;
   clearCache(): Promise<void>;
+  readerFontPacks(): Promise<ReaderFontPack[]>;
+  downloadReaderFontPack(id: string): Promise<ReaderFontPack>;
+  removeReaderFontPack(id: string): Promise<ReaderFontPack[]>;
+  fileAssociationStatus(): Promise<FileAssociationStatus>;
+  openFileAssociationSettings(): Promise<void>;
   getState<T>(): Promise<T>;
   getProgress<T>(bookId: string): Promise<T>;
   putStateSection<T>(section: 'progress' | 'settings' | 'series' | 'lastRead', value: unknown): Promise<T>;

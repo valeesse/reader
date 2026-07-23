@@ -1,4 +1,4 @@
-import type { Capabilities, ReaderCacheStats, ReaderGateway, ScanProgress, WebDavConfig } from '../contracts/readerGateway';
+import type { Capabilities, FileAssociationStatus, ReaderCacheStats, ReaderFontPack, ReaderGateway, ScanProgress, WebDavConfig } from '../contracts/readerGateway';
 import type { Book, WebDavBook } from '../types';
 import { normalizeBook, type BackendBook } from './shared';
 
@@ -78,6 +78,11 @@ export class TauriReaderGateway implements ReaderGateway {
   }
   getCacheStats() { return this.invokeHost<ReaderCacheStats>('reader_cache_stats'); }
   async clearCache() { await this.invokeHost('clear_reader_cache'); }
+  readerFontPacks() { return this.invokeHost<ReaderFontPack[]>('reader_font_packs'); }
+  downloadReaderFontPack(id: string) { return this.invokeHost<ReaderFontPack>('download_reader_font_pack', { id }); }
+  removeReaderFontPack(id: string) { return this.invokeHost<ReaderFontPack[]>('remove_reader_font_pack', { id }); }
+  fileAssociationStatus() { return this.invokeHost<FileAssociationStatus>('file_association_status'); }
+  async openFileAssociationSettings() { await this.invokeHost('open_file_association_settings'); }
   getState<T>(): Promise<T> { return this.invokeHost<T>('state_get'); }
   getProgress<T>(bookId: string): Promise<T> { return this.invokeHost<T>('state_get_progress', { bookId }); }
   putStateSection<T>(section: 'progress' | 'settings' | 'series' | 'lastRead', value: unknown): Promise<T> {

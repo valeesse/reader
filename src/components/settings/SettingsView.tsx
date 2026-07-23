@@ -1,12 +1,28 @@
 import { useEffect, useState } from 'react';
-import { clearCache as clearReaderCache, downloadWebDavSnapshot, getCacheStats, runtimeCapabilities, type ReaderCacheStats, uploadWebDavSnapshot } from '../../lib/backend';
+import {
+  clearCache as clearReaderCache,
+  downloadReaderFontPack,
+  downloadWebDavSnapshot,
+  fileAssociationStatus,
+  getCacheStats,
+  openFileAssociationSettings,
+  removeReaderFontPack,
+  runtimeCapabilities,
+  type FileAssociationStatus,
+  type ReaderCacheStats,
+  type ReaderFontPack,
+  uploadWebDavSnapshot,
+} from '../../lib/backend';
+import { clearOptionalReaderFontStyles, installOptionalReaderFontStyles, refreshReaderFontPacks } from '../../lib/fontPacks';
 import { cancelReaderIdle, ReaderIdleHandle, scheduleReaderIdle } from '../../lib/readerScheduler';
 import { applySyncSnapshot, createSyncSnapshot } from '../../lib/storage';
 import { useAppContext } from '../../store/AppStore';
-import { SyncSnapshot } from '../../types';
+import { defaultSettings, SyncSnapshot } from '../../types';
 import {
   AppearanceSettingsSection,
   CacheSettingsSection,
+  FileAssociationSettingsSection,
+  FontPackSettingsSection,
   LibrarySettingsSection,
   ReadingDefaultsSection,
 } from './SettingsSections';
@@ -35,6 +51,12 @@ export function SettingsView({
   const [confirmPull, setConfirmPull] = useState(false);
   const [confirmPush, setConfirmPush] = useState(false);
   const [confirmCacheClear, setConfirmCacheClear] = useState(false);
+  const [fontPacks, setFontPacks] = useState<ReaderFontPack[]>([]);
+  const [fontPackBusyId, setFontPackBusyId] = useState<string>();
+  const [fontPackStatus, setFontPackStatus] = useState('');
+  const [association, setAssociation] = useState<FileAssociationStatus>();
+  const [associationStatus, setAssociationStatus] = useState('');
+  const [openingAssociationSettings, setOpeningAssociationSettings] = useState(false);
 
   useEffect(() => {
     let idleId: ReaderIdleHandle | undefined;
@@ -44,6 +66,27 @@ export function SettingsView({
     return () => {
       window.clearTimeout(timerId);
       cancelReaderIdle(idleId);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!runtimeCapabilities.desktopShell) return;
+    let active = true;
+    const refreshAssociation = () => fileAssociationStatus()
+      .then((value) => { if (active) setAssociation(value); })
+      .catch((error) => { if (active) setAssociationStatus(error instanceof Error ? error.message : '读取文件关联状态失败。'); });
+    void refreshReaderFontPacks()
+      .then((packs) => {
+        if (!active) return;
+        setFontPacks(packs);
+        return installOptionalReaderFontStyles(document);
+      })
+      .catch((error) => { if (active) setFontPackStatus(error instanceof Error ? error.message : '读取字体包失败。'); });
+    void refreshAssociation();
+    window.addEventListener('focus', refreshAssociation);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', refreshAssociation);
     };
   }, []);
 
@@ -90,6 +133,57 @@ export function SettingsView({
       setClearingCache(false);
     }
   };
+  const refreshFonts = async () => {
+    const packs = await refreshReaderFontPacks();
+    setFontPacks(packs);
+    clearOptionalReaderFontStyles(document);
+    await installOptionalReaderFontStyles(document);
+    return packs;
+  };
+  const handleDownloadFont = async (id: string) => {
+    if (fontPackBusyId) return;
+    setFontPackBusyId(id);
+    setFontPackStatus('正在下载并校验字体包…');
+    try {
+      await downloadReaderFontPack(id);
+      await refreshFonts();
+      setFontPackStatus('字体包已安装，可在字体选择中使用。');
+    } catch (error) {
+      setFontPackStatus(error instanceof Error ? error.message : '字体包下载失败。');
+    } finally {
+      setFontPackBusyId(undefined);
+    }
+  };
+  const handleRemoveFont = async (id: string) => {
+    if (fontPackBusyId) return;
+    const removing = fontPacks.find((pack) => pack.id === id);
+    setFontPackBusyId(id);
+    setFontPackStatus('');
+    try {
+      await removeReaderFontPack(id);
+      await refreshFonts();
+      if (removing && settings.fontFamily.includes(removing.family)) {
+        await updateSettings({ fontFamily: defaultSettings.fontFamily });
+      }
+      setFontPackStatus('字体包已移除，阅读字体已回退到系统字体。');
+    } catch (error) {
+      setFontPackStatus(error instanceof Error ? error.message : '字体包移除失败。');
+    } finally {
+      setFontPackBusyId(undefined);
+    }
+  };
+  const handleOpenAssociationSettings = async () => {
+    setOpeningAssociationSettings(true);
+    setAssociationStatus('');
+    try {
+      await openFileAssociationSettings();
+      setAssociationStatus('请在 Windows 设置中分别选择 .epub 和 .txt 的默认应用；返回后状态会自动刷新。');
+    } catch (error) {
+      setAssociationStatus(error instanceof Error ? error.message : '无法打开系统设置。');
+    } finally {
+      setOpeningAssociationSettings(false);
+    }
+  };
   const canSync = Boolean(settings.webDavConfig.enabled && settings.webDavConfig.url.trim() && settings.webDavConfig.username.trim());
 
   return (
@@ -103,6 +197,14 @@ export function SettingsView({
           <div className="space-y-6">
             <LibrarySettingsSection {...{ onRescan, onChangeLibraryRoot, onImportBooks, scanMessage, isScanning }} />
             <CacheSettingsSection stats={cacheStats} status={cacheStatus} clearing={clearingCache} onClear={async () => setConfirmCacheClear(true)} />
+            {runtimeCapabilities.desktopShell && (
+              <FileAssociationSettingsSection
+                association={association}
+                status={associationStatus}
+                opening={openingAssociationSettings}
+                onOpenSettings={handleOpenAssociationSettings}
+              />
+            )}
             {runtimeCapabilities.librarySources.includes('webdav') && (
               <WebDavSettingsSection
                 settings={settings}
@@ -118,6 +220,15 @@ export function SettingsView({
           <div className="space-y-6">
             <AppearanceSettingsSection settings={settings} updateSettings={updateSettings} />
             <ReadingDefaultsSection settings={settings} updateSettings={updateSettings} />
+            {runtimeCapabilities.desktopShell && (
+              <FontPackSettingsSection
+                packs={fontPacks}
+                busyId={fontPackBusyId}
+                status={fontPackStatus}
+                onDownload={handleDownloadFont}
+                onRemove={handleRemoveFont}
+              />
+            )}
           </div>
         </div>
       </div>

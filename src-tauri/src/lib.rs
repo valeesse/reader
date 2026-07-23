@@ -20,6 +20,8 @@ use tauri::{AppHandle, Emitter, Manager};
 include!("reader/startup_splash.rs");
 include!("reader/model.rs");
 include!("reader/file_open.rs");
+include!("reader/file_associations.rs");
+include!("reader/font_packs.rs");
 include!("reader/state_commands.rs");
 include!("reader/library.rs");
 include!("reader/windows_dialog.rs");

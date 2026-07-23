@@ -2,7 +2,7 @@ import type { ReaderGateway, ScanProgress } from '../contracts/readerGateway';
 import { HttpReaderGateway } from '../adapters/httpReaderGateway';
 import { TauriReaderGateway } from '../adapters/tauriReaderGateway';
 
-export type { Capabilities as BackendCapabilities, ReaderCacheStats, ScanProgress } from '../contracts/readerGateway';
+export type { Capabilities as BackendCapabilities, FileAssociationStatus, ReaderCacheStats, ReaderFontPack, ScanProgress } from '../contracts/readerGateway';
 
 export const isDesktopRuntime = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 export const readerGateway = isDesktopRuntime ? new TauriReaderGateway() : new HttpReaderGateway();
@@ -21,6 +21,11 @@ export const resolveBookCover = (resourceId: string) => readerGateway.resolveBoo
 export const rescanBooks = (onProgress?: (progress: ScanProgress) => void) => readerGateway.scanBooks(onProgress);
 export const getCacheStats = () => readerGateway.getCacheStats();
 export const clearCache = () => readerGateway.clearCache();
+export const readerFontPacks = () => readerGateway.readerFontPacks();
+export const downloadReaderFontPack = (id: string) => readerGateway.downloadReaderFontPack(id);
+export const removeReaderFontPack = (id: string) => readerGateway.removeReaderFontPack(id);
+export const fileAssociationStatus = () => readerGateway.fileAssociationStatus();
+export const openFileAssociationSettings = () => readerGateway.openFileAssociationSettings();
 
 export function txtCommand<T>(route: string, command: string, body: Record<string, unknown>, signal?: AbortSignal) {
   return readerGateway.readerCommand<T>('txt', route, command, body, signal);

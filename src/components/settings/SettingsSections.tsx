@@ -1,6 +1,6 @@
-import { Database, FilePlus2, Folder, LoaderCircle, Monitor, Moon, Sun, Trash2 } from 'lucide-react';
+import { CheckCircle2, Database, Download, ExternalLink, FilePlus2, FileType2, Folder, LoaderCircle, Monitor, Moon, Sun, Trash2, Type } from 'lucide-react';
 import { AppSettings } from '../../types';
-import type { ReaderCacheStats } from '../../lib/backend';
+import type { FileAssociationStatus, ReaderCacheStats, ReaderFontPack } from '../../lib/backend';
 import { READER_FONT_OPTIONS, READING_SETTING_LIMITS } from '../../lib/readingSettings';
 import { runtimeCapabilities } from '../../lib/backend';
 
@@ -70,6 +70,101 @@ export function CacheSettingsSection({
         </button>
       </div>
       {status && <p className="mt-3 text-xs text-black/60 dark:text-white/60" role="status">{status}</p>}
+    </SettingsSection>
+  );
+}
+
+export function FontPackSettingsSection({
+  packs,
+  busyId,
+  status,
+  onDownload,
+  onRemove,
+}: {
+  packs: ReaderFontPack[];
+  busyId?: string;
+  status: string;
+  onDownload: (id: string) => Promise<void>;
+  onRemove: (id: string) => Promise<void>;
+}) {
+  return (
+    <SettingsSection title="可选字体包">
+      <div className="space-y-4">
+        {packs.length === 0 && <p className="text-xs leading-5 text-black/55 dark:text-white/55">正在读取字体包信息…</p>}
+        {packs.map((pack) => {
+          const busy = busyId === pack.id;
+          return (
+            <div key={pack.id} className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 flex-1 items-center gap-3">
+                <SectionIcon><Type className="h-5 w-5" /></SectionIcon>
+                <div className="min-w-0 flex-1">
+                  <h4 className="text-sm font-medium text-[#1C1C1E] dark:text-white">{pack.label}</h4>
+                  <p className="mt-0.5 text-xs leading-5 text-black/50 dark:text-white/50">
+                    {pack.installed ? `已安装 · ${formatBytes(pack.bytes)}` : '未安装'} · WOFF2 · v{pack.version}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => pack.installed ? onRemove(pack.id) : onDownload(pack.id)}
+                disabled={Boolean(busyId)}
+                className={`flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl px-3 text-sm font-medium disabled:opacity-50 sm:px-4 ${pack.installed ? 'bg-red-500/10 text-red-600 hover:bg-red-500/15 dark:text-red-400' : 'bg-[#007AFF]/10 text-[#007AFF] hover:bg-[#007AFF]/15'}`}
+              >
+                {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : pack.installed ? <Trash2 className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+                {pack.installed ? '移除' : '下载'}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-xs leading-5 text-black/50 dark:text-white/50">字体按需下载到应用缓存；未安装或移除后将自动使用系统字体回退。</p>
+      {status && <p className="text-xs leading-5 text-black/60 dark:text-white/60" role="status">{status}</p>}
+    </SettingsSection>
+  );
+}
+
+export function FileAssociationSettingsSection({
+  association,
+  status,
+  opening,
+  onOpenSettings,
+}: {
+  association?: FileAssociationStatus;
+  status: string;
+  opening: boolean;
+  onOpenSettings: () => Promise<void>;
+}) {
+  const isWindows = association?.platform === 'windows';
+  return (
+    <SettingsSection title="文件打开方式">
+      <div className="flex min-w-0 items-center gap-3">
+        <SectionIcon><FileType2 className="h-5 w-5" /></SectionIcon>
+        <div className="min-w-0 flex-1">
+          <h4 className="text-sm font-medium text-[#1C1C1E] dark:text-white">从资源管理器打开图书</h4>
+          <p className="mt-0.5 text-xs leading-5 text-black/55 dark:text-white/55">
+            {isWindows ? 'Windows 的默认应用选择由系统管理。' : '当前平台接口已保留，暂未实现。'}
+          </p>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {(association?.formats || [{ extension: 'epub', registered: false, isDefault: false }, { extension: 'txt', registered: false, isDefault: false }]).map((format) => (
+          <div key={format.extension} className="rounded-xl bg-black/[0.035] p-3 dark:bg-white/[0.05]">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-semibold uppercase text-[#1C1C1E] dark:text-white">.{format.extension}</span>
+              {format.isDefault && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+            </div>
+            <p className="mt-1 text-[11px] leading-4 text-black/50 dark:text-white/50">
+              {format.isDefault ? '已设为默认' : format.registered ? '已注册，尚非默认' : isWindows ? '安装后可绑定' : '暂不可设置'}
+            </p>
+          </div>
+        ))}
+      </div>
+      {isWindows && association?.canManage && (
+        <ActionButton onClick={onOpenSettings} disabled={opening}>
+          {opening ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
+          打开 Windows 默认应用设置
+        </ActionButton>
+      )}
+      {status && <p className="text-xs leading-5 text-black/60 dark:text-white/60" role="status">{status}</p>}
     </SettingsSection>
   );
 }

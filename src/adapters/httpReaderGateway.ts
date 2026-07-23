@@ -1,4 +1,4 @@
-import type { Capabilities, ReaderCacheStats, ReaderGateway, ScanProgress, WebDavConfig } from '../contracts/readerGateway';
+import type { Capabilities, FileAssociationStatus, ReaderCacheStats, ReaderFontPack, ReaderGateway, ScanProgress, WebDavConfig } from '../contracts/readerGateway';
 import type { Book, WebDavBook } from '../types';
 import { normalizeBook, readJson, type BackendBook } from './shared';
 
@@ -72,6 +72,21 @@ export class HttpReaderGateway implements ReaderGateway {
   }
   getCacheStats() { return this.http<ReaderCacheStats>('/api/cache/stats'); }
   async clearCache() { await this.http('/api/cache', { method: 'DELETE' }); }
+  async readerFontPacks(): Promise<ReaderFontPack[]> { return []; }
+  async downloadReaderFontPack(_id: string): Promise<ReaderFontPack> { throw new Error('当前环境不支持可选字体包'); }
+  async removeReaderFontPack(_id: string): Promise<ReaderFontPack[]> { throw new Error('当前环境不支持可选字体包'); }
+  async fileAssociationStatus(): Promise<FileAssociationStatus> {
+    return {
+      platform: 'web',
+      supported: false,
+      canManage: false,
+      formats: [
+        { extension: 'epub', registered: false, isDefault: false },
+        { extension: 'txt', registered: false, isDefault: false },
+      ],
+    };
+  }
+  async openFileAssociationSettings(): Promise<void> { throw new Error('当前环境不支持文件关联设置'); }
   getState<T>() { return this.http<T>('/api/state'); }
   getProgress<T>(bookId: string) { return this.http<T>(`/api/state/progress/${encodeURIComponent(bookId)}`); }
   putStateSection<T>(section: 'progress' | 'settings' | 'series' | 'lastRead', value: unknown) {

@@ -64,6 +64,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             startup_shell_ready,
             drain_pending_open_files,
+            file_association_status,
+            open_file_association_settings,
+            reader_font_packs,
+            download_reader_font_pack,
+            remove_reader_font_pack,
             scan_library,
             import_managed_books,
             open_external_books,

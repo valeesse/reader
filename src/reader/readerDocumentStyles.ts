@@ -1,4 +1,5 @@
 import { AppSettings, BookType } from '../types';
+import { installOptionalReaderFontStyles } from '../lib/fontPacks';
 
 const CONTINUOUS_STYLE_ID = 'zenith-reader-continuous-style';
 const READIUM_BEFORE_STYLE_ID = 'zenith-reader-readium-before';
@@ -7,12 +8,6 @@ const READIUM_AFTER_STYLE_ID = 'zenith-reader-readium-after';
 const TEXT_FINISH_STYLE_ID = 'zenith-reader-text-finish';
 const TXT_FONT_SCALE_BASE = 15.75;
 export const READER_IMAGE_RADIUS = '12px';
-const BUNDLED_READER_FONTS = [
-  { family: 'Zenith LXGW WenKai', path: '/fonts/LXGWWenKaiGBScreen.ttf' },
-  { family: 'Zenith LXGW 975 Yuan', path: '/fonts/LXGW975YuanSC-400W.ttf' },
-] as const;
-const bundledFontBuffers = new Map<string, Promise<ArrayBuffer>>();
-const bundledFontInstallations = new WeakMap<Document, Map<string, Promise<void>>>();
 
 export function readerThemeColors(theme: AppSettings['theme']) {
   if (theme === 'dark') return { background: '#121212', text: '#e5e7eb' };
@@ -36,7 +31,7 @@ export function applyReaderDocumentProperties(doc: Document, settings: AppSettin
   root.style.setProperty('--USER__paraSpacing', `${settings.paragraphSpacing}rem`);
   root.style.setProperty('--USER__letterSpacing', `${settings.letterSpacing}rem`);
   root.style.setProperty('--ZENITH__paragraphTextShadow', paragraphTextShadow(settings.theme));
-  void installBundledReaderFont(doc, settings.fontFamily);
+  void installOptionalReaderFontStyles(doc, settings.fontFamily);
 }
 
 export async function applyContinuousReaderDocumentStyles(doc: Document, settings: AppSettings, bookType: BookType) {
@@ -132,56 +127,6 @@ function readerFontVisualScale(fontFamily: string) {
   if (fontFamily.includes('Zenith LXGW WenKai')) return 1.1;
   if (fontFamily.includes('Zenith LXGW 975 Yuan')) return 1.025;
   return 1;
-}
-
-function installBundledReaderFont(doc: Document, fontFamily: string) {
-  const definition = BUNDLED_READER_FONTS.find((font) => fontFamily.includes(font.family));
-  const wnd = doc.defaultView;
-  if (!definition || !wnd || !doc.fonts) return Promise.resolve();
-
-  let documentInstallations = bundledFontInstallations.get(doc);
-  if (!documentInstallations) {
-    documentInstallations = new Map();
-    bundledFontInstallations.set(doc, documentInstallations);
-  }
-  const existing = documentInstallations.get(definition.family);
-  if (existing) return existing;
-
-  const installation = loadBundledFontBuffer(definition.path)
-    .then(async (buffer) => {
-      const FontFaceConstructor = wnd.FontFace;
-      if (!FontFaceConstructor) return;
-      const face = new FontFaceConstructor(definition.family, buffer, {
-        display: 'swap',
-        style: 'normal',
-        weight: '400',
-      });
-      doc.fonts.add(face);
-      await face.load();
-      // Force a fresh column/scroll geometry pass after the fallback face is
-      // replaced by the bundled font.
-      doc.documentElement.getBoundingClientRect();
-      wnd.dispatchEvent(new Event('resize'));
-    })
-    .catch((error) => {
-      documentInstallations?.delete(definition.family);
-      console.warn(`Failed to install bundled reader font: ${definition.family}`, error);
-    });
-  documentInstallations.set(definition.family, installation);
-  return installation;
-}
-
-function loadBundledFontBuffer(path: string) {
-  let pending = bundledFontBuffers.get(path);
-  if (!pending) {
-    pending = fetch(new URL(path, window.location.href))
-      .then((response) => {
-        if (!response.ok) throw new Error(`Font request failed with ${response.status}`);
-        return response.arrayBuffer();
-      });
-    bundledFontBuffers.set(path, pending);
-  }
-  return pending;
 }
 
 function paragraphTextShadow(theme: AppSettings['theme']) {
