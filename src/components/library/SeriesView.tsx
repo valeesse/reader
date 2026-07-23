@@ -86,9 +86,9 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
   };
 
   return (
-    <div className="glass-surface flex-1 flex flex-col relative">
-      <header className="min-h-14 border-b border-black/5 dark:border-white/5 flex items-center justify-between gap-3 px-4 py-2 sm:px-8 bg-white/80 dark:bg-[#121212]/80 backdrop-blur-md sticky top-0 z-10">
-        <div>
+    <div className="glass-surface relative flex min-w-0 flex-1 flex-col overflow-hidden">
+      <header className="sticky top-0 z-10 flex min-h-14 min-w-0 items-center justify-between gap-3 border-b border-black/5 bg-white/80 px-4 py-2 backdrop-blur-md dark:border-white/5 dark:bg-[#121212]/80 sm:px-8">
+        <div className="min-w-0">
           <h1 className="text-lg font-semibold text-[#1C1C1E] dark:text-white">系列</h1>
           <p className="hidden text-xs text-black/55 dark:text-white/55 sm:block">整理多卷作品，保持连续阅读顺序</p>
         </div>
@@ -126,10 +126,10 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
 
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8"
+        className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-6 lg:p-8"
         onScroll={(event) => setShowScrollTop(event.currentTarget.scrollTop > 480)}
       >
-        <div className="space-y-5">
+        <div className="min-w-0 space-y-5">
           <div className="app-card flex flex-col gap-2 p-2.5 sm:flex-row sm:items-center sm:justify-between sm:p-3">
             <div className="relative w-full sm:max-w-sm">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/45 dark:text-white/45" />
@@ -169,7 +169,7 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
                 <section
                   key={item.id}
                   draggable
-                  className={`app-card relative p-4 transition-colors sm:p-5 ${
+                  className={`app-card relative min-w-0 overflow-hidden p-4 transition-colors sm:p-5 ${
                     isDropTarget
                       ? 'border-[#007AFF]/60 bg-[#007AFF]/8'
                       : 'border-black/5 dark:border-white/5'
@@ -200,12 +200,12 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
                       }}
                     />
                   )}
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="relative z-20">
-                      <h3 className="font-semibold text-lg text-[#1C1C1E] dark:text-white">{item.name}</h3>
+                  <div className="flex min-w-0 items-start justify-between gap-4">
+                    <div className="relative z-20 min-w-0 flex-1">
+                      <h3 className="break-words text-lg font-semibold text-[#1C1C1E] [overflow-wrap:anywhere] dark:text-white">{item.name}</h3>
                       <p className="text-sm text-black/50 dark:text-white/50">{seriesBooks.length} 本书籍</p>
                     </div>
-                    <div className="relative z-20 flex gap-2">
+                    <div className="relative z-20 flex shrink-0 gap-2">
                       {isDropTarget && (
                         <div className="flex h-8 items-center gap-1 rounded-lg bg-[#007AFF]/10 px-2 text-xs text-[#007AFF]">
                           <GitMerge className="h-3.5 w-3.5" />
@@ -240,21 +240,21 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
                       </button>
                     </div>
                   </div>
-                  <div className="relative z-20 mt-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div className="relative z-20 mt-4 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {seriesBooks.map((book, index) => (
                       <button
                         key={book.id}
                         onPointerDown={() => prewarmWebReaderOnIntent(book)}
                         onFocus={() => prewarmWebReaderOnIntent(book)}
                         onClick={() => onReadBook(book)}
-                        className="flex items-center gap-3 rounded-xl bg-white/75 p-3 text-left transition-all hover:-translate-y-0.5 hover:bg-white hover:shadow-sm dark:bg-white/10 dark:hover:bg-white/15"
+                        className="flex w-full min-w-0 max-w-full items-center gap-3 overflow-hidden rounded-xl bg-white/75 p-3 text-left transition-all hover:-translate-y-0.5 hover:bg-white hover:shadow-sm dark:bg-white/10 dark:hover:bg-white/15"
                       >
                         <div className="w-8 h-10 rounded-[5px] bg-[#e4e5df] dark:bg-[#30332f] shrink-0 overflow-hidden">
                           <BookCover book={book} className="w-full h-full object-cover" compact />
                         </div>
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1 overflow-hidden">
                           <div className="text-[11px] text-black/40 dark:text-white/40">第 {book.seriesIndex ?? index + 1} 卷</div>
-                          <div className="text-sm font-medium truncate text-[#1C1C1E] dark:text-white">{book.title}</div>
+                          <div className="block w-full truncate text-sm font-medium text-[#1C1C1E] dark:text-white">{book.title}</div>
                         </div>
                       </button>
                     ))}
