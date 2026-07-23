@@ -5,7 +5,7 @@ services:
       - "8080:8080"
     environment:
       ZENITH_BIND: 0.0.0.0:8080
-      ZENITH_AUTH_TOKEN: ${ZENITH_AUTH_TOKEN:?Set ZENITH_AUTH_TOKEN before starting the service}
+      ZENITH_AUTH_TOKEN: ${ZENITH_AUTH_TOKEN:-}
     volumes:
       - ./books:/data/books:ro
       - zenith-state:/data/state
