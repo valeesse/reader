@@ -25,6 +25,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=server-builder /app/target/release/zenith-reader-server /usr/local/bin/zenith-reader-server
 COPY --from=web-builder /app/dist ./dist
+COPY --chmod=755 scripts/docker-entrypoint.sh /usr/local/bin/zenith-reader-entrypoint
 ENV ZENITH_LIBRARY_DIR=/data/books \
     ZENITH_STATE_DIR=/data/state \
     ZENITH_CACHE_DIR=/data/cache \
@@ -33,4 +34,5 @@ ENV ZENITH_LIBRARY_DIR=/data/books \
     RUST_LOG=zenith_reader_server=info,tower_http=info
 USER zenith
 EXPOSE 8080
-ENTRYPOINT ["zenith-reader-server"]
+ENTRYPOINT ["zenith-reader-entrypoint"]
+CMD ["zenith-reader-server"]

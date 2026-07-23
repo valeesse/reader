@@ -176,7 +176,7 @@ docker compose up --build -d
 
 打开 `http://服务器地址:8080`。状态与阅读缓存分别保存在 `zenith-state` 和 `zenith-cache` 卷中。部署到其他位置时，修改 `docker-compose.yml` 中 `./books:/data/books:ro` 左侧的宿主机目录即可。
 
-Web 服务默认只监听 `127.0.0.1`。Docker/LAN 部署必须设置 `ZENITH_AUTH_TOKEN`，浏览器首次访问 API 时会要求输入令牌；即使启用鉴权，也不建议直接暴露到公网。
+Web 服务默认只监听 `127.0.0.1`。Docker/LAN 部署未设置 `ZENITH_AUTH_TOKEN` 时，会在每次容器启动时自动生成随机令牌并写入容器日志；浏览器首次访问 API 时会要求输入该令牌。若需让令牌在容器重启后保持不变，请在 `.env` 中显式设置 `ZENITH_AUTH_TOKEN`。即使启用鉴权，也不建议直接暴露到公网。
 
 ## 常用命令
 
