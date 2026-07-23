@@ -49,6 +49,8 @@ export class HttpReaderGateway implements ReaderGateway {
   async pickLibraryRoot() { return undefined; }
   prewarmLibraryPicker() {}
   async importBooks(): Promise<Book[]> { throw new Error('当前服务器未启用受管书库导入'); }
+  async drainPendingOpenFiles(): Promise<string[]> { return []; }
+  async openExternalBooks(_paths: string[]): Promise<Book[]> { throw new Error('当前环境不支持从资源管理器打开文件'); }
   async listBooks(): Promise<Book[]> {
     return (await this.http<BackendBook[]>('/api/books')).map((book) => normalizeBook(book, (cover) => cover));
   }

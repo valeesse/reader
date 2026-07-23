@@ -14,6 +14,8 @@ export const setLibraryRoot = (root: string) => readerGateway.setLibraryRoot(roo
 export const pickLibraryRoot = () => readerGateway.pickLibraryRoot();
 export const prewarmLibraryPicker = () => readerGateway.prewarmLibraryPicker();
 export const importBooks = () => readerGateway.importBooks();
+export const drainPendingOpenFiles = () => readerGateway.drainPendingOpenFiles();
+export const openExternalBooks = (paths: string[]) => readerGateway.openExternalBooks(paths);
 export const listBooks = () => readerGateway.listBooks();
 export const resolveBookCover = (resourceId: string) => readerGateway.resolveBookCover(resourceId);
 export const rescanBooks = (onProgress?: (progress: ScanProgress) => void) => readerGateway.scanBooks(onProgress);

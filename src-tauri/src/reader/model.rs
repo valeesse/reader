@@ -5,6 +5,8 @@ struct ReaderState {
     application: Mutex<Option<Arc<reader_application::ReaderApplication>>>,
     state: Mutex<Option<Arc<reader_state::StateRepository>>>,
     export_paths: Mutex<HashMap<String, String>>,
+    external_open_lock: Arc<Mutex<()>>,
+    pending_open_files: Mutex<VecDeque<PathBuf>>,
 }
 
 #[derive(Debug, Serialize)]

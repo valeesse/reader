@@ -51,7 +51,7 @@ export function LibraryShell({ onReadBook, onPresentable }: { onReadBook: (book:
   const importManagedBooks = async () => {
     try {
       setIsScanning(true);
-      setScanMessage('正在导入到受管书库...');
+      setScanMessage('正在导入到当前书库...');
       const imported = await importBooks();
       if (imported.length === 0) return setScanMessage('未选择书籍。');
       await addBooks(imported);

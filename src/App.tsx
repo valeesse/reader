@@ -3,6 +3,7 @@ import { AppProvider, useAppContext } from './store/AppStore';
 import { Book } from './types';
 import { markLastReadBook } from './lib/storage';
 import { cancelReaderIdle, ReaderIdleHandle, scheduleReaderIdle } from './lib/readerScheduler';
+import { drainPendingOpenFiles, openExternalBooks, runtimeCapabilities } from './lib/backend';
 import './reader-overrides.css';
 
 let readerLayoutModulePromise: Promise<typeof import('./components/reader/ReaderLayout')> | undefined;
@@ -11,7 +12,7 @@ const ReaderLayout = lazy(() => loadReaderLayout().then((module) => ({ default: 
 const LibraryShell = lazy(() => import('./components/shell/LibraryShell').then((module) => ({ default: module.LibraryShell })));
 
 function MainLayout() {
-  const { books, settings, isLoading, stateReconciled, lastReadBookId } = useAppContext();
+  const { books, settings, isLoading, stateReconciled, lastReadBookId, addBooks } = useAppContext();
   const initialReadingBook = !isLoading && lastReadBookId
     ? books.find((item) => item.id === lastReadBookId) || null
     : null;
@@ -22,6 +23,66 @@ function MainLayout() {
   const startedWithResumeRef = useRef(Boolean(initialReadingBook));
   const libraryWarmupStartedRef = useRef(false);
   const libraryWarmupIdleRef = useRef<ReaderIdleHandle | null>(null);
+  const addBooksRef = useRef(addBooks);
+  const stateReconciledRef = useRef(stateReconciled);
+  const stateReconciliationWaitersRef = useRef<Array<() => void>>([]);
+  const [externalOpenError, setExternalOpenError] = useState<string>();
+  addBooksRef.current = addBooks;
+
+  useEffect(() => {
+    stateReconciledRef.current = stateReconciled;
+    if (!stateReconciled) return;
+    stateReconciliationWaitersRef.current.splice(0).forEach((resolve) => resolve());
+  }, [stateReconciled]);
+
+  useEffect(() => {
+    if (!runtimeCapabilities.desktopShell) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    let pipeline = Promise.resolve();
+
+    const waitForStateReconciliation = () => stateReconciledRef.current
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => stateReconciliationWaitersRef.current.push(resolve));
+    const consumePendingFiles = () => {
+      pipeline = pipeline.then(async () => {
+        const paths = await drainPendingOpenFiles();
+        if (paths.length === 0 || disposed) return;
+        const openedBooks = await openExternalBooks(paths);
+        if (openedBooks.length === 0 || disposed) return;
+        await waitForStateReconciliation();
+        if (disposed) return;
+        await addBooksRef.current(openedBooks);
+        if (disposed) return;
+        startupResumePendingRef.current = false;
+        setKeepLibraryMounted(true);
+        setReadingBook(openedBooks[0]);
+        setExternalOpenError(undefined);
+      }).catch((error) => {
+        if (!disposed) {
+          setExternalOpenError(error instanceof Error ? error.message : '无法打开所选书籍。');
+        }
+      });
+    };
+
+    void import('@tauri-apps/api/event').then(async ({ listen }) => {
+      const stopListening = await listen('open-files://available', consumePendingFiles);
+      if (disposed) {
+        stopListening();
+        return;
+      }
+      unlisten = stopListening;
+      consumePendingFiles();
+    }).catch((error) => {
+      if (!disposed) console.warn('Failed to listen for files opened by the operating system', error);
+    });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+      stateReconciliationWaitersRef.current.splice(0).forEach((resolve) => resolve());
+    };
+  }, []);
 
   const presentApplication = useCallback(() => {
     const startup = (window as Window & { __ZENITH_STARTUP__?: { hideOverlay?: () => void } }).__ZENITH_STARTUP__;
@@ -116,6 +177,12 @@ function MainLayout() {
             onPresentable={presentReader}
           />
         </Suspense>
+      )}
+      {externalOpenError && (
+        <div className="fixed left-1/2 top-3 z-[90] flex w-[min(92vw,560px)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-red-500/15 bg-[#FFF8F5]/95 px-4 py-3 text-sm text-red-800 shadow-[0_14px_44px_rgba(96,30,20,0.16)] backdrop-blur-xl dark:bg-[#2A1D1B]/95 dark:text-red-200" role="alert">
+          <span className="min-w-0 flex-1">打开书籍失败：{externalOpenError}</span>
+          <button type="button" onClick={() => setExternalOpenError(undefined)} className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold hover:bg-red-500/10">关闭</button>
+        </div>
       )}
     </div>
   );

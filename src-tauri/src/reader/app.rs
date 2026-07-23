@@ -4,12 +4,39 @@ pub fn run() {
     // The real WebView becomes visible only after index.html has parsed its
     // zero-dependency shell. A second native splash window would add a
     // distracting environment-window transition without accelerating cargo.
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+        let queued = queue_open_file_arguments(
+            &app.state::<ReaderState>(),
+            args.into_iter().map(PathBuf::from),
+            Path::new(&cwd),
+        );
+        if queued == 0 {
+            return;
+        }
+        if let Some(window) = app.get_webview_window("main") {
+            let was_visible = window.is_visible().unwrap_or(false);
+            let _ = window.unminimize();
+            if was_visible {
+                let _ = window.set_focus();
+            }
+        }
+        let _ = app.emit(OPEN_FILES_AVAILABLE_EVENT, ());
+    }));
+
+    builder
         .manage(ReaderState::default())
         .setup(move |app| {
             let library_started_at = std::time::Instant::now();
             initialize_state(app.handle(), &app.state::<ReaderState>())?;
             initialize_library(app.handle(), &app.state::<ReaderState>())?;
+            let startup_cwd = std::env::current_dir().unwrap_or_default();
+            queue_open_file_arguments(
+                &app.state::<ReaderState>(),
+                std::env::args_os().skip(1).map(PathBuf::from),
+                &startup_cwd,
+            );
             eprintln!(
                 "[startup] native library ready in {} ms; process elapsed {} ms",
                 library_started_at.elapsed().as_millis(),
@@ -36,8 +63,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             startup_shell_ready,
+            drain_pending_open_files,
             scan_library,
             import_managed_books,
+            open_external_books,
             reader_books,
             reader_cover,
             get_library_root,

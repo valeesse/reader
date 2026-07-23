@@ -41,12 +41,19 @@ export class TauriReaderGateway implements ReaderGateway {
     const selected = await open({
       multiple: true,
       directory: false,
-      title: '导入 EPUB / TXT 到受管书库',
+      title: '导入 EPUB / TXT 到当前书库',
       filters: [{ name: 'Books', extensions: ['epub', 'txt'] }],
     });
     const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
     if (paths.length === 0) return [];
     return (await this.invokeHost<BackendBook[]>('import_managed_books', { paths }))
+      .map((book) => normalizeBook(book, (cover) => this.fileUrl(cover)));
+  }
+  drainPendingOpenFiles() {
+    return this.invokeHost<string[]>('drain_pending_open_files');
+  }
+  async openExternalBooks(paths: string[]): Promise<Book[]> {
+    return (await this.invokeHost<BackendBook[]>('open_external_books', { paths }))
       .map((book) => normalizeBook(book, (cover) => this.fileUrl(cover)));
   }
   async listBooks(): Promise<Book[]> {

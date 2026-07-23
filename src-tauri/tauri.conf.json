@@ -36,6 +36,26 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
+    "fileAssociations": [
+      {
+        "ext": ["epub"],
+        "name": "Zenith Reader EPUB",
+        "description": "EPUB eBook",
+        "mimeType": "application/epub+zip",
+        "contentTypes": ["org.idpf.epub-container"],
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": ["txt"],
+        "name": "Zenith Reader TXT",
+        "description": "Text Document",
+        "mimeType": "text/plain",
+        "contentTypes": ["public.plain-text"],
+        "role": "Viewer",
+        "rank": "Alternate"
+      }
+    ],
     "icon": ["icons/icon.ico", "icons/icon.icns"]
   }
 }

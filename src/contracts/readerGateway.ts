@@ -40,6 +40,8 @@ export interface ReaderGateway {
   pickLibraryRoot(): Promise<string | undefined>;
   prewarmLibraryPicker(): void;
   importBooks(): Promise<Book[]>;
+  drainPendingOpenFiles(): Promise<string[]>;
+  openExternalBooks(paths: string[]): Promise<Book[]>;
   listBooks(): Promise<Book[]>;
   resolveBookCover(resourceId: string): Promise<string | undefined>;
   scanBooks(onProgress?: (progress: ScanProgress) => void): Promise<Book[]>;
