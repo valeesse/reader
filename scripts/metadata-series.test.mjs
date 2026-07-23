@@ -29,14 +29,29 @@ function book(id, relativePath) {
   };
 }
 
-test('strict parser requires series, numeric index and trailing title text', () => {
+test('strict parser requires series and numeric index while trailing title is optional', () => {
   assert.deepEqual(parseStrictFileSeries(book('one', 'folder/Long Series 01 First book.txt')), {
     directory: 'folder',
     name: 'Long Series',
     index: 1,
   });
-  assert.equal(parseStrictFileSeries(book('two', 'folder/Long Series 01.txt')), undefined);
+  assert.deepEqual(parseStrictFileSeries(book('two', 'folder/Long Series 01.txt')), {
+    directory: 'folder',
+    name: 'Long Series',
+    index: 1,
+  });
+  assert.deepEqual(parseStrictFileSeries(book('decimal', 'folder/Long Series 1.5.epub')), {
+    directory: 'folder',
+    name: 'Long Series',
+    index: 1.5,
+  });
+  assert.deepEqual(parseStrictFileSeries(book('special', 'folder/Long Series 02 （特别篇） [修订] #1 !?.epub')), {
+    directory: 'folder',
+    name: 'Long Series',
+    index: 2,
+  });
   assert.equal(parseStrictFileSeries(book('three', 'folder/Long-Series-01-First.txt')), undefined);
+  assert.equal(parseStrictFileSeries(book('joined', 'folder/Long Series01.txt')), undefined);
   assert.equal(parseStrictFileSeries({ ...book('four', 'Long Series 01 First.txt'), relativePath: undefined }), undefined);
 });
 
@@ -53,4 +68,28 @@ test('automatic groups stay directory-local and sort by numeric series index', (
   assert.deepEqual(result.series.map((series) => series.bookIds), [['a1', 'a2'], ['b1']]);
   assert.equal(result.series.some((series) => series.bookIds.includes('ignored')), false);
   assert.equal(result.books.find((item) => item.id === 'a2').seriesIndex, 10);
+});
+
+test('automatic creation expands an existing partial series with title-less volumes', () => {
+  const books = Array.from({ length: 10 }, (_, offset) => {
+    const index = offset + 1;
+    const suffix = index === 9 ? ' 8.5' : index === 10 ? ' sss短片' : '';
+    return book(`volume-${index}`, `light-novels/败犬女主太多了！/败犬女主太多了 ${String(index).padStart(2, '0')}${suffix}.epub`);
+  });
+  const existingSeries = [{
+    id: 'existing-series',
+    name: '败犬女主太多了',
+    bookIds: ['volume-9', 'volume-10'],
+  }];
+
+  const result = createMetadataSeries(books, existingSeries);
+
+  assert.equal(result.stats.createdCount, 0);
+  assert.equal(result.stats.updatedCount, 1);
+  assert.equal(result.stats.eligibleGroups, 1);
+  assert.deepEqual(result.series, [{
+    id: 'existing-series',
+    name: '败犬女主太多了',
+    bookIds: Array.from({ length: 10 }, (_, offset) => `volume-${offset + 1}`),
+  }]);
 });

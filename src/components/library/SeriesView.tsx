@@ -118,7 +118,7 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
               <Sparkles className={`h-4 w-4 ${isAutoCreating ? 'animate-pulse' : ''}`} />
             </button>
             <div className="pointer-events-none absolute right-0 top-12 z-20 w-72 rounded-xl bg-[#1C1C1E] px-3 py-2 text-xs leading-relaxed text-white opacity-0 shadow-xl transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:bg-white dark:text-[#1C1C1E]">
-              仅识别同一文件夹中的「&lt;系列名&gt; &lt;系列序号&gt; &lt;标题、其他文本&gt;.txt/.epub」；按系列名分组、序号排序，其他文件不处理。
+              仅识别同一文件夹中的「&lt;系列名&gt; &lt;系列序号&gt; [可选标题或其他文本].txt/.epub」；标题内容格式不限，按系列名分组、序号排序，其他文件不处理。
             </div>
           </div>
         </div>

@@ -17,7 +17,8 @@ interface SeriesCandidate extends ParsedFileSeries {
 }
 
 /**
- * Only accepts: <series name> <numeric index> <title or other text>.txt|epub
+ * Accepts: <series name> <numeric index> [title or other text].txt|epub
+ * The title suffix is optional and, when present, may contain any characters.
  * The relative directory is part of the grouping key, so identically named
  * series in different folders never merge automatically.
  */
@@ -28,13 +29,12 @@ export function parseStrictFileSeries(book: Book): ParsedFileSeries | undefined 
   const fileName = segments.pop() || '';
   if (!/\.(?:txt|epub)$/iu.test(fileName)) return undefined;
   const stem = fileName.replace(/\.(?:txt|epub)$/iu, '');
-  const match = stem.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s+(.+)$/u);
+  const match = stem.match(/^(.+?)\s+(\d+(?:\.\d+)?)(?:\s+(.*))?$/u);
   if (!match) return undefined;
 
   const name = match[1].replace(/\s+/g, ' ').trim();
   const index = Number(match[2]);
-  const remainder = match[3].trim();
-  if (!name || !remainder || !Number.isFinite(index)) return undefined;
+  if (!name || !Number.isFinite(index)) return undefined;
   return { directory: segments.join('/'), name, index };
 }
 
