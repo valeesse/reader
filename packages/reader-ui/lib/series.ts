@@ -9,10 +9,13 @@ export function sortBooksInSeries(books: Book[]) {
   });
 }
 
-export function seriesCoverBook(series: Series, books: Book[]) {
+export function seriesCoverBook(series: Series, books: Book[] | Map<string, Book>) {
+  const findBook = books instanceof Map
+    ? (bookId: string) => books.get(bookId)
+    : (bookId: string) => books.find((book) => book.id === bookId);
   const seriesBooks = sortBooksInSeries(
     series.bookIds
-      .map((bookId) => books.find((book) => book.id === bookId))
+      .map(findBook)
       .filter((book): book is Book => Boolean(book)),
   );
   return [...seriesBooks].sort((a, b) => {

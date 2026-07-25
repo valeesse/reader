@@ -21,13 +21,14 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
   const [deleteCandidateId, setDeleteCandidateId] = useState<string>();
   const [mergeSourceId, setMergeSourceId] = useState<string>();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const showScrollTopRef = useRef(false);
+  const booksById = useMemo(() => new Map(books.map((book) => [book.id, book])), [books]);
   const editingSeries = typeof editorSeriesId === 'string'
     ? series.find((item) => item.id === editorSeriesId)
     : undefined;
   const filteredSeries = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     if (!normalized) return series;
-    const booksById = new Map(books.map((book) => [book.id, book]));
     return series.filter((item) => (
       item.name.toLocaleLowerCase().includes(normalized)
       || item.bookIds.some((bookId) => {
@@ -39,7 +40,11 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
           : false;
       })
     ));
-  }, [books, query, series]);
+  }, [booksById, query, series]);
+  const booksBySeriesId = useMemo(() => new Map(series.map((item) => [
+    item.id,
+    sortBooksInSeries(item.bookIds.map((bookId) => booksById.get(bookId)).filter((book): book is Book => Boolean(book))),
+  ])), [booksById, series]);
 
   const submitEditor = async (name: string, selectedBookIds: string[]) => {
     if (editingSeries) {
@@ -127,7 +132,13 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
       <div
         ref={scrollContainerRef}
         className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-6 lg:p-8"
-        onScroll={(event) => setShowScrollTop(event.currentTarget.scrollTop > 480)}
+        onScroll={(event) => {
+          const visible = event.currentTarget.scrollTop > 480;
+          if (visible !== showScrollTopRef.current) {
+            showScrollTopRef.current = visible;
+            setShowScrollTop(visible);
+          }
+        }}
       >
         <div className="min-w-0 space-y-5">
           <div className="app-card flex flex-col gap-2 p-2.5 sm:flex-row sm:items-center sm:justify-between sm:p-3">
@@ -158,11 +169,7 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
             </div>
           ) : (
             filteredSeries.map((item) => {
-              const seriesBooks = sortBooksInSeries(
-                item.bookIds
-                  .map((bookId) => books.find((book) => book.id === bookId))
-                  .filter((book): book is Book => Boolean(book)),
-              );
+              const seriesBooks = booksBySeriesId.get(item.id) || [];
               const isDropTarget = draggingSeriesId && draggingSeriesId !== item.id;
 
               return (

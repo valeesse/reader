@@ -29,6 +29,7 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
   const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const showScrollTopRef = useRef(false);
 
   const progressByBookId = useMemo(
     () => new Map(progress.map((item) => [item.bookId, item])),
@@ -36,7 +37,7 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
   );
 
   const recentBook = useMemo(() => {
-    const recentProgress = [...progress].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    const recentProgress = progress.reduce((latest, item) => !latest || item.updatedAt > latest.updatedAt ? item : latest, progress[0]);
     return recentProgress ? books.find((book) => book.id === recentProgress.bookId) : undefined;
   }, [books, progress]);
 
@@ -53,7 +54,7 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
           .filter((book): book is Book => Boolean(book)),
       );
       if (groupedBooks.length === 0) continue;
-      const coverBook = seriesCoverBook(item, books) || groupedBooks[0];
+      const coverBook = seriesCoverBook(item, booksById) || groupedBooks[0];
       if (!coverBook) continue;
       for (const book of groupedBooks) consumedBookIds.add(book.id);
       const recentAt = Math.max(...groupedBooks.map((book) => progressByBookId.get(book.id)?.updatedAt || 0), 0);
@@ -153,7 +154,11 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
 
   const handleLibraryScroll = (event: React.UIEvent<HTMLDivElement>) => {
     const target = event.currentTarget;
-    setShowScrollTop(target.scrollTop > 480);
+    const nextShowScrollTop = target.scrollTop > 480;
+    if (nextShowScrollTop !== showScrollTopRef.current) {
+      showScrollTopRef.current = nextShowScrollTop;
+      setShowScrollTop(nextShowScrollTop);
+    }
     if (target.scrollTop + target.clientHeight >= target.scrollHeight - 420) {
       setVisibleCount((current) => Math.min(filteredEntries.length, current + BOOK_BATCH_SIZE));
     }

@@ -1,4 +1,5 @@
 import { recordReaderMetric } from './readerPerformance';
+import { isMobileConstrainedDevice } from './readerRuntimePolicy';
 
 export type CachePriority = 0 | 1 | 2 | 3;
 
@@ -229,6 +230,5 @@ export function estimateStringBytes(value: string) {
 
 export function adaptiveReaderBudget(preferredBytes: number, constrainedBytes: number) {
   if (typeof navigator === 'undefined') return preferredBytes;
-  const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
-  return deviceMemory !== undefined && deviceMemory <= 4 ? constrainedBytes : preferredBytes;
+  return isMobileConstrainedDevice(navigator) ? constrainedBytes : preferredBytes;
 }

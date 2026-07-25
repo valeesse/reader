@@ -9,6 +9,14 @@ type NavigatorWithConnection = Navigator & {
   deviceMemory?: number;
 };
 
+export function isMobileConstrainedDevice(runtimeNavigator: Navigator = navigator) {
+  const navigatorWithMemory = runtimeNavigator as NavigatorWithConnection;
+  const coarsePointer = typeof matchMedia === 'function' && matchMedia('(hover: none) and (pointer: coarse)').matches;
+  return navigatorWithMemory.deviceMemory !== undefined
+    ? navigatorWithMemory.deviceMemory <= 4
+    : coarsePointer;
+}
+
 export type ReaderRuntimePolicy = {
   desktop: boolean;
   constrained: boolean;
@@ -33,7 +41,7 @@ export function readerRuntimePolicy(): ReaderRuntimePolicy {
   const constrained = !localTransport && (
     saveData
     || highLatency
-    || (runtimeNavigator.deviceMemory !== undefined && runtimeNavigator.deviceMemory <= 4)
+    || isMobileConstrainedDevice(runtimeNavigator)
   );
   return {
     desktop: runtimeCapabilities.desktopShell,

@@ -361,9 +361,6 @@ export class ContinuousResourceStrip {
 
   private updateCurrentFromScroll() {
     if (this.destroyed || this.records.size === 0) return;
-    if (!this.stableAnchorLocked) {
-      this.stableViewportAnchor = this.captureLiveViewportAnchor() || this.stableViewportAnchor;
-    }
     this.updateScrollPrediction();
     const focus = this.scroller.scrollTop + 1;
     const selectedIndex = this.geometry.indexAt(focus);

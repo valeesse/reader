@@ -45,6 +45,7 @@ type WebState = {
 
 let progressWriteQueue = Promise.resolve();
 let webStateRequest: Promise<WebState> | undefined;
+let startupSnapshotCache: StartupSnapshot | null | undefined;
 
 export async function saveBooks(books: Book[]) {
   updateStartupSnapshot({ books: books.map(stripBookCover) });
@@ -118,7 +119,9 @@ async function saveProgressInOrder(progress: ReadingProgress) {
       set(KEYS.LAST_READ, progress.bookId),
       set(KEYS.LAST_READ_UPDATED_AT, progress.updatedAt),
     ]);
-    updateStartupSnapshot({ lastReadBookId: progress.bookId });
+    if (getStartupSnapshotSync()?.lastReadBookId !== progress.bookId) {
+      updateStartupSnapshot({ lastReadBookId: progress.bookId });
+    }
   }
   if (runtimeCapabilities.remoteState) {
     await putWebReadingState({
@@ -214,11 +217,17 @@ export async function getSettings(): Promise<AppSettings> {
 
 export function getStartupSnapshotSync(): StartupSnapshot | undefined {
   if (typeof window === 'undefined') return undefined;
+  if (startupSnapshotCache !== undefined) return startupSnapshotCache || undefined;
   try {
     const snapshot = JSON.parse(window.localStorage.getItem(KEYS.STARTUP_SNAPSHOT) || 'null') as StartupSnapshot | null;
-    if (snapshot?.version !== 2) return undefined;
-    return { ...snapshot, books: snapshot.books.filter(isCurrentBook), settings: normalizeSettings(snapshot.settings) };
+    if (snapshot?.version !== 2) {
+      startupSnapshotCache = null;
+      return undefined;
+    }
+    startupSnapshotCache = { ...snapshot, books: snapshot.books.filter(isCurrentBook), settings: normalizeSettings(snapshot.settings) };
+    return startupSnapshotCache;
   } catch {
+    startupSnapshotCache = null;
     return undefined;
   }
 }
@@ -318,10 +327,12 @@ function updateStartupSnapshot(partial: Partial<Omit<StartupSnapshot, 'version' 
 
 function writeStartupSnapshot(snapshot: StartupSnapshot) {
   try {
-    window.localStorage.setItem(KEYS.STARTUP_SNAPSHOT, JSON.stringify({
+    const durableSnapshot = {
       ...snapshot,
       settings: withoutSecrets(snapshot.settings),
-    }));
+    };
+    window.localStorage.setItem(KEYS.STARTUP_SNAPSHOT, JSON.stringify(durableSnapshot));
+    startupSnapshotCache = durableSnapshot;
   } catch (error) {
     console.warn('Failed to write startup snapshot', error);
   }

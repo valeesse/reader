@@ -76,6 +76,7 @@ export function SeriesDetailView({
   const uniqueAuthors = Array.from(new Set(entry.books.map((book) => book.author).filter(Boolean)));
   const [showScrollTop, setShowScrollTop] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const showScrollTopRef = useRef(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     dialogRef.current?.focus();
@@ -103,7 +104,13 @@ export function SeriesDetailView({
       <div
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto p-3 min-[380px]:p-4 sm:p-6 space-y-6 sm:space-y-8"
-        onScroll={(event) => setShowScrollTop(event.currentTarget.scrollTop > 480)}
+        onScroll={(event) => {
+          const visible = event.currentTarget.scrollTop > 480;
+          if (visible !== showScrollTopRef.current) {
+            showScrollTopRef.current = visible;
+            setShowScrollTop(visible);
+          }
+        }}
       >
         <section className="app-card grid gap-4 p-4 sm:gap-6 sm:p-6 lg:grid-cols-[220px_minmax(0,1fr)]">
           <div className="w-full max-w-[160px] sm:max-w-[220px] mx-auto lg:mx-0">
