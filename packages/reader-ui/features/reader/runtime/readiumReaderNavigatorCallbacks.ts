@@ -74,7 +74,6 @@ export function createNavigatorCallbacks(runtime: ReadiumReaderRuntime, options:
       });
       if (runtime.layoutRestoringRef.current) return;
       const visibleDocument = getLiveReadiumIframe(currentReadiumFrame(navigator))?.contentDocument || undefined;
-      if (visibleDocument) applyReadiumFrameSettings(visibleDocument, runtime.settingsRef.current, book.type, navigator.layout);
       const semanticLocator = locatorFromVisibleTxtOffset(locator as unknown as import('./readiumPublication').ReadiumLocatorLike, publication, visibleDocument) as unknown as ReadiumLocator;
       runtime.operations.scheduleStableAnchorCapture(navigator);
       const visibleLink = publication.readingOrder.findWithHref(semanticLocator.href);

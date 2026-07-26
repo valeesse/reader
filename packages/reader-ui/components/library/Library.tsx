@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Book, BookType, Series } from '../../types';
-import { useAppContext } from '../../store/AppStore';
+import { useAppContext, useProgressContext } from '../../store/AppStore';
 import { ArrowDownAZ, ArrowUpAZ, BookOpen, Clock3, RotateCcw, Search, SearchX, Settings2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { BookCover } from './BookCover';
@@ -20,8 +20,10 @@ export type LibraryEntry =
 const BOOK_BATCH_SIZE = 72;
 
 export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Book) => void; onOpenSettings: () => void }) {
-  const { books, progress, series } = useAppContext();
+  const { books, series } = useAppContext();
+  const progress = useProgressContext();
   const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [sortKey, setSortKey] = useState<SortKey>('recent');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
@@ -92,7 +94,7 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
   }, [books, progressByBookId, series]);
 
   const filteredEntries = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
+    const normalizedQuery = deferredQuery.trim().toLocaleLowerCase();
     const result = libraryEntries.filter((entry) => {
       const entryTypes = entry.kind === 'series' ? new Set(entry.books.map((book) => book.type)) : new Set([entry.book.type]);
       if (typeFilter !== 'all' && !entryTypes.has(typeFilter)) return false;
@@ -124,7 +126,7 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
       }
       return sortOrder === 'asc' ? value : -value;
     });
-  }, [libraryEntries, query, sortKey, sortOrder, typeFilter]);
+  }, [deferredQuery, libraryEntries, sortKey, sortOrder, typeFilter]);
 
   const visibleEntries = filteredEntries.slice(0, visibleCount);
   const filteredBookCount = filteredEntries.reduce((total, entry) => total + (entry.kind === 'series' ? entry.books.length : 1), 0);

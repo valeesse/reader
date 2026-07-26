@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useDeferredValue, useMemo, useRef, useState } from 'react';
 import { useAppContext } from '../../store/AppStore';
 import { Book } from '../../types';
 import { GitMerge, Layers, Pencil, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
@@ -17,17 +17,20 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
   const [isAutoCreating, setIsAutoCreating] = useState(false);
   const [autoCreateMessage, setAutoCreateMessage] = useState('');
   const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
+  const [visibleSeriesCount, setVisibleSeriesCount] = useState(8);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [deleteCandidateId, setDeleteCandidateId] = useState<string>();
-  const [mergeSourceId, setMergeSourceId] = useState<string>();
+const [mergeSourceId, setMergeSourceId] = useState<string>();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const showScrollTopRef = useRef(false);
   const booksById = useMemo(() => new Map(books.map((book) => [book.id, book])), [books]);
+  const [visibleBySeriesId, setVisibleBySeriesId] = useState<Record<string, number>>({});
   const editingSeries = typeof editorSeriesId === 'string'
     ? series.find((item) => item.id === editorSeriesId)
     : undefined;
   const filteredSeries = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase();
+    const normalized = deferredQuery.trim().toLocaleLowerCase();
     if (!normalized) return series;
     return series.filter((item) => (
       item.name.toLocaleLowerCase().includes(normalized)
@@ -40,7 +43,9 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
           : false;
       })
     ));
-  }, [booksById, query, series]);
+  }, [booksById, deferredQuery, series]);
+  const visibleSeries = filteredSeries.slice(0, visibleSeriesCount);
+  const normalizedQuery = deferredQuery.trim().toLocaleLowerCase();
   const booksBySeriesId = useMemo(() => new Map(series.map((item) => [
     item.id,
     sortBooksInSeries(item.bookIds.map((bookId) => booksById.get(bookId)).filter((book): book is Book => Boolean(book))),
@@ -90,6 +95,18 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
     await mergeSeries(sourceId!, targetId);
   };
 
+  const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const target = event.currentTarget;
+    const visible = target.scrollTop > 480;
+    if (visible !== showScrollTopRef.current) {
+      showScrollTopRef.current = visible;
+      setShowScrollTop(visible);
+    }
+    if (target.scrollTop + target.clientHeight >= target.scrollHeight - 600) {
+      setVisibleSeriesCount((current) => Math.min(filteredSeries.length, current + 8));
+    }
+  };
+
   return (
     <div className="glass-surface relative flex min-w-0 flex-1 flex-col overflow-hidden">
       <header className="sticky top-0 z-10 flex min-h-14 min-w-0 items-center justify-between gap-3 border-b border-black/5 bg-white/80 px-4 py-2 backdrop-blur-md dark:border-white/5 dark:bg-[#121212]/80 sm:px-8">
@@ -132,13 +149,7 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
       <div
         ref={scrollContainerRef}
         className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-6 lg:p-8"
-        onScroll={(event) => {
-          const visible = event.currentTarget.scrollTop > 480;
-          if (visible !== showScrollTopRef.current) {
-            showScrollTopRef.current = visible;
-            setShowScrollTop(visible);
-          }
-        }}
+        onScroll={handleScroll}
       >
         <div className="min-w-0 space-y-5">
           <div className="app-card flex flex-col gap-2 p-2.5 sm:flex-row sm:items-center sm:justify-between sm:p-3">
@@ -168,15 +179,20 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
               <button onClick={() => setQuery('')} className="mt-5 rounded-xl bg-black/5 px-4 py-2 text-sm font-medium hover:bg-black/10 dark:bg-white/10">清除搜索</button>
             </div>
           ) : (
-            filteredSeries.map((item) => {
+            visibleSeries.map((item) => {
               const seriesBooks = booksBySeriesId.get(item.id) || [];
+              const matchingBooks = normalizedQuery && !item.name.toLocaleLowerCase().includes(normalizedQuery)
+                ? seriesBooks.filter((book) => bookMatchesQuery(book, normalizedQuery))
+                : seriesBooks;
+              const visibleCount = visibleBySeriesId[item.id] || (normalizedQuery ? 36 : 12);
+              const visibleBooks = matchingBooks.slice(0, visibleCount);
               const isDropTarget = draggingSeriesId && draggingSeriesId !== item.id;
 
               return (
                 <section
                   key={item.id}
                   draggable
-                  className={`app-card relative min-w-0 overflow-hidden p-4 transition-colors sm:p-5 ${
+                  className={`series-section app-card relative min-w-0 overflow-hidden p-4 transition-colors sm:p-5 ${
                     isDropTarget
                       ? 'border-[#007AFF]/60 bg-[#007AFF]/8'
                       : 'border-black/5 dark:border-white/5'
@@ -210,7 +226,7 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
                   <div className="flex min-w-0 items-start justify-between gap-4">
                     <div className="relative z-20 min-w-0 flex-1">
                       <h3 className="break-words text-lg font-semibold text-[#1C1C1E] [overflow-wrap:anywhere] dark:text-white">{item.name}</h3>
-                      <p className="text-sm text-black/50 dark:text-white/50">{seriesBooks.length} 本书籍</p>
+                      <p className="text-sm text-black/50 dark:text-white/50">{matchingBooks.length} 本书籍</p>
                     </div>
                     <div className="relative z-20 flex shrink-0 gap-2">
                       {isDropTarget && (
@@ -248,7 +264,7 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
                     </div>
                   </div>
                   <div className="relative z-20 mt-4 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    {seriesBooks.map((book, index) => (
+                    {visibleBooks.map((book, index) => (
                       <button
                         key={book.id}
                         onPointerDown={() => prewarmWebReaderOnIntent(book)}
@@ -266,9 +282,27 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
                       </button>
                     ))}
                   </div>
+                  {visibleBooks.length < matchingBooks.length && (
+                    <button
+                      type="button"
+                      onClick={() => setVisibleBySeriesId((current) => ({ ...current, [item.id]: visibleCount + 72 }))}
+                      className="relative z-20 mx-auto mt-4 block rounded-xl bg-black/5 px-4 py-2 text-sm font-medium text-black/55 transition-colors hover:bg-black/10 dark:bg-white/10 dark:text-white/60 dark:hover:bg-white/15"
+                    >
+                      加载更多（已显示 {visibleBooks.length} / {matchingBooks.length}）
+                    </button>
+                  )}
                 </section>
               );
             })
+          )}
+          {visibleSeriesCount < filteredSeries.length && (
+            <button
+              type="button"
+              onClick={() => setVisibleSeriesCount((current) => Math.min(filteredSeries.length, current + 8))}
+              className="mx-auto block rounded-xl bg-black/5 px-4 py-2 text-sm font-medium text-black/55 transition-colors hover:bg-black/10 dark:bg-white/10 dark:text-white/60 dark:hover:bg-white/15"
+            >
+              加载更多系列
+            </button>
           )}
         </div>
       </div>
@@ -313,4 +347,10 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
       )}
     </div>
   );
+}
+
+function bookMatchesQuery(book: Book, query: string) {
+  return [book.title, book.author, book.fileName, book.relativePath]
+    .filter(Boolean)
+    .some((value) => value!.toLocaleLowerCase().includes(query));
 }

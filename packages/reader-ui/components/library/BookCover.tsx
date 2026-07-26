@@ -32,7 +32,7 @@ export function BookCover({
         setVisible(true);
         observer.disconnect();
       }
-    }, { rootMargin: '320px 0px' });
+    }, { rootMargin: '120px 0px' });
     observer.observe(host);
     return () => observer.disconnect();
   }, [book.id]);

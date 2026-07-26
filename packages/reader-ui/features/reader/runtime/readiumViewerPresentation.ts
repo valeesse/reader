@@ -12,6 +12,7 @@ type PageGeometry = {
   columnCount: number; columnGap: number; horizontal: boolean; stride: number;
 };
 const geometryCache = new WeakMap<Document, PageGeometry>();
+const chapterAnchorsCache = new WeakMap<Document, { layoutKey: string; resource: string; pages: number[] }>();
 
 export function formatResourceStripPageCounter(
   locator: ReadiumLocator,
@@ -61,24 +62,31 @@ function chapterPageFromDocument(
 ) {
   if (!doc) return undefined;
   const resource = publication.readingOrder.findWithHref(href)?.href || href.split('#')[0];
-  const anchors = publication.toc.items.flatMap((link) => {
-    const linkResource = publication.readingOrder.findWithHref(link.href)?.href || link.href.split('#')[0];
-    const fragment = link.locator.locations.fragments?.[0];
-    if (linkResource !== resource || !fragment) return [];
-    const element = doc.getElementById(fragment);
-    if (!element) return [];
-    const rect = element.getBoundingClientRect();
+  const layoutKey = [geometry.viewportWidth, geometry.viewportHeight, geometry.scrollWidth, geometry.scrollHeight, geometry.stride].join(':');
+  let cached = chapterAnchorsCache.get(doc);
+  if (!cached || cached.layoutKey !== layoutKey || cached.resource !== resource) {
     const scroller = doc.scrollingElement as HTMLElement | null;
-    const offset = geometry.horizontal
-      ? Math.abs(scroller?.scrollLeft || 0) + rect.left
-      : Math.max(0, scroller?.scrollTop || 0) + rect.top;
-    return [{ page: Math.max(1, Math.floor(Math.max(0, offset) / geometry.stride) + 1) }];
-  }).sort((left, right) => left.page - right.page);
+    const pages = publication.toc.items.flatMap((link) => {
+      const linkResource = publication.readingOrder.findWithHref(link.href)?.href || link.href.split('#')[0];
+      const fragment = link.locator.locations.fragments?.[0];
+      if (linkResource !== resource || !fragment) return [];
+      const element = doc.getElementById(fragment);
+      if (!element) return [];
+      const rect = element.getBoundingClientRect();
+      const offset = geometry.horizontal
+        ? Math.abs(scroller?.scrollLeft || 0) + rect.left
+        : Math.max(0, scroller?.scrollTop || 0) + rect.top;
+      return [Math.max(1, Math.floor(Math.max(0, offset) / geometry.stride) + 1)];
+    }).sort((left, right) => left - right);
+    cached = { layoutKey, resource, pages };
+    chapterAnchorsCache.set(doc, cached);
+  }
+  const anchors = cached.pages;
   if (anchors.length === 0) return undefined;
   let index = 0;
-  while (index + 1 < anchors.length && anchors[index + 1].page <= currentPage) index += 1;
-  const start = anchors[index].page;
-  const end = anchors[index + 1]?.page || Math.max(currentPage, Math.ceil((geometry.horizontal ? geometry.scrollWidth : geometry.scrollHeight) / geometry.stride));
+  while (index + 1 < anchors.length && anchors[index + 1] <= currentPage) index += 1;
+  const start = anchors[index];
+  const end = anchors[index + 1] || Math.max(currentPage, Math.ceil((geometry.horizontal ? geometry.scrollWidth : geometry.scrollHeight) / geometry.stride));
   return {
     current: Math.max(1, currentPage - start + 1),
     total: Math.max(1, end - start + (anchors[index + 1] ? 0 : 1)),
@@ -88,18 +96,21 @@ function formatProgressPercent(progress: number) {
   const percent = Math.max(0, Math.min(100, progress * 100));
   return `${percent === 0 || percent === 100 ? percent.toFixed(0) : percent.toFixed(1)}%`;
 }
-export function invalidateReadiumDocumentGeometry(doc: Document) { geometryCache.delete(doc); }
+export function invalidateReadiumDocumentGeometry(doc: Document) {
+  geometryCache.delete(doc);
+  chapterAnchorsCache.delete(doc);
+}
 export function invalidateReadiumPageGeometry(navigator: EpubNavigator) {
   readiumFrames(navigator).forEach((frame) => {
     const doc = getLiveReadiumIframe(frame)?.contentDocument;
-    if (doc) geometryCache.delete(doc);
+    if (doc) invalidateReadiumDocumentGeometry(doc);
   });
 }
 export function watchReadiumFrameLayout(wnd: Window, onLayout: () => void) {
   const doc = wnd.document;
   let raf: number | null = null;
   const notify = () => {
-    geometryCache.delete(doc);
+    invalidateReadiumDocumentGeometry(doc);
     if (raf !== null) return;
     raf = wnd.requestAnimationFrame(() => { raf = null; onLayout(); });
   };
@@ -115,7 +126,7 @@ export function watchReadiumFrameLayout(wnd: Window, onLayout: () => void) {
   resizeObserver.observe(doc.documentElement);
   if (doc.body) resizeObserver.observe(doc.body);
   const mutationObserver = new MutationObserver(notify);
-  mutationObserver.observe(doc.documentElement, { childList: true, subtree: true, attributes: true });
+  mutationObserver.observe(doc.documentElement, { childList: true, subtree: true });
   wnd.addEventListener('pagehide', () => {
     resizeObserver.disconnect();
     mutationObserver.disconnect();

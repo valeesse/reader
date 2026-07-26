@@ -105,6 +105,11 @@ button:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.series-section {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 420px;
+}
+
 @media (min-width: 520px) {
   .library-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));

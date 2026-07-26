@@ -24,7 +24,6 @@ import { cancelReaderIdle, scheduleReaderIdle } from '../lib/readerScheduler';
 interface AppContextType {
   books: Book[];
   series: Series[];
-  progress: ReadingProgress[];
   settings: AppSettings;
   addBook: (book: Book) => Promise<void>;
   addBooks: (books: Book[]) => Promise<void>;
@@ -34,7 +33,6 @@ interface AppContextType {
   autoCreateMetadataSeries: () => Promise<AutoCreateSeriesResult>;
   mergeSeries: (sourceSeriesId: string, targetSeriesId: string) => Promise<void>;
   reloadState: () => Promise<void>;
-  refreshProgress: () => Promise<void>;
   updateSettings: (settings: Partial<AppSettings>) => Promise<void>;
   lastReadBookId?: string;
   isLoading: boolean;
@@ -43,12 +41,12 @@ interface AppContextType {
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+const ProgressContext = createContext<ReadingProgress[] | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [startupSnapshot] = useState(() => getStartupSnapshotSync());
   const [books, setBooks] = useState<Book[]>(() => startupSnapshot?.books || []);
   const [series, setSeries] = useState<Series[]>(() => startupSnapshot?.series || []);
-  const [progress, setProgress] = useState<ReadingProgress[]>([]);
   const [settings, setSettingsState] = useState<AppSettings>(() => normalizeSettings(startupSnapshot?.settings || defaultSettings));
   const [lastReadBookId, setLastReadBookId] = useState<string | undefined>(() => startupSnapshot?.lastReadBookId);
   const [isLoading, setIsLoading] = useState(!startupSnapshot);
@@ -86,7 +84,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         settings: normalizedSettings,
         lastReadBookId: effectiveLastReadBookId,
       });
-      loadProgressInIdle();
     } catch (error) {
       console.warn('Failed to reconcile persisted application state', error);
       setStateError(error instanceof Error ? error.message : '无法连接到书库服务，请稍后重试。');
@@ -116,34 +113,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const refreshProgress = async () => {
-    setProgress(await getAllProgress());
-  };
-
-  const loadProgressInIdle = () => {
-    const load = () => {
-      getAllProgress().then(setProgress).catch((error) => {
-        console.warn('Failed to load reading progress', error);
-      });
-    };
-
-    scheduleReaderIdle(load, { timeout: 1200 });
-  };
-
   useEffect(() => {
     const handleProgressSaved = (event: Event) => {
       const detail = (event as CustomEvent<ProgressSavedDetail | undefined>).detail;
-      if (detail?.progress?.bookId) {
-        const savedProgress = detail.progress;
-        if (detail.lastReadBookId) setLastReadBookId(detail.lastReadBookId);
-        setProgress((current) => {
-          const next = current.filter((item) => item.bookId !== savedProgress.bookId);
-          return [...next, savedProgress];
-        });
-      } else {
-        if (detail?.lastReadBookId) setLastReadBookId(detail.lastReadBookId);
-        loadProgressInIdle();
-      }
+      if (detail?.lastReadBookId) setLastReadBookId(detail.lastReadBookId);
     };
     window.addEventListener('zenith:progress-saved', handleProgressSaved);
     return () => window.removeEventListener('zenith:progress-saved', handleProgressSaved);
@@ -249,10 +222,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AppContext.Provider value={{ books, series, progress, settings, addBook, addBooks, createSeries, updateSeries, deleteSeries, autoCreateMetadataSeries, mergeSeries, reloadState, refreshProgress, updateSettings, lastReadBookId, isLoading, stateReconciled, stateError }}>
-      {children}
+    <AppContext.Provider value={{ books, series, settings, addBook, addBooks, createSeries, updateSeries, deleteSeries, autoCreateMetadataSeries, mergeSeries, reloadState, updateSettings, lastReadBookId, isLoading, stateReconciled, stateError }}>
+      <ProgressProvider>{children}</ProgressProvider>
     </AppContext.Provider>
   );
+}
+
+function ProgressProvider({ children }: { children: ReactNode }) {
+  const [progress, setProgress] = useState<ReadingProgress[]>([]);
+
+  useEffect(() => {
+    const idleId = scheduleReaderIdle(() => {
+      getAllProgress().then(setProgress).catch((error) => {
+        console.warn('Failed to load reading progress', error);
+      });
+    }, { timeout: 1200 });
+    const handleProgressSaved = (event: Event) => {
+      const saved = (event as CustomEvent<ProgressSavedDetail | undefined>).detail?.progress;
+      if (!saved?.bookId) return;
+      setProgress((current) => {
+        const index = current.findIndex((item) => item.bookId === saved.bookId);
+        if (index < 0) return [...current, saved];
+        if (current[index].updatedAt === saved.updatedAt && current[index].location === saved.location) return current;
+        const next = [...current];
+        next[index] = saved;
+        return next;
+      });
+    };
+    window.addEventListener('zenith:progress-saved', handleProgressSaved);
+    return () => {
+      cancelReaderIdle(idleId);
+      window.removeEventListener('zenith:progress-saved', handleProgressSaved);
+    };
+  }, []);
+
+  return <ProgressContext.Provider value={progress}>{children}</ProgressContext.Provider>;
 }
 
 export function useAppContext() {
@@ -260,6 +264,12 @@ export function useAppContext() {
   if (context === undefined) {
     throw new Error('useAppContext must be used within an AppProvider');
   }
+  return context;
+}
+
+export function useProgressContext() {
+  const context = useContext(ProgressContext);
+  if (context === undefined) throw new Error('useProgressContext must be used within an AppProvider');
   return context;
 }
 

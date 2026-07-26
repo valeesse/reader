@@ -1,8 +1,8 @@
-import React, { Suspense, lazy, startTransition, useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { AppProvider, useAppContext } from './store/AppStore';
 import { Book } from './types';
 import { markLastReadBook } from './lib/storage';
-import { cancelReaderIdle, ReaderIdleHandle, scheduleReaderIdle } from './lib/readerScheduler';
+import { cancelReaderIdle, scheduleReaderIdle } from './lib/readerScheduler';
 import { drainPendingOpenFiles, openExternalBooks, runtimeCapabilities } from './lib/backend';
 import './features/reader/styles.css';
 
@@ -17,12 +17,9 @@ function MainLayout() {
     ? books.find((item) => item.id === lastReadBookId) || null
     : null;
   const [readingBook, setReadingBook] = useState<Book | null>(() => initialReadingBook);
-  const [keepLibraryMounted, setKeepLibraryMounted] = useState(false);
   const [startupResolved, setStartupResolved] = useState(() => Boolean(initialReadingBook));
   const startupResumePendingRef = useRef(true);
   const startedWithResumeRef = useRef(Boolean(initialReadingBook));
-  const libraryWarmupStartedRef = useRef(false);
-  const libraryWarmupIdleRef = useRef<ReaderIdleHandle | null>(null);
   const addBooksRef = useRef(addBooks);
   const stateReconciledRef = useRef(stateReconciled);
   const stateReconciliationWaitersRef = useRef<Array<() => void>>([]);
@@ -55,7 +52,6 @@ function MainLayout() {
         await addBooksRef.current(openedBooks);
         if (disposed) return;
         startupResumePendingRef.current = false;
-        setKeepLibraryMounted(true);
         setReadingBook(openedBooks[0]);
         setExternalOpenError(undefined);
       }).catch((error) => {
@@ -91,19 +87,7 @@ function MainLayout() {
 
   const presentReader = useCallback(() => {
     presentApplication();
-    if (!startedWithResumeRef.current || libraryWarmupStartedRef.current) return;
-    libraryWarmupStartedRef.current = true;
-    libraryWarmupIdleRef.current = scheduleReaderIdle(() => {
-      libraryWarmupIdleRef.current = null;
-      startTransition(() => setKeepLibraryMounted(true));
-    }, { timeout: 1200 });
   }, [presentApplication]);
-
-  useEffect(() => () => {
-    if (libraryWarmupIdleRef.current !== null) {
-      cancelReaderIdle(libraryWarmupIdleRef.current);
-    }
-  }, []);
 
   useEffect(() => {
     if (isLoading || !startupResumePendingRef.current) return;
@@ -149,7 +133,6 @@ function MainLayout() {
   };
 
   const openBookFromLibrary = (book: Book) => {
-    setKeepLibraryMounted(true);
     setReadingBook(book);
   };
 
@@ -157,7 +140,7 @@ function MainLayout() {
 
   return (
     <div className="h-screen w-full flex gap-0 sm:gap-2 overflow-hidden bg-[#F7F5F0] dark:bg-[#111210] text-[#1C1C1E] dark:text-[#ecece7] selection:bg-[#087DF1]/20 font-sans transition-colors duration-500 p-0 sm:p-2">
-      {(!readingBook || keepLibraryMounted) && (
+      {!readingBook && (
         <div
           className="contents"
           aria-hidden={readingBook ? true : undefined}

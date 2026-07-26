@@ -74,10 +74,14 @@ export function SeriesDetailView({
   onReadBook: (book: Book) => void;
 }) {
   const uniqueAuthors = Array.from(new Set(entry.books.map((book) => book.author).filter(Boolean)));
+  const [visibleCount, setVisibleCount] = useState(72);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const showScrollTopRef = useRef(false);
   const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    setVisibleCount(72);
+  }, [entry.id]);
   useEffect(() => {
     dialogRef.current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -136,7 +140,7 @@ export function SeriesDetailView({
             <p className="text-sm text-black/45 dark:text-white/45">按卷序 / 文件名排序</p>
           </div>
           <div className="grid grid-cols-2 min-[520px]:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-5">
-            {entry.books.map((book, index) => (
+            {entry.books.slice(0, visibleCount).map((book, index) => (
               <motion.button key={book.id} whileHover={{ y: -3 }} whileTap={{ scale: 0.985 }} onPointerDown={() => prewarmWebReaderOnIntent(book)} onFocus={() => prewarmWebReaderOnIntent(book)} onClick={() => onReadBook(book)} className="group text-left overflow-hidden rounded-2xl border border-black/5 dark:border-white/10 bg-white/85 dark:bg-white/10 shadow-sm transition-colors hover:bg-white dark:hover:bg-white/15">
                 <div className="relative aspect-[3/4] overflow-hidden bg-[#e4e5df] dark:bg-[#30332f]">
                   <BookCover book={book} className="h-full w-full object-cover" />
@@ -150,6 +154,15 @@ export function SeriesDetailView({
               </motion.button>
             ))}
           </div>
+          {visibleCount < entry.books.length && (
+            <button
+              type="button"
+              onClick={() => setVisibleCount((current) => Math.min(entry.books.length, current + 72))}
+              className="mx-auto block rounded-xl bg-black/5 px-4 py-2 text-sm font-medium text-black/55 transition-colors hover:bg-black/10 dark:bg-white/10 dark:text-white/60 dark:hover:bg-white/15"
+            >
+              加载更多（已显示 {visibleCount} / {entry.books.length}）
+            </button>
+          )}
         </section>
       </div>
       <ScrollToTopButton
