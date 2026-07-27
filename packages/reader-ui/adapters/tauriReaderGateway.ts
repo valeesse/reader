@@ -73,6 +73,10 @@ export class TauriReaderGateway implements ReaderGateway {
       unlisten?.();
     }
   }
+  async deleteBooks(resourceIds: string[]): Promise<Book[]> {
+    return (await this.invokeHost<BackendBook[]>('delete_library_books', { resourceIds }))
+      .map((book) => normalizeBook(book, (cover) => this.fileUrl(cover)));
+  }
   readerCommand<T>(_kind: 'txt' | 'epub', _route: string, command: string, body: Record<string, unknown>) {
     return this.invokeHost<T>(command, body);
   }

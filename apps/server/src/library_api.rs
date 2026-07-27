@@ -3,6 +3,12 @@ use axum::{Json, extract::State, http::StatusCode};
 use reader_contracts::{Capabilities, ResourceTransport};
 use reader_core::{Book, ScanProgress};
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeleteBooksRequest {
+    resource_ids: Vec<String>,
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WebBook {
@@ -41,6 +47,23 @@ pub(crate) async fn library_config() -> Json<serde_json::Value> {
 
 pub(crate) async fn books(State(s): State<AppState>) -> Result<Json<Vec<WebBook>>, ApiError> {
     let books = s.application.books()?;
+    Ok(Json(books.into_iter().map(web_book).collect()))
+}
+
+pub(crate) async fn delete_books(
+    State(s): State<AppState>,
+    Json(request): Json<DeleteBooksRequest>,
+) -> Result<Json<Vec<WebBook>>, ApiError> {
+    if request.resource_ids.is_empty() {
+        return Ok(Json(
+            s.application.books()?.into_iter().map(web_book).collect(),
+        ));
+    }
+    let application = s.application.clone();
+    let books =
+        tokio::task::spawn_blocking(move || application.delete_books(&request.resource_ids))
+            .await
+            .map_err(|error| ApiError(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))??;
     Ok(Json(books.into_iter().map(web_book).collect()))
 }
 

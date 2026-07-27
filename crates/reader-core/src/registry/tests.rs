@@ -82,3 +82,48 @@ fn scan_real_files_can_be_verified_without_fixture_books() {
         fingerprint_file(root.join("verify.txt")).unwrap()
     );
 }
+
+#[test]
+fn batch_delete_removes_files_and_persisted_index_entries() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().join("books");
+    let state = temp.path().join("state");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("one.txt"), b"one").unwrap();
+    fs::write(root.join("two.txt"), b"two").unwrap();
+    let mut registry = LibraryRegistry::open(&root, &state).unwrap();
+    let books = registry.scan(|_| {}).unwrap();
+    let deleted = books
+        .iter()
+        .find(|book| book.relative_path == "one.txt")
+        .unwrap()
+        .resource_id
+        .clone();
+
+    registry
+        .delete_books(std::slice::from_ref(&deleted))
+        .unwrap();
+
+    assert!(!root.join("one.txt").exists());
+    assert!(root.join("two.txt").exists());
+    assert!(matches!(
+        registry.resolve(&deleted),
+        Err(CoreError::InvalidResourceId)
+    ));
+    let reopened = LibraryRegistry::open(&root, &state).unwrap();
+    assert_eq!(reopened.books().len(), 1);
+    assert_eq!(reopened.books()[0].relative_path, "two.txt");
+}
+
+#[test]
+fn batch_delete_validates_every_id_before_removing_files() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().join("books");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("one.txt"), b"one").unwrap();
+    let mut registry = LibraryRegistry::open(&root, temp.path().join("state")).unwrap();
+    let id = registry.scan(|_| {}).unwrap()[0].resource_id.clone();
+
+    assert!(registry.delete_books(&[id, "invalid".into()]).is_err());
+    assert!(root.join("one.txt").exists());
+}

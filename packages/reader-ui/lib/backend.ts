@@ -19,6 +19,7 @@ export const openExternalBooks = (paths: string[]) => readerGateway.openExternal
 export const listBooks = () => readerGateway.listBooks();
 export const resolveBookCover = (resourceId: string) => readerGateway.resolveBookCover(resourceId);
 export const rescanBooks = (onProgress?: (progress: ScanProgress) => void) => readerGateway.scanBooks(onProgress);
+export const deleteLibraryBooks = (resourceIds: string[]) => readerGateway.deleteBooks(resourceIds);
 export const getCacheStats = () => readerGateway.getCacheStats();
 export const clearCache = () => readerGateway.clearCache();
 export const readerFontPacks = () => readerGateway.readerFontPacks();

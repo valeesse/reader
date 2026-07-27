@@ -204,6 +204,18 @@ export async function clearLastReadBook() {
   ]);
 }
 
+export async function removeLocalBookState(bookIds: string[]) {
+  const deleted = new Set(bookIds);
+  await Promise.all(bookIds.flatMap((bookId) => [
+    del(`${KEYS.BOOK_COVER}${bookId}`),
+    del(`${KEYS.PROGRESS}${bookId}`),
+  ]));
+  const lastReadBookId = await get<string>(KEYS.LAST_READ);
+  if (lastReadBookId && deleted.has(lastReadBookId)) {
+    await clearLastReadBook();
+  }
+}
+
 /**
  * Record the selected book before its first locator is available.  This keeps
  * the synchronous startup snapshot authoritative even when the application is

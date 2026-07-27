@@ -245,6 +245,39 @@ impl LibraryRegistry {
             .collect()
     }
 
+    pub fn delete_books(&mut self, resource_ids: &[String]) -> Result<(), CoreError> {
+        let requested = resource_ids.iter().collect::<HashSet<_>>();
+        if requested.is_empty() {
+            return Ok(());
+        }
+
+        // Resolve every target before deleting the first file. This prevents a
+        // malformed or stale resource id from turning a batch into a partial
+        // operation before validation has completed.
+        let paths = requested
+            .iter()
+            .map(|resource_id| self.resolve(resource_id))
+            .collect::<Result<Vec<_>, _>>()?;
+        for path in paths {
+            fs::remove_file(path)?;
+        }
+
+        let removed_paths = self
+            .index
+            .resources
+            .iter()
+            .filter(|(resource_id, _)| requested.contains(resource_id))
+            .map(|(_, relative_path)| relative_path.clone())
+            .collect::<HashSet<_>>();
+        self.index
+            .resources
+            .retain(|resource_id, _| !requested.contains(resource_id));
+        self.index
+            .files
+            .retain(|file| !removed_paths.contains(&file.relative_path));
+        self.persist()
+    }
+
     pub fn resolve(&self, resource_id: &str) -> Result<PathBuf, CoreError> {
         if !valid_resource_id(resource_id) {
             return Err(CoreError::InvalidResourceId);

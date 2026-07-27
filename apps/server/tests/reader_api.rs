@@ -259,6 +259,37 @@ async fn sqlite_state_rejects_invalid_payload_without_panicking() {
     );
 }
 
+#[tokio::test]
+async fn deleting_books_removes_files_and_returns_the_remaining_library() {
+    let temp = TempDir::new().unwrap();
+    let books_dir = temp.path().join("books");
+    fs::create_dir_all(&books_dir).unwrap();
+    fs::write(books_dir.join("delete-me.txt"), "delete").unwrap();
+    fs::write(books_dir.join("keep-me.txt"), "keep").unwrap();
+    let app = app(&temp);
+    let books = scan(&app).await;
+    let delete_id = books
+        .iter()
+        .find(|book| book["fileName"] == "delete-me.txt")
+        .unwrap()["resourceId"]
+        .as_str()
+        .unwrap();
+
+    let (status, remaining) = request(
+        &app,
+        "DELETE",
+        "/api/books",
+        json!({ "resourceIds": [delete_id] }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(remaining.as_array().unwrap().len(), 1);
+    assert_eq!(remaining[0]["fileName"], "keep-me.txt");
+    assert!(!books_dir.join("delete-me.txt").exists());
+    assert!(books_dir.join("keep-me.txt").exists());
+}
+
 fn write_epub(path: &Path) {
     let mut zip = ZipWriter::new(fs::File::create(path).unwrap());
     let options = SimpleFileOptions::default();

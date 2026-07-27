@@ -1,4 +1,4 @@
-import { ArrowDownAZ, ArrowLeft, ArrowUpAZ, Grid2X2, Layers, List } from 'lucide-react';
+import { ArrowDownAZ, ArrowLeft, ArrowUpAZ, Check, Grid2X2, Layers, List, Trash2, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Book } from '../../types';
@@ -7,6 +7,8 @@ import { prewarmWebReaderOnIntent } from '../../features/reader/runtime/readerWa
 import { BookCover } from './BookCover';
 import type { LibraryEntry } from './Library';
 import { ScrollToTopButton } from './ScrollToTopButton';
+import { useAppContext } from '../../store/AppStore';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 export function SeriesTile({
   entry,
@@ -121,11 +123,16 @@ export function SeriesDetailView({
   onBack: () => void;
   onReadBook: (book: Book) => void;
 }) {
+  const { deleteBooks } = useAppContext();
   const uniqueAuthors = Array.from(new Set(entry.books.map((book) => book.author).filter(Boolean)));
   const [visibleCount, setVisibleCount] = useState(72);
   const [layoutMode, setLayoutMode] = useState<'grid' | 'list'>('grid');
   const [sortKey, setSortKey] = useState<'series' | 'title' | 'addedAt'>('series');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedBookIds, setSelectedBookIds] = useState<Set<string>>(() => new Set());
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const showScrollTopRef = useRef(false);
@@ -219,11 +226,20 @@ export function SeriesDetailView({
                 <button type="button" onClick={() => setLayoutMode('grid')} aria-label="封面网格" aria-pressed={layoutMode === 'grid'} className={`flex h-8 w-8 items-center justify-center rounded-lg ${layoutMode === 'grid' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}><Grid2X2 className="h-4 w-4" /></button>
                 <button type="button" onClick={() => setLayoutMode('list')} aria-label="列表" aria-pressed={layoutMode === 'list'} className={`flex h-8 w-8 items-center justify-center rounded-lg ${layoutMode === 'list' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}><List className="h-4 w-4" /></button>
               </div>
+              <button type="button" onClick={() => { setSelectionMode((value) => !value); setSelectedBookIds(new Set()); }} aria-label={selectionMode ? '退出选择' : '选择要删除的书籍'} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${selectionMode ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-black/5 text-black/45 dark:bg-white/10 dark:text-white/45'}`}>{selectionMode ? <X className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}</button>
             </div>
           </div>
+          {selectionMode && (
+            <div className="app-card flex flex-wrap items-center gap-2 border-red-500/15 p-2.5">
+              <span className="mr-auto px-1 text-sm font-medium">已选择 {selectedBookIds.size} 本</span>
+              <button type="button" onClick={() => setSelectedBookIds(new Set(sortedBooks.slice(0, visibleCount).map((book) => book.id)))} className="h-9 rounded-xl bg-black/5 px-3 text-xs font-medium dark:bg-white/10">全选已显示</button>
+              <button type="button" disabled={selectedBookIds.size === 0} onClick={() => setConfirmDelete(true)} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-red-600 px-3 text-xs font-semibold text-white disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" />永久删除</button>
+            </div>
+          )}
           <div className={layoutMode === 'grid' ? 'grid grid-cols-2 gap-3 min-[520px]:grid-cols-3 sm:gap-5 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 gap-2'}>
             {sortedBooks.slice(0, visibleCount).map((book, index) => (
-              layoutMode === 'grid' ? (
+              <div key={book.id} className={`relative min-w-0 ${selectedBookIds.has(book.id) ? 'rounded-2xl ring-2 ring-[#087DF1] ring-offset-2 ring-offset-[#FBFAF7] dark:ring-offset-[#171916]' : ''}`}>
+              {layoutMode === 'grid' ? (
               <motion.button key={book.id} whileHover={{ y: -3 }} whileTap={{ scale: 0.985 }} onPointerDown={() => prewarmWebReaderOnIntent(book)} onFocus={() => prewarmWebReaderOnIntent(book)} onClick={() => onReadBook(book)} className="group overflow-hidden rounded-2xl border border-black/5 bg-white/85 text-left shadow-sm transition-colors hover:bg-white dark:border-white/10 dark:bg-white/10 dark:hover:bg-white/15">
                 <div className="relative aspect-[3/4] overflow-hidden bg-[#e4e5df] dark:bg-[#30332f]">
                   <BookCover book={book} className="h-full w-full object-cover" />
@@ -238,6 +254,23 @@ export function SeriesDetailView({
               ) : (
                 <BookListItem key={book.id} book={book} onReadBook={onReadBook} />
               )
+              }
+              {selectionMode && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedBookIds((current) => {
+                    const next = new Set(current);
+                    next.has(book.id) ? next.delete(book.id) : next.add(book.id);
+                    return next;
+                  })}
+                  aria-label={`选择${book.title}`}
+                  aria-pressed={selectedBookIds.has(book.id)}
+                  className="absolute inset-0 z-10 rounded-2xl"
+                >
+                  <span className={`absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full border-2 shadow-sm ${selectedBookIds.has(book.id) ? 'border-[#087DF1] bg-[#087DF1] text-white' : 'border-white bg-black/35 text-transparent'}`}><Check className="h-4 w-4" /></span>
+                </button>
+              )}
+              </div>
             ))}
           </div>
           {visibleCount < sortedBooks.length && (
@@ -255,6 +288,26 @@ export function SeriesDetailView({
         visible={showScrollTop}
         onClick={() => scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
       />
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`永久删除 ${selectedBookIds.size} 本书？`}
+          description="此操作会直接删除书库目录中的原始文件，并从书架和系列中移除，且无法恢复。"
+          confirmLabel="确认永久删除"
+          busy={isDeleting}
+          onCancel={() => !isDeleting && setConfirmDelete(false)}
+          onConfirm={async () => {
+            setIsDeleting(true);
+            try {
+              await deleteBooks(Array.from(selectedBookIds));
+              setConfirmDelete(false);
+              setSelectionMode(false);
+              setSelectedBookIds(new Set());
+            } finally {
+              setIsDeleting(false);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

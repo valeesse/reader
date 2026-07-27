@@ -57,6 +57,7 @@ pub fn build_router(config: ServerConfig) -> Result<Router, Box<dyn std::error::
         .route("/api/capabilities", get(library_api::capabilities))
         .route("/api/library/config", get(library_api::library_config))
         .route("/api/books", get(library_api::books))
+        .route("/api/books", delete(library_api::delete_books))
         .route("/api/rescan", post(library_api::rescan))
         .route("/api/scan/status", get(library_api::scan_status))
         .route("/api/state", get(state::get_web_state))

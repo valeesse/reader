@@ -67,6 +67,12 @@ export class HttpReaderGateway implements ReaderGateway {
       await new Promise((resolve) => window.setTimeout(resolve, 250));
     }
   }
+  async deleteBooks(resourceIds: string[]): Promise<Book[]> {
+    return (await this.http<BackendBook[]>('/api/books', {
+      method: 'DELETE',
+      body: JSON.stringify({ resourceIds }),
+    })).map((book) => normalizeBook(book, (cover) => cover));
+  }
   readerCommand<T>(kind: 'txt' | 'epub', route: string, _command: string, body: Record<string, unknown>, signal?: AbortSignal) {
     return this.http<T>(`/api/${kind}/${route}`, { method: 'POST', body: JSON.stringify(body), signal });
   }

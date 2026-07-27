@@ -300,6 +300,23 @@ fn initialize_library(app: &AppHandle, state: &ReaderState) -> Result<(), String
     Ok(())
 }
 
+#[tauri::command]
+async fn delete_library_books(
+    app: AppHandle,
+    resource_ids: Vec<String>,
+) -> Result<Vec<NativeBook>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<ReaderState>();
+        let application = reader_application(&state)?;
+        application
+            .delete_books(&resource_ids)
+            .map(|books| books.into_iter().map(native_book_from_core).collect())
+            .map_err(|error| format!("永久删除书籍失败: {error}"))
+    })
+    .await
+    .map_err(|error| format!("删除任务中断: {error}"))?
+}
+
 fn discard_unavailable_library_root(
     app: &AppHandle,
     state: &ReaderState,

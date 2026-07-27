@@ -73,6 +73,9 @@ impl ReaderApplication {
     {
         self.reader.scan(progress)
     }
+    pub fn delete_books(&self, resource_ids: &[String]) -> Result<Vec<Book>, ReaderError> {
+        self.reader.delete_books(resource_ids)
+    }
     pub fn cover(&self, resource_id: &str) -> Result<CachedCover, ReaderError> {
         self.reader.cover(resource_id)
     }

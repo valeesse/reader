@@ -97,6 +97,15 @@ impl ReaderService {
         Ok(books)
     }
 
+    pub fn delete_books(&self, resource_ids: &[String]) -> Result<Vec<Book>, ReaderError> {
+        let _maintenance = self.maintenance.read().map_err(|_| ReaderError::Busy)?;
+        let mut next_registry = self.registry.lock().map_err(|_| ReaderError::Busy)?.clone();
+        next_registry.delete_books(resource_ids)?;
+        *self.registry.lock().map_err(|_| ReaderError::Busy)? = next_registry;
+        drop(_maintenance);
+        self.books()
+    }
+
     pub fn txt_preview(
         &self,
         resource_id: &str,

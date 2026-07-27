@@ -15,13 +15,14 @@ import {
   saveSeries,
   getLastReadBookId,
   clearLastReadBook,
+  removeLocalBookState,
   getStartupSnapshotSync,
   saveStartupSnapshot,
   ProgressSavedDetail,
 } from '../lib/storage';
 import { normalizeSettings } from '../lib/readingSettings';
 import { cancelReaderIdle, scheduleReaderIdle } from '../lib/readerScheduler';
-import { runtimeCapabilities } from '../lib/backend';
+import { deleteLibraryBooks, runtimeCapabilities } from '../lib/backend';
 
 interface AppContextType {
   books: Book[];
@@ -34,6 +35,7 @@ interface AppContextType {
   deleteSeries: (seriesId: string) => Promise<void>;
   autoCreateMetadataSeries: () => Promise<AutoCreateSeriesResult>;
   mergeSeries: (sourceSeriesId: string, targetSeriesId: string) => Promise<void>;
+  deleteBooks: (bookIds: string[]) => Promise<void>;
   reloadState: () => Promise<void>;
   updateSettings: (settings: Partial<AppSettings>) => Promise<void>;
   lastReadBookId?: string;
@@ -163,6 +165,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await Promise.all([saveBooks(booksWithSeries), saveSeries(nextSeries)]);
   };
 
+  const deleteBooks = async (bookIds: string[]) => {
+    const ids = Array.from(new Set(bookIds));
+    if (ids.length === 0) return;
+    const remaining = await deleteLibraryBooks(ids);
+    const existingById = new Map(books.map((book) => [book.resourceId, book]));
+    const nextBooks = remaining.map((book) => {
+      const existing = existingById.get(book.resourceId);
+      return {
+        ...existing,
+        ...book,
+        addedAt: existing?.addedAt ?? book.addedAt,
+        seriesName: book.seriesName ?? existing?.seriesName,
+        seriesIndex: book.seriesIndex ?? existing?.seriesIndex,
+      };
+    });
+    const available = new Set(nextBooks.map((book) => book.id));
+    const nextSeries = series
+      .map((item) => ({ ...item, bookIds: item.bookIds.filter((id) => available.has(id)) }))
+      .filter((item) => item.bookIds.length > 0);
+    setBooks(nextBooks.map(stripBookCover));
+    setSeries(nextSeries);
+    if (lastReadBookId && ids.includes(lastReadBookId)) setLastReadBookId(undefined);
+    await Promise.all([
+      saveBooks(nextBooks),
+      saveSeries(nextSeries),
+      removeLocalBookState(ids),
+    ]);
+  };
+
   const createSeries = async (name: string, bookIds: string[]) => {
     const trimmedName = name.trim();
     if (!trimmedName || bookIds.length === 0) return;
@@ -237,7 +268,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AppContext.Provider value={{ books, series, settings, addBook, addBooks, createSeries, updateSeries, deleteSeries, autoCreateMetadataSeries, mergeSeries, reloadState, updateSettings, lastReadBookId, isLoading, stateReconciled, stateError }}>
+    <AppContext.Provider value={{ books, series, settings, addBook, addBooks, createSeries, updateSeries, deleteSeries, autoCreateMetadataSeries, mergeSeries, deleteBooks, reloadState, updateSettings, lastReadBookId, isLoading, stateReconciled, stateError }}>
       <ProgressProvider>{children}</ProgressProvider>
     </AppContext.Provider>
   );

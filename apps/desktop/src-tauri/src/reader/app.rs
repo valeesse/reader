@@ -70,6 +70,7 @@ pub fn run() {
             download_reader_font_pack,
             remove_reader_font_pack,
             scan_library,
+            delete_library_books,
             import_managed_books,
             open_external_books,
             reader_books,

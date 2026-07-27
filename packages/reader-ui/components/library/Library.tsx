@@ -1,7 +1,7 @@
 import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Book, BookType, Series } from '../../types';
 import { useAppContext, useProgressContext } from '../../store/AppStore';
-import { ArrowDownAZ, ArrowUpAZ, BookOpen, Clock3, Grid2X2, List, RotateCcw, Search, SearchX, Settings2 } from 'lucide-react';
+import { ArrowDownAZ, ArrowUpAZ, BookOpen, Check, Clock3, Grid2X2, List, RotateCcw, Search, SearchX, Settings2, Trash2, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { BookCover } from './BookCover';
 import { displayBookFileName, seriesCoverBook, sortBooksInSeries } from '../../lib/series';
@@ -9,6 +9,7 @@ import { prewarmWebReaderOnIntent } from '../../features/reader/runtime/readerWa
 import { BookListItem, BookTile, SeriesDetailView, SeriesListItem, SeriesTile } from './LibraryTiles';
 import { ScrollToTopButton } from './ScrollToTopButton';
 import { runtimeCapabilities } from '../../lib/backend';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 type SortKey = 'fileName' | 'addedAt' | 'recent';
 type SortOrder = 'asc' | 'desc';
@@ -21,7 +22,7 @@ export type LibraryEntry =
 const BOOK_BATCH_SIZE = 72;
 
 export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Book) => void; onOpenSettings: () => void }) {
-  const { books, series } = useAppContext();
+  const { books, series, deleteBooks } = useAppContext();
   const progress = useProgressContext();
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
@@ -29,6 +30,10 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
   const [sortKey, setSortKey] = useState<SortKey>('recent');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('grid');
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedBookIds, setSelectedBookIds] = useState<Set<string>>(() => new Set());
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [visibleCount, setVisibleCount] = useState(BOOK_BATCH_SIZE);
   const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -154,6 +159,20 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
 
   const toggleSortOrder = () => {
     setSortOrder((current) => (current === 'asc' ? 'desc' : 'asc'));
+  };
+
+  const leaveSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedBookIds(new Set());
+  };
+
+  const toggleBookIds = (bookIds: string[]) => {
+    setSelectedBookIds((current) => {
+      const next = new Set(current);
+      const allSelected = bookIds.every((id) => next.has(id));
+      bookIds.forEach((id) => allSelected ? next.delete(id) : next.add(id));
+      return next;
+    });
   };
 
   const handleLibraryScroll = (event: React.UIEvent<HTMLDivElement>) => {
@@ -293,23 +312,48 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
                     <List className="h-4 w-4" />
                   </button>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => selectionMode ? leaveSelectionMode() : setSelectionMode(true)}
+                  aria-label={selectionMode ? '退出选择' : '选择要删除的书籍'}
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${selectionMode ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-black/5 text-black/50 hover:text-red-600 dark:bg-white/10 dark:text-white/50'}`}
+                >
+                  {selectionMode ? <X className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+                </button>
               </div>
             </div>
+
+            {selectionMode && (
+              <div className="app-card sticky top-0 z-[8] flex flex-wrap items-center gap-2 border-red-500/15 p-2.5 sm:p-3">
+                <span className="mr-auto px-1 text-sm font-medium text-[#1C1C1E] dark:text-white">已选择 {selectedBookIds.size} 本</span>
+                <button type="button" onClick={() => setSelectedBookIds(new Set(visibleEntries.flatMap((entry) => entry.kind === 'series' ? entry.books.map((book) => book.id) : [entry.book.id])))} className="h-9 rounded-xl bg-black/5 px-3 text-xs font-medium hover:bg-black/10 dark:bg-white/10">选择当前结果</button>
+                <button type="button" onClick={() => setSelectedBookIds(new Set())} className="h-9 rounded-xl bg-black/5 px-3 text-xs font-medium hover:bg-black/10 dark:bg-white/10">清空</button>
+                <button type="button" disabled={selectedBookIds.size === 0} onClick={() => setConfirmDelete(true)} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-red-600 px-3 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" />永久删除</button>
+              </div>
+            )}
 
             <div className={layoutMode === 'grid'
               ? 'library-grid grid content-start gap-x-3 gap-y-5 min-[380px]:gap-x-4 sm:gap-x-5 sm:gap-y-7 lg:gap-x-6 lg:gap-y-8'
               : 'grid grid-cols-1 content-start gap-2 sm:gap-3'}
             >
               {visibleEntries.map((entry) => (
-                entry.kind === 'series' ? (
-                  layoutMode === 'grid'
-                    ? <SeriesTile key={entry.id} entry={entry} onOpenSeries={() => setSelectedSeriesId(entry.id)} />
-                    : <SeriesListItem key={entry.id} entry={entry} onOpenSeries={() => setSelectedSeriesId(entry.id)} />
-                ) : (
-                  layoutMode === 'grid'
-                    ? <BookTile key={entry.id} book={entry.book} onReadBook={onReadBook} />
-                    : <BookListItem key={entry.id} book={entry.book} onReadBook={onReadBook} />
-                )
+                <SelectableLibraryEntry
+                  key={`${entry.kind}-${entry.id}`}
+                  active={selectionMode}
+                  selected={(entry.kind === 'series' ? entry.books.map((book) => book.id) : [entry.book.id]).every((id) => selectedBookIds.has(id))}
+                  label={`选择${entry.title}`}
+                  onToggle={() => toggleBookIds(entry.kind === 'series' ? entry.books.map((book) => book.id) : [entry.book.id])}
+                >
+                  {entry.kind === 'series' ? (
+                    layoutMode === 'grid'
+                      ? <SeriesTile entry={entry} onOpenSeries={() => setSelectedSeriesId(entry.id)} />
+                      : <SeriesListItem entry={entry} onOpenSeries={() => setSelectedSeriesId(entry.id)} />
+                  ) : (
+                    layoutMode === 'grid'
+                      ? <BookTile book={entry.book} onReadBook={onReadBook} />
+                      : <BookListItem book={entry.book} onReadBook={onReadBook} />
+                  )}
+                </SelectableLibraryEntry>
               ))}
             </div>
 
@@ -349,6 +393,50 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
           onBack={() => setSelectedSeriesId(null)}
           onReadBook={onReadBook}
         />
+      )}
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`永久删除 ${selectedBookIds.size} 本书？`}
+          description="此操作会直接删除书库目录中的原始文件，并从书架和相关系列中移除。删除后无法恢复，请确认你已备份需要保留的文件。"
+          confirmLabel="确认永久删除"
+          busy={isDeleting}
+          onCancel={() => !isDeleting && setConfirmDelete(false)}
+          onConfirm={async () => {
+            setIsDeleting(true);
+            try {
+              await deleteBooks(Array.from(selectedBookIds));
+              setConfirmDelete(false);
+              leaveSelectionMode();
+            } finally {
+              setIsDeleting(false);
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function SelectableLibraryEntry({
+  active,
+  selected,
+  label,
+  onToggle,
+  children,
+}: {
+  active: boolean;
+  selected: boolean;
+  label: string;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`relative min-w-0 ${selected ? 'rounded-2xl ring-2 ring-[#087DF1] ring-offset-2 ring-offset-[#FBFAF7] dark:ring-offset-[#171916]' : ''}`}>
+      {children}
+      {active && (
+        <button type="button" onClick={onToggle} aria-label={label} aria-pressed={selected} className="absolute inset-0 z-10 rounded-2xl bg-transparent">
+          <span className={`absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full border-2 shadow-sm ${selected ? 'border-[#087DF1] bg-[#087DF1] text-white' : 'border-white bg-black/35 text-transparent'}`}><Check className="h-4 w-4" /></span>
+        </button>
       )}
     </div>
   );
