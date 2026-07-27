@@ -1,18 +1,19 @@
 import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Book, BookType, Series } from '../../types';
 import { useAppContext, useProgressContext } from '../../store/AppStore';
-import { ArrowDownAZ, ArrowUpAZ, BookOpen, Clock3, RotateCcw, Search, SearchX, Settings2 } from 'lucide-react';
+import { ArrowDownAZ, ArrowUpAZ, BookOpen, Clock3, Grid2X2, List, RotateCcw, Search, SearchX, Settings2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { BookCover } from './BookCover';
 import { displayBookFileName, seriesCoverBook, sortBooksInSeries } from '../../lib/series';
 import { prewarmWebReaderOnIntent } from '../../features/reader/runtime/readerWarmup';
-import { BookTile, SeriesDetailView, SeriesTile } from './LibraryTiles';
+import { BookListItem, BookTile, SeriesDetailView, SeriesListItem, SeriesTile } from './LibraryTiles';
 import { ScrollToTopButton } from './ScrollToTopButton';
 import { runtimeCapabilities } from '../../lib/backend';
 
 type SortKey = 'fileName' | 'addedAt' | 'recent';
 type SortOrder = 'asc' | 'desc';
 type TypeFilter = 'all' | BookType;
+type LayoutMode = 'grid' | 'list';
 export type LibraryEntry =
   | { kind: 'book'; id: string; type: BookType; title: string; fileName: string; addedAt: number; recentAt: number; book: Book }
   | { kind: 'series'; id: string; type: 'epub' | 'txt' | 'mixed'; title: string; fileName: string; addedAt: number; recentAt: number; series: Series; books: Book[]; coverBook: Book };
@@ -27,6 +28,7 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [sortKey, setSortKey] = useState<SortKey>('recent');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>('grid');
   const [visibleCount, setVisibleCount] = useState(BOOK_BATCH_SIZE);
   const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -240,7 +242,7 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
                   className="w-full h-10 rounded-xl bg-black/[0.035] dark:bg-white/10 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-[#007AFF]/35"
                 />
               </div>
-              <div className="flex min-w-0 items-center gap-2 lg:justify-end">
+              <div className="flex min-w-0 flex-wrap items-center gap-2 lg:flex-nowrap lg:justify-end">
                 <div className="grid min-w-0 flex-[1.15] grid-cols-3 gap-2 rounded-xl bg-black/5 p-1 dark:bg-white/10 lg:w-[13rem] lg:flex-none">
                   {(['all', 'epub', 'txt'] as TypeFilter[]).map((value) => (
                     <button
@@ -271,15 +273,42 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
                 >
                   {sortOrder === 'asc' ? <ArrowUpAZ className="w-4 h-4" /> : <ArrowDownAZ className="w-4 h-4" />}
                 </button>
+                <div className="flex h-10 shrink-0 items-center rounded-xl bg-black/5 p-1 dark:bg-white/10" aria-label="展示方式">
+                  <button
+                    type="button"
+                    onClick={() => setLayoutMode('grid')}
+                    aria-label="封面网格"
+                    aria-pressed={layoutMode === 'grid'}
+                    className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${layoutMode === 'grid' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}
+                  >
+                    <Grid2X2 className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLayoutMode('list')}
+                    aria-label="列表"
+                    aria-pressed={layoutMode === 'list'}
+                    className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${layoutMode === 'list' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}
+                  >
+                    <List className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div className="library-grid grid gap-x-3 min-[380px]:gap-x-4 sm:gap-x-5 lg:gap-x-6 gap-y-5 sm:gap-y-7 lg:gap-y-8 content-start">
+            <div className={layoutMode === 'grid'
+              ? 'library-grid grid content-start gap-x-3 gap-y-5 min-[380px]:gap-x-4 sm:gap-x-5 sm:gap-y-7 lg:gap-x-6 lg:gap-y-8'
+              : 'grid grid-cols-1 content-start gap-2 sm:gap-3'}
+            >
               {visibleEntries.map((entry) => (
                 entry.kind === 'series' ? (
-                  <SeriesTile key={entry.id} entry={entry} onOpenSeries={() => setSelectedSeriesId(entry.id)} />
+                  layoutMode === 'grid'
+                    ? <SeriesTile key={entry.id} entry={entry} onOpenSeries={() => setSelectedSeriesId(entry.id)} />
+                    : <SeriesListItem key={entry.id} entry={entry} onOpenSeries={() => setSelectedSeriesId(entry.id)} />
                 ) : (
-                  <BookTile key={entry.id} book={entry.book} onReadBook={onReadBook} />
+                  layoutMode === 'grid'
+                    ? <BookTile key={entry.id} book={entry.book} onReadBook={onReadBook} />
+                    : <BookListItem key={entry.id} book={entry.book} onReadBook={onReadBook} />
                 )
               ))}
             </div>

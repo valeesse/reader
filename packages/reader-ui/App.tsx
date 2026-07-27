@@ -148,17 +148,15 @@ function MainLayout() {
 
   return (
     <div className="h-screen w-full flex gap-0 sm:gap-2 overflow-hidden bg-[#F7F5F0] dark:bg-[#111210] text-[#1C1C1E] dark:text-[#ecece7] selection:bg-[#087DF1]/20 font-sans transition-colors duration-500 p-0 sm:p-2">
-      {!readingBook && (
-        <div
-          className="contents"
-          aria-hidden={readingBook ? true : undefined}
-          inert={readingBook ? true : undefined}
-        >
-          <Suspense fallback={<StartupSplash theme={settings.theme} />}>
-            <LibraryShell onReadBook={openBookFromLibrary} onPresentable={presentApplication} />
-          </Suspense>
-        </div>
-      )}
+      <div
+        className={readingBook ? 'hidden' : 'contents'}
+        aria-hidden={readingBook ? true : undefined}
+        inert={readingBook ? true : undefined}
+      >
+        <Suspense fallback={<StartupSplash theme={settings.theme} />}>
+          <LibraryShell onReadBook={openBookFromLibrary} onPresentable={presentApplication} />
+        </Suspense>
+      </div>
       {readingBook && (
         <Suspense fallback={null}>
           <ReaderLayout

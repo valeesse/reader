@@ -1,7 +1,7 @@
 import React, { useDeferredValue, useMemo, useRef, useState } from 'react';
 import { useAppContext } from '../../store/AppStore';
 import { Book } from '../../types';
-import { GitMerge, Layers, Pencil, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
+import { ArrowDownAZ, ArrowUpAZ, GitMerge, Grid2X2, Layers, List, Pencil, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
 import { BookCover } from './BookCover';
 import { sortBooksInSeries } from '../../lib/series';
 import { prewarmWebReaderOnIntent } from '../../features/reader/runtime/readerWarmup';
@@ -18,6 +18,9 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
   const [autoCreateMessage, setAutoCreateMessage] = useState('');
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
+  const [layoutMode, setLayoutMode] = useState<'grid' | 'list'>('grid');
+  const [sortKey, setSortKey] = useState<'name' | 'bookCount' | 'addedAt'>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [visibleSeriesCount, setVisibleSeriesCount] = useState(8);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [deleteCandidateId, setDeleteCandidateId] = useState<string>();
@@ -31,8 +34,7 @@ const [mergeSourceId, setMergeSourceId] = useState<string>();
     : undefined;
   const filteredSeries = useMemo(() => {
     const normalized = deferredQuery.trim().toLocaleLowerCase();
-    if (!normalized) return series;
-    return series.filter((item) => (
+    const result = !normalized ? [...series] : series.filter((item) => (
       item.name.toLocaleLowerCase().includes(normalized)
       || item.bookIds.some((bookId) => {
         const book = booksById.get(bookId);
@@ -43,7 +45,17 @@ const [mergeSourceId, setMergeSourceId] = useState<string>();
           : false;
       })
     ));
-  }, [booksById, deferredQuery, series]);
+    return result.sort((a, b) => {
+      let value = 0;
+      if (sortKey === 'bookCount') value = a.bookIds.length - b.bookIds.length;
+      else if (sortKey === 'addedAt') {
+        const aAdded = Math.max(...a.bookIds.map((id) => booksById.get(id)?.addedAt || 0), 0);
+        const bAdded = Math.max(...b.bookIds.map((id) => booksById.get(id)?.addedAt || 0), 0);
+        value = aAdded - bAdded;
+      } else value = a.name.localeCompare(b.name, 'zh-Hans-CN');
+      return sortOrder === 'asc' ? value : -value;
+    });
+  }, [booksById, deferredQuery, series, sortKey, sortOrder]);
   const visibleSeries = filteredSeries.slice(0, visibleSeriesCount);
   const normalizedQuery = deferredQuery.trim().toLocaleLowerCase();
   const booksBySeriesId = useMemo(() => new Map(series.map((item) => [
@@ -152,7 +164,7 @@ const [mergeSourceId, setMergeSourceId] = useState<string>();
         onScroll={handleScroll}
       >
         <div className="min-w-0 space-y-5">
-          <div className="app-card flex flex-col gap-2 p-2.5 sm:flex-row sm:items-center sm:justify-between sm:p-3">
+          <div className="app-card flex flex-col gap-2 p-2.5 sm:p-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="relative w-full sm:max-w-sm">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/45 dark:text-white/45" />
               <input
@@ -162,7 +174,21 @@ const [mergeSourceId, setMergeSourceId] = useState<string>();
                 className="h-10 w-full rounded-xl bg-black/[0.035] pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-[#007AFF]/35 dark:bg-white/10"
               />
             </div>
-            <span className="px-1 text-xs tabular-nums text-black/55 dark:text-white/55">{filteredSeries.length} 个系列 · {filteredSeries.reduce((count, item) => count + item.bookIds.length, 0)} 本书</span>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="mr-auto px-1 text-xs tabular-nums text-black/55 dark:text-white/55">{filteredSeries.length} 个系列 · {filteredSeries.reduce((count, item) => count + item.bookIds.length, 0)} 本书</span>
+              <select value={sortKey} onChange={(event) => setSortKey(event.target.value as 'name' | 'bookCount' | 'addedAt')} aria-label="系列排序方式" className="h-9 min-w-0 rounded-xl bg-black/5 px-2 text-xs outline-none dark:bg-white/10">
+                <option value="name">系列名</option>
+                <option value="bookCount">书籍数量</option>
+                <option value="addedAt">最近加入</option>
+              </select>
+              <button type="button" onClick={() => setSortOrder((value) => value === 'asc' ? 'desc' : 'asc')} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-black/5 dark:bg-white/10" aria-label="切换排序方向">
+                {sortOrder === 'asc' ? <ArrowUpAZ className="h-4 w-4" /> : <ArrowDownAZ className="h-4 w-4" />}
+              </button>
+              <div className="flex h-9 shrink-0 rounded-xl bg-black/5 p-0.5 dark:bg-white/10">
+                <button type="button" onClick={() => setLayoutMode('grid')} aria-label="卡片网格" aria-pressed={layoutMode === 'grid'} className={`flex h-8 w-8 items-center justify-center rounded-lg ${layoutMode === 'grid' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}><Grid2X2 className="h-4 w-4" /></button>
+                <button type="button" onClick={() => setLayoutMode('list')} aria-label="紧凑列表" aria-pressed={layoutMode === 'list'} className={`flex h-8 w-8 items-center justify-center rounded-lg ${layoutMode === 'list' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}><List className="h-4 w-4" /></button>
+              </div>
+            </div>
           </div>
           {series.length === 0 ? (
             <div className="flex min-h-[360px] flex-col items-center justify-center px-6 text-center text-gray-500 dark:text-gray-400">
@@ -263,14 +289,14 @@ const [mergeSourceId, setMergeSourceId] = useState<string>();
                       </button>
                     </div>
                   </div>
-                  <div className="relative z-20 mt-4 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className={`relative z-20 mt-4 grid min-w-0 gap-3 ${layoutMode === 'grid' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
                     {visibleBooks.map((book, index) => (
                       <button
                         key={book.id}
                         onPointerDown={() => prewarmWebReaderOnIntent(book)}
                         onFocus={() => prewarmWebReaderOnIntent(book)}
                         onClick={() => onReadBook(book)}
-                        className="flex w-full min-w-0 max-w-full items-center gap-3 overflow-hidden rounded-xl bg-white/75 p-3 text-left transition-all hover:-translate-y-0.5 hover:bg-white hover:shadow-sm dark:bg-white/10 dark:hover:bg-white/15"
+                        className={`flex w-full min-w-0 max-w-full items-center gap-3 overflow-hidden rounded-xl bg-white/75 text-left transition-all hover:-translate-y-0.5 hover:bg-white hover:shadow-sm dark:bg-white/10 dark:hover:bg-white/15 ${layoutMode === 'grid' ? 'p-3' : 'px-3 py-2'}`}
                       >
                         <div className="w-8 h-10 rounded-[5px] bg-[#e4e5df] dark:bg-[#30332f] shrink-0 overflow-hidden">
                           <BookCover book={book} className="w-full h-full object-cover" compact />

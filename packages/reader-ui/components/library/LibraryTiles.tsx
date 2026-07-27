@@ -1,6 +1,6 @@
-import { ArrowLeft, Layers } from 'lucide-react';
+import { ArrowDownAZ, ArrowLeft, ArrowUpAZ, Grid2X2, Layers, List } from 'lucide-react';
 import { motion } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Book } from '../../types';
 import { displayBookFileName } from '../../lib/series';
 import { prewarmWebReaderOnIntent } from '../../features/reader/runtime/readerWarmup';
@@ -64,6 +64,54 @@ export function BookTile({ book, onReadBook }: { book: Book; onReadBook: (book: 
   );
 }
 
+export function BookListItem({ book, onReadBook }: { book: Book; onReadBook: (book: Book) => void }) {
+  return (
+    <button
+      type="button"
+      onPointerDown={() => prewarmWebReaderOnIntent(book)}
+      onFocus={() => prewarmWebReaderOnIntent(book)}
+      onClick={() => onReadBook(book)}
+      className="app-card group flex min-w-0 items-center gap-3 p-2.5 text-left transition-colors hover:border-[#087DF1]/20 hover:bg-white sm:gap-4 sm:p-3 dark:hover:bg-white/10"
+    >
+      <div className="h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-[#e4e5df] shadow-sm dark:bg-[#30332f] sm:h-[76px] sm:w-[57px]">
+        <BookCover book={book} className="h-full w-full object-cover" compact />
+      </div>
+      <div className="min-w-0 flex-1">
+        <h3 className="truncate text-sm font-semibold text-[#1C1C1E] dark:text-white sm:text-base">{book.title}</h3>
+        <p className="mt-1 truncate text-xs text-black/50 dark:text-white/50 sm:text-sm">{book.author || '未知作者'}</p>
+        <p className="mt-1 truncate text-xs text-black/40 dark:text-white/40">{displayBookFileName(book)}</p>
+      </div>
+      <span className="shrink-0 rounded-lg bg-black/5 px-2 py-1 text-[10px] font-semibold uppercase text-black/45 dark:bg-white/10 dark:text-white/45">{book.type}</span>
+    </button>
+  );
+}
+
+export function SeriesListItem({
+  entry,
+  onOpenSeries,
+}: {
+  entry: Extract<LibraryEntry, { kind: 'series' }>;
+  onOpenSeries: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpenSeries}
+      className="app-card group flex min-w-0 items-center gap-3 p-2.5 text-left transition-colors hover:border-[#087DF1]/20 hover:bg-white sm:gap-4 sm:p-3 dark:hover:bg-white/10"
+    >
+      <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-[#e4e5df] shadow-sm dark:bg-[#30332f] sm:h-[76px] sm:w-[57px]">
+        <BookCover book={entry.coverBook} className="h-full w-full object-cover" compact />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#087DF1]"><Layers className="h-3.5 w-3.5" />系列</div>
+        <h3 className="mt-1 truncate text-sm font-semibold text-[#1C1C1E] dark:text-white sm:text-base">{entry.title}</h3>
+        <p className="mt-1 truncate text-xs text-black/45 dark:text-white/45">{displayBookFileName(entry.coverBook)}</p>
+      </div>
+      <span className="shrink-0 rounded-lg bg-[#087DF1]/10 px-2.5 py-1 text-xs font-semibold text-[#087DF1]">{entry.books.length} 本</span>
+    </button>
+  );
+}
+
 export function SeriesDetailView({
   entry,
   onBack,
@@ -75,6 +123,9 @@ export function SeriesDetailView({
 }) {
   const uniqueAuthors = Array.from(new Set(entry.books.map((book) => book.author).filter(Boolean)));
   const [visibleCount, setVisibleCount] = useState(72);
+  const [layoutMode, setLayoutMode] = useState<'grid' | 'list'>('grid');
+  const [sortKey, setSortKey] = useState<'series' | 'title' | 'addedAt'>('series');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [showScrollTop, setShowScrollTop] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const showScrollTopRef = useRef(false);
@@ -90,6 +141,14 @@ export function SeriesDetailView({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onBack]);
+  const sortedBooks = useMemo(() => [...entry.books].sort((a, b) => {
+    let value = 0;
+    if (sortKey === 'title') value = a.title.localeCompare(b.title, 'zh-Hans-CN');
+    else if (sortKey === 'addedAt') value = a.addedAt - b.addedAt;
+    else value = (a.seriesIndex ?? Number.MAX_SAFE_INTEGER) - (b.seriesIndex ?? Number.MAX_SAFE_INTEGER)
+      || displayBookFileName(a).localeCompare(displayBookFileName(b), 'zh-Hans-CN');
+    return sortOrder === 'asc' ? value : -value;
+  }), [entry.books, sortKey, sortOrder]);
   return (
     <div
       ref={dialogRef}
@@ -135,13 +194,37 @@ export function SeriesDetailView({
           </div>
         </section>
         <section className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-base font-semibold text-[#1C1C1E] dark:text-white">系列书籍</h3>
-            <p className="text-sm text-black/45 dark:text-white/45">按卷序 / 文件名排序</p>
+            <div className="flex min-w-0 items-center gap-2">
+              <select
+                value={sortKey}
+                onChange={(event) => setSortKey(event.target.value as 'series' | 'title' | 'addedAt')}
+                aria-label="系列书籍排序方式"
+                className="h-9 min-w-0 rounded-xl bg-black/5 px-2 text-xs outline-none dark:bg-white/10 sm:px-3"
+              >
+                <option value="series">卷序 / 文件名</option>
+                <option value="title">书名</option>
+                <option value="addedAt">加入时间</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => setSortOrder((value) => value === 'asc' ? 'desc' : 'asc')}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-black/5 dark:bg-white/10"
+                aria-label="切换排序方向"
+              >
+                {sortOrder === 'asc' ? <ArrowUpAZ className="h-4 w-4" /> : <ArrowDownAZ className="h-4 w-4" />}
+              </button>
+              <div className="flex h-9 shrink-0 rounded-xl bg-black/5 p-0.5 dark:bg-white/10">
+                <button type="button" onClick={() => setLayoutMode('grid')} aria-label="封面网格" aria-pressed={layoutMode === 'grid'} className={`flex h-8 w-8 items-center justify-center rounded-lg ${layoutMode === 'grid' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}><Grid2X2 className="h-4 w-4" /></button>
+                <button type="button" onClick={() => setLayoutMode('list')} aria-label="列表" aria-pressed={layoutMode === 'list'} className={`flex h-8 w-8 items-center justify-center rounded-lg ${layoutMode === 'list' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}><List className="h-4 w-4" /></button>
+              </div>
+            </div>
           </div>
-          <div className="grid grid-cols-2 min-[520px]:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-5">
-            {entry.books.slice(0, visibleCount).map((book, index) => (
-              <motion.button key={book.id} whileHover={{ y: -3 }} whileTap={{ scale: 0.985 }} onPointerDown={() => prewarmWebReaderOnIntent(book)} onFocus={() => prewarmWebReaderOnIntent(book)} onClick={() => onReadBook(book)} className="group text-left overflow-hidden rounded-2xl border border-black/5 dark:border-white/10 bg-white/85 dark:bg-white/10 shadow-sm transition-colors hover:bg-white dark:hover:bg-white/15">
+          <div className={layoutMode === 'grid' ? 'grid grid-cols-2 gap-3 min-[520px]:grid-cols-3 sm:gap-5 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 gap-2'}>
+            {sortedBooks.slice(0, visibleCount).map((book, index) => (
+              layoutMode === 'grid' ? (
+              <motion.button key={book.id} whileHover={{ y: -3 }} whileTap={{ scale: 0.985 }} onPointerDown={() => prewarmWebReaderOnIntent(book)} onFocus={() => prewarmWebReaderOnIntent(book)} onClick={() => onReadBook(book)} className="group overflow-hidden rounded-2xl border border-black/5 bg-white/85 text-left shadow-sm transition-colors hover:bg-white dark:border-white/10 dark:bg-white/10 dark:hover:bg-white/15">
                 <div className="relative aspect-[3/4] overflow-hidden bg-[#e4e5df] dark:bg-[#30332f]">
                   <BookCover book={book} className="h-full w-full object-cover" />
                   <div className="absolute right-0 top-0 border-l-[26px] border-t-[26px] border-l-transparent border-t-[#F59E0B]" />
@@ -152,15 +235,18 @@ export function SeriesDetailView({
                   <p className="line-clamp-2 text-xs text-black/55 dark:text-white/55">{displayBookFileName(book)}</p>
                 </div>
               </motion.button>
+              ) : (
+                <BookListItem key={book.id} book={book} onReadBook={onReadBook} />
+              )
             ))}
           </div>
-          {visibleCount < entry.books.length && (
+          {visibleCount < sortedBooks.length && (
             <button
               type="button"
-              onClick={() => setVisibleCount((current) => Math.min(entry.books.length, current + 72))}
+              onClick={() => setVisibleCount((current) => Math.min(sortedBooks.length, current + 72))}
               className="mx-auto block rounded-xl bg-black/5 px-4 py-2 text-sm font-medium text-black/55 transition-colors hover:bg-black/10 dark:bg-white/10 dark:text-white/60 dark:hover:bg-white/15"
             >
-              加载更多（已显示 {visibleCount} / {entry.books.length}）
+              加载更多（已显示 {visibleCount} / {sortedBooks.length}）
             </button>
           )}
         </section>
