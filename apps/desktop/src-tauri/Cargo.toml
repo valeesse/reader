@@ -20,6 +20,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 base64 = "0.22"
 flate2 = "1"
+notify = "8"
 percent-encoding = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 reader-core = { path = "../../../crates/reader-core" }

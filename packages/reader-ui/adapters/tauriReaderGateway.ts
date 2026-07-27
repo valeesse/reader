@@ -73,6 +73,12 @@ export class TauriReaderGateway implements ReaderGateway {
       unlisten?.();
     }
   }
+  async watchLibraryChanges(onBooks: (books: Book[]) => void): Promise<() => void> {
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen<BackendBook[]>('library-scan://changed', (event) => {
+      onBooks(event.payload.map((book) => normalizeBook(book, (cover) => this.fileUrl(cover))));
+    });
+  }
   async deleteBooks(resourceIds: string[]): Promise<Book[]> {
     return (await this.invokeHost<BackendBook[]>('delete_library_books', { resourceIds }))
       .map((book) => normalizeBook(book, (cover) => this.fileUrl(cover)));

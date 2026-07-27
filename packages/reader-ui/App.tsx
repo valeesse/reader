@@ -111,14 +111,6 @@ function MainLayout() {
   }, [lastReadBookId, readingBook?.id]);
 
   useEffect(() => {
-    if (!stateReconciled || !readingBook) return;
-    if (!books.some((book) => book.id === readingBook.id)) {
-      startupResumePendingRef.current = false;
-      setReadingBook(null);
-    }
-  }, [books, readingBook, stateReconciled]);
-
-  useEffect(() => {
     document.documentElement.classList.remove('startup-dark', 'startup-sepia');
     if (settings.theme === 'dark') document.documentElement.classList.add('dark');
     else if (settings.theme === 'sepia') document.documentElement.classList.add('sepia');

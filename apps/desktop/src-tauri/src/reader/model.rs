@@ -3,6 +3,7 @@ static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(1);
 #[derive(Default)]
 struct ReaderState {
     application: Mutex<Option<Arc<reader_application::ReaderApplication>>>,
+    library_watcher: Mutex<Option<RecommendedWatcher>>,
     state: Mutex<Option<Arc<reader_state::StateRepository>>>,
     export_paths: Mutex<HashMap<String, String>>,
     external_open_lock: Arc<Mutex<()>>,

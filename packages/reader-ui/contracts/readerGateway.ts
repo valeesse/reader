@@ -70,6 +70,7 @@ export interface ReaderGateway {
   listBooks(): Promise<Book[]>;
   resolveBookCover(resourceId: string): Promise<string | undefined>;
   scanBooks(onProgress?: (progress: ScanProgress) => void): Promise<Book[]>;
+  watchLibraryChanges(onBooks: (books: Book[]) => void): Promise<() => void>;
   deleteBooks(resourceIds: string[]): Promise<Book[]>;
   readerCommand<T>(kind: 'txt' | 'epub', route: string, command: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T>;
   getCacheStats(): Promise<ReaderCacheStats>;

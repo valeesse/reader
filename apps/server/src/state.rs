@@ -7,6 +7,7 @@ use axum::{
 use reader_application::ReaderApplication;
 use reader_state::{StateError, StateRepository};
 use serde_json::Value;
+use std::sync::Mutex;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -14,6 +15,7 @@ use tokio::sync::RwLock;
 pub(crate) struct AppState {
     pub(crate) application: Arc<ReaderApplication>,
     pub(crate) scan: Arc<RwLock<ScanStatus>>,
+    pub(crate) library_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
     pub(crate) authentication: bool,
     state: Arc<StateRepository>,
 }
@@ -27,6 +29,7 @@ impl AppState {
         Ok(Self {
             application,
             scan: Arc::new(RwLock::new(ScanStatus::default())),
+            library_watcher: Arc::new(Mutex::new(None)),
             authentication,
             state: Arc::new(StateRepository::open(state_path)?),
         })
@@ -41,6 +44,7 @@ pub(crate) struct ScanStatus {
     pub(crate) matched: usize,
     pub(crate) current_relative_path: String,
     pub(crate) error: Option<String>,
+    pub(crate) version: u64,
 }
 
 pub(crate) async fn get_web_state(State(s): State<AppState>) -> Result<Json<Value>, ApiError> {

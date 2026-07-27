@@ -17,6 +17,7 @@ use std::{
 
 pub struct ReaderService {
     registry: Mutex<LibraryRegistry>,
+    library_mutation: Mutex<()>,
     config: ReaderConfig,
     txt_books: Mutex<std::collections::HashMap<String, model::TxtBookCache>>,
     epub_books: Mutex<std::collections::HashMap<String, model::EpubBookCache>>,
@@ -33,6 +34,7 @@ impl ReaderService {
         let config = ReaderConfig::new(state_dir, cache_dir)?;
         Ok(Self {
             registry: Mutex::new(registry),
+            library_mutation: Mutex::new(()),
             config,
             txt_books: Mutex::new(Default::default()),
             epub_books: Mutex::new(Default::default()),
@@ -55,6 +57,10 @@ impl ReaderService {
         F: FnMut(ScanProgress),
     {
         let _maintenance = self.maintenance.read().map_err(|_| ReaderError::Busy)?;
+        let _mutation = self
+            .library_mutation
+            .lock()
+            .map_err(|_| ReaderError::Busy)?;
         self.scan_inner(progress)
     }
 
@@ -65,10 +71,24 @@ impl ReaderService {
         // Scan a detached registry snapshot so active reads can continue to
         // resolve paths from the last committed index. Publish atomically only
         // after the new index is complete.
+        let previous_content = self
+            .registry
+            .lock()
+            .map_err(|_| ReaderError::Busy)?
+            .books()
+            .into_iter()
+            .map(|book| (book.resource_id, book.content_id))
+            .collect::<std::collections::HashMap<_, _>>();
         let mut next_registry = self.registry.lock().map_err(|_| ReaderError::Busy)?.clone();
         let mut books = next_registry.scan(progress)?;
         *self.registry.lock().map_err(|_| ReaderError::Busy)? = next_registry;
         for book in &mut books {
+            if previous_content
+                .get(&book.resource_id)
+                .is_some_and(|content_id| content_id != &book.content_id)
+            {
+                cache::remove_scan_metadata(&self.config, &book.resource_id);
+            }
             if book.book_type == "epub"
                 && let Ok(metadata) = epub::scan_epub_metadata(self, &book.resource_id, &book.title)
             {
@@ -99,9 +119,14 @@ impl ReaderService {
 
     pub fn delete_books(&self, resource_ids: &[String]) -> Result<Vec<Book>, ReaderError> {
         let _maintenance = self.maintenance.read().map_err(|_| ReaderError::Busy)?;
+        let _mutation = self
+            .library_mutation
+            .lock()
+            .map_err(|_| ReaderError::Busy)?;
         let mut next_registry = self.registry.lock().map_err(|_| ReaderError::Busy)?.clone();
         next_registry.delete_books(resource_ids)?;
         *self.registry.lock().map_err(|_| ReaderError::Busy)? = next_registry;
+        drop(_mutation);
         drop(_maintenance);
         self.books()
     }

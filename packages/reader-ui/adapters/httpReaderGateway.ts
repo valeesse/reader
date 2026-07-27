@@ -15,6 +15,7 @@ type WebScanStatus = {
   matched: number;
   currentRelativePath: string;
   error?: string;
+  version: number;
 };
 
 export class HttpReaderGateway implements ReaderGateway {
@@ -66,6 +67,30 @@ export class HttpReaderGateway implements ReaderGateway {
       }
       await new Promise((resolve) => window.setTimeout(resolve, 250));
     }
+  }
+  async watchLibraryChanges(onBooks: (books: Book[]) => void): Promise<() => void> {
+    let disposed = false;
+    let polling = false;
+    let knownVersion = (await this.http<WebScanStatus>('/api/scan/status')).version;
+    const timer = window.setInterval(async () => {
+      if (disposed || polling) return;
+      polling = true;
+      try {
+        const status = await this.http<WebScanStatus>('/api/scan/status');
+        if (!status.running && status.version !== knownVersion) {
+          knownVersion = status.version;
+          onBooks(await this.listBooks());
+        }
+      } catch (error) {
+        console.warn('Automatic library refresh failed', error);
+      } finally {
+        polling = false;
+      }
+    }, 1500);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
   }
   async deleteBooks(resourceIds: string[]): Promise<Book[]> {
     return (await this.http<BackendBook[]>('/api/books', {

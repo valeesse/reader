@@ -290,6 +290,33 @@ async fn deleting_books_removes_files_and_returns_the_remaining_library() {
     assert!(books_dir.join("keep-me.txt").exists());
 }
 
+#[tokio::test]
+async fn library_directory_changes_are_scanned_automatically() {
+    let temp = TempDir::new().unwrap();
+    let books_dir = temp.path().join("books");
+    fs::create_dir_all(&books_dir).unwrap();
+    let app = app(&temp);
+    fs::write(books_dir.join("appeared.txt"), "automatic scan").unwrap();
+
+    let mut discovered = false;
+    for _ in 0..100 {
+        let (_, books) = request(&app, "GET", "/api/books", Value::Null).await;
+        if books
+            .as_array()
+            .is_some_and(|books| books.iter().any(|book| book["fileName"] == "appeared.txt"))
+        {
+            discovered = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    assert!(
+        discovered,
+        "filesystem watcher did not refresh the web library"
+    );
+}
+
 fn write_epub(path: &Path) {
     let mut zip = ZipWriter::new(fs::File::create(path).unwrap());
     let options = SimpleFileOptions::default();

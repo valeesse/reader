@@ -121,6 +121,25 @@ pub(super) fn save_scan_metadata(c: &ReaderConfig, id: &str, m: &ScanEpubMetadat
         let _ = write_atomic(&d.join(format!("{}.json", hash(id))), &v);
     }
 }
+pub(super) fn remove_scan_metadata(c: &ReaderConfig, id: &str) {
+    let _ = fs::remove_file(
+        c.state_dir
+            .join("book-metadata")
+            .join(format!("{}.json", hash(id))),
+    );
+    if let Ok(entries) = fs::read_dir(&c.cover_dir) {
+        let prefix = format!("{}.", hash(id));
+        for entry in entries.flatten() {
+            if entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with(&prefix))
+            {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+}
 pub(super) fn stats(c: &ReaderConfig) -> Result<ReaderCacheStats, ReaderError> {
     let mut bytes = 0;
     let mut files = 0;

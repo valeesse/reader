@@ -1,7 +1,13 @@
 use crate::{error::ApiError, state::AppState};
 use axum::{Json, extract::State, http::StatusCode};
+use notify::{Event, EventKind, RecursiveMode, Watcher};
 use reader_contracts::{Capabilities, ResourceTransport};
 use reader_core::{Book, ScanProgress};
+use std::{
+    path::Path,
+    sync::mpsc::{self, RecvTimeoutError},
+    time::Duration,
+};
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,10 +83,11 @@ pub(crate) async fn rescan(State(state): State<AppState>) -> Result<StatusCode, 
         if status.running {
             return Ok(StatusCode::ACCEPTED);
         }
-        *status = crate::state::ScanStatus {
-            running: true,
-            ..Default::default()
-        };
+        status.running = true;
+        status.visited = 0;
+        status.matched = 0;
+        status.current_relative_path.clear();
+        status.error = None;
     }
     tokio::spawn(async move {
         let application = state.application.clone();
@@ -88,12 +95,14 @@ pub(crate) async fn rescan(State(state): State<AppState>) -> Result<StatusCode, 
         let result = tokio::task::spawn_blocking(move || {
             application.scan(|p: ScanProgress| {
                 if let Ok(mut status) = scan.try_write() {
+                    let version = status.version;
                     *status = crate::state::ScanStatus {
                         running: true,
                         visited: p.visited,
                         matched: p.matched,
                         current_relative_path: p.current_relative_path,
                         error: None,
+                        version,
                     };
                 }
             })
@@ -103,12 +112,90 @@ pub(crate) async fn rescan(State(state): State<AppState>) -> Result<StatusCode, 
         status.running = false;
         status.current_relative_path.clear();
         status.error = match result {
-            Ok(Ok(_)) => None,
+            Ok(Ok(_)) => {
+                status.version = status.version.saturating_add(1);
+                None
+            }
             Ok(Err(e)) => Some(e.to_string()),
             Err(e) => Some(e.to_string()),
         };
     });
     Ok(StatusCode::ACCEPTED)
+}
+
+pub(crate) fn start_library_watcher(state: &AppState, root: &Path) -> Result<(), notify::Error> {
+    let (sender, receiver) = mpsc::channel::<notify::Result<Event>>();
+    let mut watcher = notify::recommended_watcher(move |event| {
+        let _ = sender.send(event);
+    })?;
+    watcher.watch(root, RecursiveMode::Recursive)?;
+    *state.library_watcher.lock().expect("library watcher lock") = Some(watcher);
+
+    let application = state.application.clone();
+    let scan_status = state.scan.clone();
+    std::thread::Builder::new()
+        .name("zenith-server-library-watch".into())
+        .spawn(move || {
+            while let Ok(event) = receiver.recv() {
+                if !event.as_ref().is_ok_and(library_event_needs_scan) {
+                    continue;
+                }
+                loop {
+                    match receiver.recv_timeout(Duration::from_millis(650)) {
+                        Ok(next) if next.as_ref().is_ok_and(library_event_needs_scan) => continue,
+                        Ok(_) => {}
+                        Err(RecvTimeoutError::Timeout) => break,
+                        Err(RecvTimeoutError::Disconnected) => return,
+                    }
+                }
+                loop {
+                    let mut status = scan_status.blocking_write();
+                    if !status.running {
+                        status.running = true;
+                        status.error = None;
+                        break;
+                    }
+                    drop(status);
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                let result = application.scan(|progress| {
+                    if let Ok(mut status) = scan_status.try_write() {
+                        status.visited = progress.visited;
+                        status.matched = progress.matched;
+                        status.current_relative_path = progress.current_relative_path;
+                    }
+                });
+                let mut status = scan_status.blocking_write();
+                status.running = false;
+                status.current_relative_path.clear();
+                match result {
+                    Ok(_) => {
+                        status.version = status.version.saturating_add(1);
+                        status.error = None;
+                    }
+                    Err(error) => status.error = Some(error.to_string()),
+                }
+            }
+        })
+        .map_err(notify::Error::io)?;
+    Ok(())
+}
+
+fn library_event_needs_scan(event: &Event) -> bool {
+    if matches!(event.kind, EventKind::Remove(_)) {
+        return true;
+    }
+    matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_))
+        && event.paths.iter().any(|path| {
+            path.is_dir()
+                || path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| {
+                        extension.eq_ignore_ascii_case("epub")
+                            || extension.eq_ignore_ascii_case("txt")
+                    })
+        })
 }
 
 fn web_book(book: Book) -> WebBook {

@@ -52,6 +52,7 @@ pub fn build_router(config: ServerConfig) -> Result<Router, Box<dyn std::error::
         config.state_dir.join("reader-state-v1.sqlite3"),
         config.auth_token.is_some(),
     )?;
+    library_api::start_library_watcher(&state, &config.library_dir)?;
     let auth_token = config.auth_token.clone().map(Arc::new);
     Ok(Router::new()
         .route("/api/capabilities", get(library_api::capabilities))

@@ -262,7 +262,7 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
                 />
               </div>
               <div className="flex min-w-0 flex-wrap items-center gap-2 lg:flex-nowrap lg:justify-end">
-                <div className="grid min-w-0 flex-[1.15] grid-cols-3 gap-2 rounded-xl bg-black/5 p-1 dark:bg-white/10 lg:w-[13rem] lg:flex-none">
+                <div className="grid w-full min-w-0 grid-cols-3 gap-2 rounded-xl bg-black/5 p-1 dark:bg-white/10 sm:w-auto sm:flex-[1.15] lg:w-[13rem] lg:flex-none">
                   {(['all', 'epub', 'txt'] as TypeFilter[]).map((value) => (
                     <button
                       key={value}
@@ -278,7 +278,7 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
                   value={sortKey}
                   onChange={(event) => setSortKey(event.target.value as SortKey)}
                   aria-label="排序方式"
-                  className="h-10 min-w-0 flex-1 rounded-xl bg-black/[0.035] px-2 text-xs outline-none focus:ring-2 focus:ring-[#087DF1]/35 dark:bg-white/10 sm:px-3 sm:text-sm lg:w-[7.75rem] lg:flex-none"
+                  className="h-10 min-w-[6.25rem] flex-1 rounded-xl bg-black/[0.035] px-2 text-xs outline-none focus:ring-2 focus:ring-[#087DF1]/35 dark:bg-white/10 sm:px-3 sm:text-sm lg:w-[7.75rem] lg:flex-none"
                 >
                   <option value="recent">最近阅读</option>
                   <option value="fileName">文件名</option>

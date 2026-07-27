@@ -47,6 +47,7 @@ fn set_library_root(
         &serde_json::to_vec(&config).map_err(|error| error.to_string())?,
     )?;
     *state.application.lock().map_err(|_| "阅读服务被占用".to_string())? = Some(application);
+    start_library_watcher(&app, &state, &root)?;
     Ok(())
 }
 
@@ -118,10 +119,16 @@ fn ensure_external_open_library(
         return Err("书库根目录不是文件夹".into());
     }
     let mut application = state.application.lock().map_err(|_| "阅读服务被占用".to_string())?;
+    let initialized = application.is_none();
     if application.is_none() {
         *application = Some(create_reader_application(app, &root)?);
     }
-    Ok((root, application.clone().expect("application initialized")))
+    let application_value = application.clone().expect("application initialized");
+    drop(application);
+    if initialized {
+        start_library_watcher(app, state, &root)?;
+    }
+    Ok((root, application_value))
 }
 
 fn import_external_books_into_library(
@@ -297,6 +304,9 @@ fn initialize_library(app: &AppHandle, state: &ReaderState) -> Result<(), String
     };
     let application = create_reader_application(app, &root)?;
     *state.application.lock().map_err(|_| "阅读服务被占用".to_string())? = Some(application);
+    if let Err(error) = start_library_watcher(app, state, &root) {
+        eprintln!("[startup] failed to watch library directory: {error}");
+    }
     Ok(())
 }
 
@@ -345,6 +355,10 @@ fn invalidate_library_dependent_state(
     app: &AppHandle,
     state: &ReaderState,
 ) -> Result<(), String> {
+    *state
+        .library_watcher
+        .lock()
+        .map_err(|_| "书库监听服务被占用".to_string())? = None;
     *state
         .application
         .lock()
@@ -410,4 +424,68 @@ fn library_state_dir_path(app: &AppHandle) -> Result<PathBuf, String> {
         .app_data_dir()
         .map_err(|error| error.to_string())?
         .join("library-state"))
+}
+
+fn start_library_watcher(app: &AppHandle, state: &ReaderState, root: &Path) -> Result<(), String> {
+    let (sender, receiver) = mpsc::channel::<notify::Result<Event>>();
+    let mut watcher = notify::recommended_watcher(move |event| {
+        let _ = sender.send(event);
+    })
+    .map_err(|error| format!("创建书库目录监听失败: {error}"))?;
+    watcher
+        .watch(root, RecursiveMode::Recursive)
+        .map_err(|error| format!("监听书库目录失败: {error}"))?;
+    *state
+        .library_watcher
+        .lock()
+        .map_err(|_| "书库监听服务被占用".to_string())? = Some(watcher);
+
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("zenith-library-watch".into())
+        .spawn(move || {
+            while let Ok(event) = receiver.recv() {
+                if !event.as_ref().is_ok_and(library_event_needs_scan) {
+                    continue;
+                }
+                loop {
+                    match receiver.recv_timeout(Duration::from_millis(650)) {
+                        Ok(next) if next.as_ref().is_ok_and(library_event_needs_scan) => continue,
+                        Ok(_) => {}
+                        Err(RecvTimeoutError::Timeout) => break,
+                        Err(RecvTimeoutError::Disconnected) => return,
+                    }
+                }
+                let state = app.state::<ReaderState>();
+                let application = match reader_application(&state) {
+                    Ok(application) => application,
+                    Err(_) => continue,
+                };
+                match application.scan(|_| {}) {
+                    Ok(books) => {
+                        let books = books
+                            .into_iter()
+                            .map(native_book_from_core)
+                            .collect::<Vec<_>>();
+                        let _ = app.emit("library-scan://changed", &books);
+                    }
+                    Err(error) => {
+                        eprintln!("[library-watch] automatic scan failed: {error}");
+                    }
+                }
+            }
+        })
+        .map_err(|error| format!("启动书库监听线程失败: {error}"))?;
+    Ok(())
+}
+
+fn library_event_needs_scan(event: &Event) -> bool {
+    if matches!(event.kind, EventKind::Remove(_)) {
+        return true;
+    }
+    matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_))
+        && event
+            .paths
+            .iter()
+            .any(|path| path.is_dir() || supported_book_path(path))
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Book } from '../../types';
 import { useAppContext } from '../../store/AppStore';
@@ -7,7 +7,7 @@ import { Library } from '../library/Library';
 import { SettingsView } from '../settings/SettingsView';
 import { WebDavLibrary } from '../library/WebDavLibrary';
 import { SeriesView } from '../library/SeriesView';
-import { getLibraryRoot, importBooks, pickLibraryRoot, prewarmLibraryPicker, rescanBooks, runtimeCapabilities, setLibraryRoot } from '../../lib/backend';
+import { getLibraryRoot, importBooks, pickLibraryRoot, prewarmLibraryPicker, rescanBooks, runtimeCapabilities, setLibraryRoot, watchLibraryChanges } from '../../lib/backend';
 import { cancelReaderIdle, scheduleReaderIdle } from '../../lib/readerScheduler';
 import { AlertCircle, RotateCw } from 'lucide-react';
 
@@ -16,12 +16,34 @@ export function LibraryShell({ onReadBook, onPresentable }: { onReadBook: (book:
   const [currentView, setCurrentView] = useState<LibraryView>('library');
   const [scanMessage, setScanMessage] = useState('');
   const [isScanning, setIsScanning] = useState(false);
+  const addBooksRef = useRef(addBooks);
+  addBooksRef.current = addBooks;
 
   useEffect(() => {
     onPresentable();
     const idleId = scheduleReaderIdle(prewarmLibraryPicker, { timeout: 1800 });
     return () => cancelReaderIdle(idleId);
   }, [onPresentable]);
+
+  useEffect(() => {
+    let disposed = false;
+    let stopWatching: (() => void) | undefined;
+    void watchLibraryChanges((updatedBooks) => {
+      if (disposed) return;
+      void addBooksRef.current(updatedBooks).then(() => {
+        if (!disposed) setScanMessage(`书库目录已自动更新，共 ${updatedBooks.length} 本书。`);
+      });
+    }).then((stop) => {
+      if (disposed) stop();
+      else stopWatching = stop;
+    }).catch((error) => {
+      console.warn('Failed to watch library changes', error);
+    });
+    return () => {
+      disposed = true;
+      stopWatching?.();
+    };
+  }, []);
 
   const scanLibrary = async (changeRoot: boolean) => {
     try {

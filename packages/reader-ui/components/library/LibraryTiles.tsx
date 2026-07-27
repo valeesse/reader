@@ -73,7 +73,7 @@ export function BookListItem({ book, onReadBook }: { book: Book; onReadBook: (bo
       onPointerDown={() => prewarmWebReaderOnIntent(book)}
       onFocus={() => prewarmWebReaderOnIntent(book)}
       onClick={() => onReadBook(book)}
-      className="app-card group flex min-w-0 items-center gap-3 p-2.5 text-left transition-colors hover:border-[#087DF1]/20 hover:bg-white sm:gap-4 sm:p-3 dark:hover:bg-white/10"
+      className="app-card group flex w-full min-w-0 items-center gap-3 p-2.5 text-left transition-colors hover:border-[#087DF1]/20 hover:bg-white sm:gap-4 sm:p-3 dark:hover:bg-white/10"
     >
       <div className="h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-[#e4e5df] shadow-sm dark:bg-[#30332f] sm:h-[76px] sm:w-[57px]">
         <BookCover book={book} className="h-full w-full object-cover" compact />
@@ -99,7 +99,7 @@ export function SeriesListItem({
     <button
       type="button"
       onClick={onOpenSeries}
-      className="app-card group flex min-w-0 items-center gap-3 p-2.5 text-left transition-colors hover:border-[#087DF1]/20 hover:bg-white sm:gap-4 sm:p-3 dark:hover:bg-white/10"
+      className="app-card group flex w-full min-w-0 items-center gap-3 p-2.5 text-left transition-colors hover:border-[#087DF1]/20 hover:bg-white sm:gap-4 sm:p-3 dark:hover:bg-white/10"
     >
       <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-[#e4e5df] shadow-sm dark:bg-[#30332f] sm:h-[76px] sm:w-[57px]">
         <BookCover book={entry.coverBook} className="h-full w-full object-cover" compact />
