@@ -1,11 +1,12 @@
 import { ArrowDownAZ, ArrowLeft, ArrowUpAZ, Check, Grid2X2, Layers, List, Trash2, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { Book } from '../../types';
 import { displayBookFileName } from '../../lib/series';
 import { prewarmWebReaderOnIntent } from '../../features/reader/runtime/readerWarmup';
 import { BookCover } from './BookCover';
-import type { LibraryEntry } from './Library';
+import type { LibraryEntry, LibraryLayoutMode } from './Library';
 import { ScrollToTopButton } from './ScrollToTopButton';
 import { useAppContext } from '../../store/AppStore';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -66,6 +67,92 @@ export function BookTile({ book, onReadBook }: { book: Book; onReadBook: (book: 
   );
 }
 
+export function LongPressSelectable({
+  active,
+  selected,
+  label,
+  onLongPress,
+  onToggle,
+  children,
+}: {
+  active: boolean;
+  selected: boolean;
+  label: string;
+  onLongPress: () => void;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  const timerRef = useRef<number | null>(null);
+  const startPointRef = useRef<{ x: number; y: number } | null>(null);
+  const suppressClickRef = useRef(false);
+
+  const cancelLongPress = () => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    startPointRef.current = null;
+  };
+
+  useEffect(() => cancelLongPress, []);
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (active || (event.pointerType === 'mouse' && event.button !== 0)) return;
+    cancelLongPress();
+    startPointRef.current = { x: event.clientX, y: event.clientY };
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = null;
+      startPointRef.current = null;
+      suppressClickRef.current = true;
+      onLongPress();
+      navigator.vibrate?.(12);
+    }, 520);
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const startPoint = startPointRef.current;
+    if (!startPoint) return;
+    if (Math.hypot(event.clientX - startPoint.x, event.clientY - startPoint.y) > 10) {
+      cancelLongPress();
+    }
+  };
+
+  const handleClickCapture = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!suppressClickRef.current) return;
+    suppressClickRef.current = false;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    if (active) return;
+    cancelLongPress();
+    onLongPress();
+  };
+
+  return (
+    <div
+      className={`relative min-w-0 select-none ${selected ? 'rounded-2xl ring-2 ring-[#087DF1] ring-offset-2 ring-offset-[#FBFAF7] dark:ring-offset-[#171916]' : ''}`}
+      style={{ touchAction: 'pan-y' }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={cancelLongPress}
+      onPointerCancel={cancelLongPress}
+      onPointerLeave={cancelLongPress}
+      onClickCapture={handleClickCapture}
+      onContextMenu={handleContextMenu}
+    >
+      {children}
+      {active && (
+        <button type="button" onClick={onToggle} aria-label={label} aria-pressed={selected} className="absolute inset-0 z-10 rounded-2xl bg-transparent">
+          <span className={`absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full border-2 shadow-sm ${selected ? 'border-[#087DF1] bg-[#087DF1] text-white' : 'border-white bg-black/35 text-transparent'}`}><Check className="h-4 w-4" /></span>
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function BookListItem({ book, onReadBook }: { book: Book; onReadBook: (book: Book) => void }) {
   return (
     <button
@@ -73,17 +160,18 @@ export function BookListItem({ book, onReadBook }: { book: Book; onReadBook: (bo
       onPointerDown={() => prewarmWebReaderOnIntent(book)}
       onFocus={() => prewarmWebReaderOnIntent(book)}
       onClick={() => onReadBook(book)}
-      className="app-card group flex w-full min-w-0 items-center gap-3 p-2.5 text-left transition-colors hover:border-[#087DF1]/20 hover:bg-white sm:gap-4 sm:p-3 dark:hover:bg-white/10"
+      className="app-card group flex w-full min-w-0 items-center gap-2.5 p-1.5 text-left transition-colors hover:border-[#087DF1]/20 hover:bg-white sm:p-2 dark:hover:bg-white/10"
     >
-      <div className="h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-[#e4e5df] shadow-sm dark:bg-[#30332f] sm:h-[76px] sm:w-[57px]">
+      <div className="h-12 w-9 shrink-0 overflow-hidden rounded-md bg-[#e4e5df] shadow-sm dark:bg-[#30332f]">
         <BookCover book={book} className="h-full w-full object-cover" compact />
       </div>
       <div className="min-w-0 flex-1">
-        <h3 className="truncate text-sm font-semibold text-[#1C1C1E] dark:text-white sm:text-base">{book.title}</h3>
-        <p className="mt-1 truncate text-xs text-black/50 dark:text-white/50 sm:text-sm">{book.author || '未知作者'}</p>
-        <p className="mt-1 truncate text-xs text-black/40 dark:text-white/40">{displayBookFileName(book)}</p>
+        <h3 className="truncate text-sm font-semibold leading-5 text-[#1C1C1E] dark:text-white">{book.title}</h3>
+        <p className="mt-0.5 truncate text-[11px] leading-4 text-black/45 dark:text-white/45">
+          {book.author || '未知作者'} <span aria-hidden="true">·</span> {displayBookFileName(book)}
+        </p>
       </div>
-      <span className="shrink-0 rounded-lg bg-black/5 px-2 py-1 text-[10px] font-semibold uppercase text-black/45 dark:bg-white/10 dark:text-white/45">{book.type}</span>
+      <span className="shrink-0 rounded-md bg-black/5 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-black/45 dark:bg-white/10 dark:text-white/45">{book.type}</span>
     </button>
   );
 }
@@ -99,34 +187,39 @@ export function SeriesListItem({
     <button
       type="button"
       onClick={onOpenSeries}
-      className="app-card group flex w-full min-w-0 items-center gap-3 p-2.5 text-left transition-colors hover:border-[#087DF1]/20 hover:bg-white sm:gap-4 sm:p-3 dark:hover:bg-white/10"
+      className="app-card group flex w-full min-w-0 items-center gap-2.5 p-1.5 text-left transition-colors hover:border-[#087DF1]/20 hover:bg-white sm:p-2 dark:hover:bg-white/10"
     >
-      <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-[#e4e5df] shadow-sm dark:bg-[#30332f] sm:h-[76px] sm:w-[57px]">
+      <div className="relative h-12 w-9 shrink-0 overflow-hidden rounded-md bg-[#e4e5df] shadow-sm dark:bg-[#30332f]">
         <BookCover book={entry.coverBook} className="h-full w-full object-cover" compact />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#087DF1]"><Layers className="h-3.5 w-3.5" />系列</div>
-        <h3 className="mt-1 truncate text-sm font-semibold text-[#1C1C1E] dark:text-white sm:text-base">{entry.title}</h3>
-        <p className="mt-1 truncate text-xs text-black/45 dark:text-white/45">{displayBookFileName(entry.coverBook)}</p>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="flex shrink-0 items-center gap-1 text-[10px] font-semibold text-[#087DF1]"><Layers className="h-3 w-3" />系列</span>
+          <h3 className="min-w-0 truncate text-sm font-semibold leading-5 text-[#1C1C1E] dark:text-white">{entry.title}</h3>
+        </div>
+        <p className="mt-0.5 truncate text-[11px] leading-4 text-black/45 dark:text-white/45">{displayBookFileName(entry.coverBook)}</p>
       </div>
-      <span className="shrink-0 rounded-lg bg-[#087DF1]/10 px-2.5 py-1 text-xs font-semibold text-[#087DF1]">{entry.books.length} 本</span>
+      <span className="shrink-0 rounded-md bg-[#087DF1]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#087DF1]">{entry.books.length} 本</span>
     </button>
   );
 }
 
 export function SeriesDetailView({
   entry,
+  layoutMode,
+  onLayoutModeChange,
   onBack,
   onReadBook,
 }: {
   entry: Extract<LibraryEntry, { kind: 'series' }>;
+  layoutMode: LibraryLayoutMode;
+  onLayoutModeChange: (mode: LibraryLayoutMode) => void;
   onBack: () => void;
   onReadBook: (book: Book) => void;
 }) {
   const { deleteBooks } = useAppContext();
   const uniqueAuthors = Array.from(new Set(entry.books.map((book) => book.author).filter(Boolean)));
   const [visibleCount, setVisibleCount] = useState(72);
-  const [layoutMode, setLayoutMode] = useState<'grid' | 'list'>('grid');
   const [sortKey, setSortKey] = useState<'series' | 'title' | 'addedAt'>('series');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectionMode, setSelectionMode] = useState(false);
@@ -156,6 +249,21 @@ export function SeriesDetailView({
       || displayBookFileName(a).localeCompare(displayBookFileName(b), 'zh-Hans-CN');
     return sortOrder === 'asc' ? value : -value;
   }), [entry.books, sortKey, sortOrder]);
+  const leaveSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedBookIds(new Set());
+  };
+  const enterSelectionMode = (bookId: string) => {
+    setSelectionMode(true);
+    setSelectedBookIds((current) => new Set(current).add(bookId));
+  };
+  const toggleBook = (bookId: string) => {
+    setSelectedBookIds((current) => {
+      const next = new Set(current);
+      next.has(bookId) ? next.delete(bookId) : next.add(bookId);
+      return next;
+    });
+  };
   return (
     <div
       ref={dialogRef}
@@ -173,7 +281,7 @@ export function SeriesDetailView({
       </header>
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto p-3 min-[380px]:p-4 sm:p-6 space-y-6 sm:space-y-8"
+        className="min-w-0 flex-1 space-y-6 overflow-x-hidden overflow-y-auto p-3 min-[380px]:p-4 sm:space-y-8 sm:p-6"
         onScroll={(event) => {
           const visible = event.currentTarget.scrollTop > 480;
           if (visible !== showScrollTopRef.current) {
@@ -203,7 +311,7 @@ export function SeriesDetailView({
         <section className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-base font-semibold text-[#1C1C1E] dark:text-white">系列书籍</h3>
-            <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
               <select
                 value={sortKey}
                 onChange={(event) => setSortKey(event.target.value as 'series' | 'title' | 'addedAt')}
@@ -223,14 +331,14 @@ export function SeriesDetailView({
                 {sortOrder === 'asc' ? <ArrowUpAZ className="h-4 w-4" /> : <ArrowDownAZ className="h-4 w-4" />}
               </button>
               <div className="flex h-9 shrink-0 rounded-xl bg-black/5 p-0.5 dark:bg-white/10">
-                <button type="button" onClick={() => setLayoutMode('grid')} aria-label="封面网格" aria-pressed={layoutMode === 'grid'} className={`flex h-8 w-8 items-center justify-center rounded-lg ${layoutMode === 'grid' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}><Grid2X2 className="h-4 w-4" /></button>
-                <button type="button" onClick={() => setLayoutMode('list')} aria-label="列表" aria-pressed={layoutMode === 'list'} className={`flex h-8 w-8 items-center justify-center rounded-lg ${layoutMode === 'list' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}><List className="h-4 w-4" /></button>
+                <button type="button" onClick={() => onLayoutModeChange('grid')} aria-label="封面网格" aria-pressed={layoutMode === 'grid'} className={`flex h-8 w-8 items-center justify-center rounded-lg ${layoutMode === 'grid' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}><Grid2X2 className="h-4 w-4" /></button>
+                <button type="button" onClick={() => onLayoutModeChange('list')} aria-label="列表" aria-pressed={layoutMode === 'list'} className={`flex h-8 w-8 items-center justify-center rounded-lg ${layoutMode === 'list' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}><List className="h-4 w-4" /></button>
               </div>
-              <button type="button" onClick={() => { setSelectionMode((value) => !value); setSelectedBookIds(new Set()); }} aria-label={selectionMode ? '退出选择' : '选择要删除的书籍'} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${selectionMode ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-black/5 text-black/45 dark:bg-white/10 dark:text-white/45'}`}>{selectionMode ? <X className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}</button>
             </div>
           </div>
           {selectionMode && (
             <div className="app-card flex flex-wrap items-center gap-2 border-red-500/15 p-2.5">
+              <button type="button" onClick={leaveSelectionMode} aria-label="退出选择" className="flex h-9 w-9 items-center justify-center rounded-xl bg-black/5 text-black/55 dark:bg-white/10 dark:text-white/60"><X className="h-4 w-4" /></button>
               <span className="mr-auto px-1 text-sm font-medium">已选择 {selectedBookIds.size} 本</span>
               <button type="button" onClick={() => setSelectedBookIds(new Set(sortedBooks.slice(0, visibleCount).map((book) => book.id)))} className="h-9 rounded-xl bg-black/5 px-3 text-xs font-medium dark:bg-white/10">全选已显示</button>
               <button type="button" disabled={selectedBookIds.size === 0} onClick={() => setConfirmDelete(true)} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-red-600 px-3 text-xs font-semibold text-white disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" />永久删除</button>
@@ -238,9 +346,16 @@ export function SeriesDetailView({
           )}
           <div className={layoutMode === 'grid' ? 'grid grid-cols-2 gap-3 min-[520px]:grid-cols-3 sm:gap-5 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 gap-2'}>
             {sortedBooks.slice(0, visibleCount).map((book, index) => (
-              <div key={book.id} className={`relative min-w-0 ${selectedBookIds.has(book.id) ? 'rounded-2xl ring-2 ring-[#087DF1] ring-offset-2 ring-offset-[#FBFAF7] dark:ring-offset-[#171916]' : ''}`}>
+              <LongPressSelectable
+                key={book.id}
+                active={selectionMode}
+                selected={selectedBookIds.has(book.id)}
+                label={`选择${book.title}`}
+                onLongPress={() => enterSelectionMode(book.id)}
+                onToggle={() => toggleBook(book.id)}
+              >
               {layoutMode === 'grid' ? (
-              <motion.button key={book.id} whileHover={{ y: -3 }} whileTap={{ scale: 0.985 }} onPointerDown={() => prewarmWebReaderOnIntent(book)} onFocus={() => prewarmWebReaderOnIntent(book)} onClick={() => onReadBook(book)} className="group overflow-hidden rounded-2xl border border-black/5 bg-white/85 text-left shadow-sm transition-colors hover:bg-white dark:border-white/10 dark:bg-white/10 dark:hover:bg-white/15">
+              <motion.button whileHover={{ y: -3 }} whileTap={{ scale: 0.985 }} onPointerDown={() => prewarmWebReaderOnIntent(book)} onFocus={() => prewarmWebReaderOnIntent(book)} onClick={() => onReadBook(book)} className="group overflow-hidden rounded-2xl border border-black/5 bg-white/85 text-left shadow-sm transition-colors hover:bg-white dark:border-white/10 dark:bg-white/10 dark:hover:bg-white/15">
                 <div className="relative aspect-[3/4] overflow-hidden bg-[#e4e5df] dark:bg-[#30332f]">
                   <BookCover book={book} className="h-full w-full object-cover" />
                   <div className="absolute right-0 top-0 border-l-[26px] border-t-[26px] border-l-transparent border-t-[#F59E0B]" />
@@ -252,25 +367,10 @@ export function SeriesDetailView({
                 </div>
               </motion.button>
               ) : (
-                <BookListItem key={book.id} book={book} onReadBook={onReadBook} />
+                <BookListItem book={book} onReadBook={onReadBook} />
               )
               }
-              {selectionMode && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedBookIds((current) => {
-                    const next = new Set(current);
-                    next.has(book.id) ? next.delete(book.id) : next.add(book.id);
-                    return next;
-                  })}
-                  aria-label={`选择${book.title}`}
-                  aria-pressed={selectedBookIds.has(book.id)}
-                  className="absolute inset-0 z-10 rounded-2xl"
-                >
-                  <span className={`absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full border-2 shadow-sm ${selectedBookIds.has(book.id) ? 'border-[#087DF1] bg-[#087DF1] text-white' : 'border-white bg-black/35 text-transparent'}`}><Check className="h-4 w-4" /></span>
-                </button>
-              )}
-              </div>
+              </LongPressSelectable>
             ))}
           </div>
           {visibleCount < sortedBooks.length && (

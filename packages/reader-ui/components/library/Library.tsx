@@ -1,12 +1,12 @@
 import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Book, BookType, Series } from '../../types';
 import { useAppContext, useProgressContext } from '../../store/AppStore';
-import { ArrowDownAZ, ArrowUpAZ, BookOpen, Check, Clock3, Grid2X2, List, RotateCcw, Search, SearchX, Settings2, Trash2, X } from 'lucide-react';
+import { ArrowDownAZ, ArrowUpAZ, BookOpen, Clock3, Grid2X2, List, RotateCcw, Search, SearchX, Settings2, Trash2, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { BookCover } from './BookCover';
 import { displayBookFileName, seriesCoverBook, sortBooksInSeries } from '../../lib/series';
 import { prewarmWebReaderOnIntent } from '../../features/reader/runtime/readerWarmup';
-import { BookListItem, BookTile, SeriesDetailView, SeriesListItem, SeriesTile } from './LibraryTiles';
+import { BookListItem, BookTile, LongPressSelectable, SeriesDetailView, SeriesListItem, SeriesTile } from './LibraryTiles';
 import { ScrollToTopButton } from './ScrollToTopButton';
 import { runtimeCapabilities } from '../../lib/backend';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -14,14 +14,24 @@ import { ConfirmDialog } from '../ui/ConfirmDialog';
 type SortKey = 'fileName' | 'addedAt' | 'recent';
 type SortOrder = 'asc' | 'desc';
 type TypeFilter = 'all' | BookType;
-type LayoutMode = 'grid' | 'list';
+export type LibraryLayoutMode = 'grid' | 'list';
 export type LibraryEntry =
   | { kind: 'book'; id: string; type: BookType; title: string; fileName: string; addedAt: number; recentAt: number; book: Book }
   | { kind: 'series'; id: string; type: 'epub' | 'txt' | 'mixed'; title: string; fileName: string; addedAt: number; recentAt: number; series: Series; books: Book[]; coverBook: Book };
 
 const BOOK_BATCH_SIZE = 72;
 
-export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Book) => void; onOpenSettings: () => void }) {
+export function Library({
+  layoutMode,
+  onLayoutModeChange,
+  onReadBook,
+  onOpenSettings,
+}: {
+  layoutMode: LibraryLayoutMode;
+  onLayoutModeChange: (mode: LibraryLayoutMode) => void;
+  onReadBook: (book: Book) => void;
+  onOpenSettings: () => void;
+}) {
   const { books, series, deleteBooks } = useAppContext();
   const progress = useProgressContext();
   const [query, setQuery] = useState('');
@@ -29,7 +39,6 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [sortKey, setSortKey] = useState<SortKey>('recent');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>('grid');
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedBookIds, setSelectedBookIds] = useState<Set<string>>(() => new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -175,6 +184,15 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
     });
   };
 
+  const enterSelectionMode = (bookIds: string[]) => {
+    setSelectionMode(true);
+    setSelectedBookIds((current) => {
+      const next = new Set(current);
+      bookIds.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
   const handleLibraryScroll = (event: React.UIEvent<HTMLDivElement>) => {
     const target = event.currentTarget;
     const nextShowScrollTop = target.scrollTop > 480;
@@ -208,20 +226,20 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
   }
 
   return (
-    <div className="flex-1 flex relative overflow-hidden">
+    <div className="relative flex min-w-0 flex-1 overflow-hidden">
       <div
-        className={`flex-1 flex flex-col relative bg-[#FBFAF7]/80 dark:bg-[#171916]/80 ${selectedSeriesEntry ? 'pointer-events-none select-none' : ''}`}
+        className={`relative flex min-w-0 flex-1 flex-col bg-[#FBFAF7]/80 dark:bg-[#171916]/80 ${selectedSeriesEntry ? 'pointer-events-none select-none' : ''}`}
         aria-hidden={selectedSeriesEntry ? true : undefined}
         inert={selectedSeriesEntry ? true : undefined}
       >
         <header className="h-14 sm:h-16 border-b border-black/[0.045] dark:border-white/5 flex items-center justify-between px-4 sm:px-8 bg-[#FBFAF7]/85 dark:bg-[#171916]/85 backdrop-blur-md sticky top-0 z-10">
           <h1 className="text-lg font-semibold tracking-[0.06em] text-[#1C1C1E] dark:text-white">所有书籍</h1>
-          <span className="text-xs tabular-nums text-black/55 dark:text-white/55">
+          <span className="min-w-0 truncate text-right text-xs tabular-nums text-black/55 dark:text-white/55">
             {filteredEntries.length} 个条目 · {filteredBookCount} 本书
           </span>
         </header>
 
-        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-3 py-4 min-[380px]:px-4 sm:p-6 lg:p-8" onScroll={handleLibraryScroll}>
+        <div ref={scrollContainerRef} className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-4 min-[380px]:px-4 sm:p-6 lg:p-8" onScroll={handleLibraryScroll}>
           <div className="mx-auto w-full max-w-[1800px] space-y-5 sm:space-y-7">
             {recentBook && (
               <button
@@ -251,8 +269,8 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
               </button>
             )}
 
-            <div className="app-card flex flex-col gap-2.5 p-2.5 sm:p-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="relative min-w-0 lg:w-96 lg:shrink-0">
+            <div className="app-card flex min-w-0 flex-col gap-2.5 p-2.5 sm:p-3 min-[1280px]:flex-row min-[1280px]:items-center min-[1280px]:justify-between">
+              <div className="relative min-w-0 min-[1280px]:w-96 min-[1280px]:shrink-0">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-black/35 dark:text-white/35" />
                 <input
                   value={query}
@@ -261,8 +279,8 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
                   className="w-full h-10 rounded-xl bg-black/[0.035] dark:bg-white/10 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-[#007AFF]/35"
                 />
               </div>
-              <div className="flex min-w-0 flex-wrap items-center gap-2 lg:flex-nowrap lg:justify-end">
-                <div className="grid w-full min-w-0 grid-cols-3 gap-2 rounded-xl bg-black/5 p-1 dark:bg-white/10 sm:w-auto sm:flex-[1.15] lg:w-[13rem] lg:flex-none">
+              <div className="flex min-w-0 flex-wrap items-center gap-2 min-[1280px]:flex-nowrap min-[1280px]:justify-end">
+                <div className="grid w-full min-w-0 grid-cols-3 gap-2 rounded-xl bg-black/5 p-1 dark:bg-white/10 sm:w-auto sm:flex-[1.15] min-[1280px]:w-[13rem] min-[1280px]:flex-none">
                   {(['all', 'epub', 'txt'] as TypeFilter[]).map((value) => (
                     <button
                       key={value}
@@ -278,7 +296,7 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
                   value={sortKey}
                   onChange={(event) => setSortKey(event.target.value as SortKey)}
                   aria-label="排序方式"
-                  className="h-10 min-w-[6.25rem] flex-1 rounded-xl bg-black/[0.035] px-2 text-xs outline-none focus:ring-2 focus:ring-[#087DF1]/35 dark:bg-white/10 sm:px-3 sm:text-sm lg:w-[7.75rem] lg:flex-none"
+                  className="h-10 min-w-[6.25rem] flex-1 rounded-xl bg-black/[0.035] px-2 text-xs outline-none focus:ring-2 focus:ring-[#087DF1]/35 dark:bg-white/10 sm:px-3 sm:text-sm min-[1280px]:w-[7.75rem] min-[1280px]:flex-none"
                 >
                   <option value="recent">最近阅读</option>
                   <option value="fileName">文件名</option>
@@ -295,7 +313,7 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
                 <div className="flex h-10 shrink-0 items-center rounded-xl bg-black/5 p-1 dark:bg-white/10" aria-label="展示方式">
                   <button
                     type="button"
-                    onClick={() => setLayoutMode('grid')}
+                    onClick={() => onLayoutModeChange('grid')}
                     aria-label="封面网格"
                     aria-pressed={layoutMode === 'grid'}
                     className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${layoutMode === 'grid' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}
@@ -304,7 +322,7 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
                   </button>
                   <button
                     type="button"
-                    onClick={() => setLayoutMode('list')}
+                    onClick={() => onLayoutModeChange('list')}
                     aria-label="列表"
                     aria-pressed={layoutMode === 'list'}
                     className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${layoutMode === 'list' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}
@@ -312,19 +330,12 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
                     <List className="h-4 w-4" />
                   </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => selectionMode ? leaveSelectionMode() : setSelectionMode(true)}
-                  aria-label={selectionMode ? '退出选择' : '选择要删除的书籍'}
-                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${selectionMode ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-black/5 text-black/50 hover:text-red-600 dark:bg-white/10 dark:text-white/50'}`}
-                >
-                  {selectionMode ? <X className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
-                </button>
               </div>
             </div>
 
             {selectionMode && (
               <div className="app-card sticky top-0 z-[8] flex flex-wrap items-center gap-2 border-red-500/15 p-2.5 sm:p-3">
+                <button type="button" onClick={leaveSelectionMode} aria-label="退出选择" className="flex h-9 w-9 items-center justify-center rounded-xl bg-black/5 text-black/55 hover:bg-black/10 dark:bg-white/10 dark:text-white/60"><X className="h-4 w-4" /></button>
                 <span className="mr-auto px-1 text-sm font-medium text-[#1C1C1E] dark:text-white">已选择 {selectedBookIds.size} 本</span>
                 <button type="button" onClick={() => setSelectedBookIds(new Set(visibleEntries.flatMap((entry) => entry.kind === 'series' ? entry.books.map((book) => book.id) : [entry.book.id])))} className="h-9 rounded-xl bg-black/5 px-3 text-xs font-medium hover:bg-black/10 dark:bg-white/10">选择当前结果</button>
                 <button type="button" onClick={() => setSelectedBookIds(new Set())} className="h-9 rounded-xl bg-black/5 px-3 text-xs font-medium hover:bg-black/10 dark:bg-white/10">清空</button>
@@ -337,11 +348,12 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
               : 'grid grid-cols-1 content-start gap-2 sm:gap-3'}
             >
               {visibleEntries.map((entry) => (
-                <SelectableLibraryEntry
+                <LongPressSelectable
                   key={`${entry.kind}-${entry.id}`}
                   active={selectionMode}
                   selected={(entry.kind === 'series' ? entry.books.map((book) => book.id) : [entry.book.id]).every((id) => selectedBookIds.has(id))}
                   label={`选择${entry.title}`}
+                  onLongPress={() => enterSelectionMode(entry.kind === 'series' ? entry.books.map((book) => book.id) : [entry.book.id])}
                   onToggle={() => toggleBookIds(entry.kind === 'series' ? entry.books.map((book) => book.id) : [entry.book.id])}
                 >
                   {entry.kind === 'series' ? (
@@ -353,7 +365,7 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
                       ? <BookTile book={entry.book} onReadBook={onReadBook} />
                       : <BookListItem book={entry.book} onReadBook={onReadBook} />
                   )}
-                </SelectableLibraryEntry>
+                </LongPressSelectable>
               ))}
             </div>
 
@@ -390,6 +402,8 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
       {selectedSeriesEntry && (
         <SeriesDetailView
           entry={selectedSeriesEntry}
+          layoutMode={layoutMode}
+          onLayoutModeChange={onLayoutModeChange}
           onBack={() => setSelectedSeriesId(null)}
           onReadBook={onReadBook}
         />
@@ -412,31 +426,6 @@ export function Library({ onReadBook, onOpenSettings }: { onReadBook: (book: Boo
             }
           }}
         />
-      )}
-    </div>
-  );
-}
-
-function SelectableLibraryEntry({
-  active,
-  selected,
-  label,
-  onToggle,
-  children,
-}: {
-  active: boolean;
-  selected: boolean;
-  label: string;
-  onToggle: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className={`relative min-w-0 ${selected ? 'rounded-2xl ring-2 ring-[#087DF1] ring-offset-2 ring-offset-[#FBFAF7] dark:ring-offset-[#171916]' : ''}`}>
-      {children}
-      {active && (
-        <button type="button" onClick={onToggle} aria-label={label} aria-pressed={selected} className="absolute inset-0 z-10 rounded-2xl bg-transparent">
-          <span className={`absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full border-2 shadow-sm ${selected ? 'border-[#087DF1] bg-[#087DF1] text-white' : 'border-white bg-black/35 text-transparent'}`}><Check className="h-4 w-4" /></span>
-        </button>
       )}
     </div>
   );

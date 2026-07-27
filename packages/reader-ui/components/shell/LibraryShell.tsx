@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Book } from '../../types';
 import { useAppContext } from '../../store/AppStore';
 import { LibraryView, Sidebar } from './Sidebar';
-import { Library } from '../library/Library';
+import { Library, type LibraryLayoutMode } from '../library/Library';
 import { SettingsView } from '../settings/SettingsView';
 import { WebDavLibrary } from '../library/WebDavLibrary';
 import { SeriesView } from '../library/SeriesView';
@@ -16,6 +16,13 @@ export function LibraryShell({ onReadBook, onPresentable }: { onReadBook: (book:
   const [currentView, setCurrentView] = useState<LibraryView>('library');
   const [scanMessage, setScanMessage] = useState('');
   const [isScanning, setIsScanning] = useState(false);
+  const [libraryLayoutMode, setLibraryLayoutMode] = useState<LibraryLayoutMode>(() => {
+    try {
+      return window.localStorage.getItem('zenith_library_layout') === 'list' ? 'list' : 'grid';
+    } catch {
+      return 'grid';
+    }
+  });
   const addBooksRef = useRef(addBooks);
   addBooksRef.current = addBooks;
 
@@ -44,6 +51,12 @@ export function LibraryShell({ onReadBook, onPresentable }: { onReadBook: (book:
       stopWatching?.();
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('zenith_library_layout', libraryLayoutMode);
+    } catch {}
+  }, [libraryLayoutMode]);
 
   const scanLibrary = async (changeRoot: boolean) => {
     try {
@@ -98,9 +111,22 @@ export function LibraryShell({ onReadBook, onPresentable }: { onReadBook: (book:
             transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
             className="flex-1 flex min-w-0"
           >
-            {currentView === 'library' && <Library onReadBook={onReadBook} onOpenSettings={() => setCurrentView('settings')} />}
+            {currentView === 'library' && (
+              <Library
+                layoutMode={libraryLayoutMode}
+                onLayoutModeChange={setLibraryLayoutMode}
+                onReadBook={onReadBook}
+                onOpenSettings={() => setCurrentView('settings')}
+              />
+            )}
             {currentView === 'webdav' && runtimeCapabilities.librarySources.includes('webdav') && <WebDavLibrary onReadBook={onReadBook} />}
-            {currentView === 'series' && <SeriesView onReadBook={onReadBook} />}
+            {currentView === 'series' && (
+              <SeriesView
+                layoutMode={libraryLayoutMode}
+                onLayoutModeChange={setLibraryLayoutMode}
+                onReadBook={onReadBook}
+              />
+            )}
             {currentView === 'settings' && (
               <SettingsView
                 onRescan={() => scanLibrary(false)}

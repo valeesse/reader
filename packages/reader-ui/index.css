@@ -126,7 +126,7 @@ button:disabled {
   }
 }
 
-@media (min-width: 1100px) {
+@media (min-width: 1280px) {
   .app-sidebar {
     width: 14rem;
   }

@@ -9,8 +9,17 @@ import { SeriesEditorDialog } from './SeriesEditorDialog';
 import { ScrollToTopButton } from './ScrollToTopButton';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { SeriesMergeDialog } from './SeriesMergeDialog';
+import type { LibraryLayoutMode } from './Library';
 
-export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void }) {
+export function SeriesView({
+  layoutMode,
+  onLayoutModeChange,
+  onReadBook,
+}: {
+  layoutMode: LibraryLayoutMode;
+  onLayoutModeChange: (mode: LibraryLayoutMode) => void;
+  onReadBook: (book: Book) => void;
+}) {
   const { series, books, createSeries, updateSeries, deleteSeries, autoCreateMetadataSeries, mergeSeries } = useAppContext();
   const [editorSeriesId, setEditorSeriesId] = useState<string | null | undefined>();
   const [draggingSeriesId, setDraggingSeriesId] = useState<string | undefined>();
@@ -18,7 +27,6 @@ export function SeriesView({ onReadBook }: { onReadBook: (book: Book) => void })
   const [autoCreateMessage, setAutoCreateMessage] = useState('');
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
-  const [layoutMode, setLayoutMode] = useState<'grid' | 'list'>('grid');
   const [sortKey, setSortKey] = useState<'name' | 'bookCount' | 'addedAt'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [visibleSeriesCount, setVisibleSeriesCount] = useState(8);
@@ -164,7 +172,7 @@ const [mergeSourceId, setMergeSourceId] = useState<string>();
         onScroll={handleScroll}
       >
         <div className="min-w-0 space-y-5">
-          <div className="app-card flex flex-col gap-2 p-2.5 sm:p-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="app-card flex min-w-0 flex-col gap-2 p-2.5 sm:p-3 min-[1280px]:flex-row min-[1280px]:items-center min-[1280px]:justify-between">
             <div className="relative w-full sm:max-w-sm">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/45 dark:text-white/45" />
               <input
@@ -185,8 +193,8 @@ const [mergeSourceId, setMergeSourceId] = useState<string>();
                 {sortOrder === 'asc' ? <ArrowUpAZ className="h-4 w-4" /> : <ArrowDownAZ className="h-4 w-4" />}
               </button>
               <div className="flex h-9 shrink-0 rounded-xl bg-black/5 p-0.5 dark:bg-white/10">
-                <button type="button" onClick={() => setLayoutMode('grid')} aria-label="卡片网格" aria-pressed={layoutMode === 'grid'} className={`flex h-8 w-8 items-center justify-center rounded-lg ${layoutMode === 'grid' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}><Grid2X2 className="h-4 w-4" /></button>
-                <button type="button" onClick={() => setLayoutMode('list')} aria-label="紧凑列表" aria-pressed={layoutMode === 'list'} className={`flex h-8 w-8 items-center justify-center rounded-lg ${layoutMode === 'list' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}><List className="h-4 w-4" /></button>
+                <button type="button" onClick={() => onLayoutModeChange('grid')} aria-label="卡片网格" aria-pressed={layoutMode === 'grid'} className={`flex h-8 w-8 items-center justify-center rounded-lg ${layoutMode === 'grid' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}><Grid2X2 className="h-4 w-4" /></button>
+                <button type="button" onClick={() => onLayoutModeChange('list')} aria-label="紧凑列表" aria-pressed={layoutMode === 'list'} className={`flex h-8 w-8 items-center justify-center rounded-lg ${layoutMode === 'list' ? 'bg-white text-[#087DF1] shadow-sm dark:bg-[#2C2C2E]' : 'text-black/45 dark:text-white/45'}`}><List className="h-4 w-4" /></button>
               </div>
             </div>
           </div>
@@ -296,14 +304,14 @@ const [mergeSourceId, setMergeSourceId] = useState<string>();
                         onPointerDown={() => prewarmWebReaderOnIntent(book)}
                         onFocus={() => prewarmWebReaderOnIntent(book)}
                         onClick={() => onReadBook(book)}
-                        className={`flex w-full min-w-0 max-w-full items-center gap-3 overflow-hidden rounded-xl bg-white/75 text-left transition-all hover:-translate-y-0.5 hover:bg-white hover:shadow-sm dark:bg-white/10 dark:hover:bg-white/15 ${layoutMode === 'grid' ? 'p-3' : 'px-3 py-2'}`}
+                        className={`flex w-full min-w-0 max-w-full items-center overflow-hidden rounded-xl bg-white/75 text-left transition-all hover:-translate-y-0.5 hover:bg-white hover:shadow-sm dark:bg-white/10 dark:hover:bg-white/15 ${layoutMode === 'grid' ? 'gap-3 p-3' : 'gap-2 px-2 py-1.5'}`}
                       >
-                        <div className="w-8 h-10 rounded-[5px] bg-[#e4e5df] dark:bg-[#30332f] shrink-0 overflow-hidden">
+                        <div className={`${layoutMode === 'grid' ? 'h-10 w-8' : 'h-9 w-7'} shrink-0 overflow-hidden rounded-[5px] bg-[#e4e5df] dark:bg-[#30332f]`}>
                           <BookCover book={book} className="w-full h-full object-cover" compact />
                         </div>
-                        <div className="min-w-0 flex-1 overflow-hidden">
-                          <div className="text-[11px] text-black/40 dark:text-white/40">第 {book.seriesIndex ?? index + 1} 卷</div>
-                          <div className="block w-full truncate text-sm font-medium text-[#1C1C1E] dark:text-white">{book.title}</div>
+                        <div className={`min-w-0 flex-1 overflow-hidden ${layoutMode === 'list' ? 'flex items-center gap-2' : ''}`}>
+                          <div className="shrink-0 text-[10px] text-black/40 dark:text-white/40">第 {book.seriesIndex ?? index + 1} 卷</div>
+                          <div className="block min-w-0 flex-1 truncate text-sm font-medium text-[#1C1C1E] dark:text-white">{book.title}</div>
                         </div>
                       </button>
                     ))}
