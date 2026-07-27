@@ -2952,7 +2952,7 @@ checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
 
 [[package]]
 name = "reader-application"
-version = "1.1.0"
+version = "0.1.1"
 dependencies = [
  "reader-contracts",
  "reader-core",
@@ -2961,14 +2961,14 @@ dependencies = [
 
 [[package]]
 name = "reader-contracts"
-version = "1.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "reader-core"
-version = "1.1.0"
+version = "0.1.1"
 dependencies = [
  "encoding_rs",
  "encoding_rs_io",
@@ -2986,7 +2986,7 @@ dependencies = [
 
 [[package]]
 name = "reader-state"
-version = "1.1.0"
+version = "0.1.1"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -5640,7 +5640,7 @@ dependencies = [
 
 [[package]]
 name = "zenith-reader"
-version = "1.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "flate2",
@@ -5664,7 +5664,7 @@ dependencies = [
 
 [[package]]
 name = "zenith-reader-server"
-version = "1.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "http-body-util",

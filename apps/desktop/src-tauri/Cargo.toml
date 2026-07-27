@@ -1,6 +1,6 @@
 [package]
 name = "zenith-reader"
-version = "1.1.0"
+version = "0.1.1"
 description = "A glassmorphic cross-platform EPUB/TXT reader"
 authors = ["Zenith Reader"]
 edition = "2024"
