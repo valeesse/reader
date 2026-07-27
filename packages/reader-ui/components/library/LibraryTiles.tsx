@@ -8,7 +8,7 @@ import { prewarmWebReaderOnIntent } from '../../features/reader/runtime/readerWa
 import { BookCover } from './BookCover';
 import type { LibraryEntry, LibraryLayoutMode } from './Library';
 import { ScrollToTopButton } from './ScrollToTopButton';
-import { useAppContext } from '../../store/AppStore';
+import { useAppContext, useProgressContext } from '../../store/AppStore';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 export function SeriesTile({
@@ -218,9 +218,10 @@ export function SeriesDetailView({
   onReadBook: (book: Book) => void;
 }) {
   const { deleteBooks } = useAppContext();
+  const progress = useProgressContext();
   const uniqueAuthors = Array.from(new Set(entry.books.map((book) => book.author).filter(Boolean)));
   const [visibleCount, setVisibleCount] = useState(72);
-  const [sortKey, setSortKey] = useState<'series' | 'title' | 'addedAt'>('series');
+  const [sortKey, setSortKey] = useState<'series' | 'title' | 'addedAt' | 'recent'>('series');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedBookIds, setSelectedBookIds] = useState<Set<string>>(() => new Set());
@@ -241,14 +242,16 @@ export function SeriesDetailView({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onBack]);
+  const recentAtByBookId = useMemo(() => new Map(progress.map((item) => [item.bookId, item.updatedAt])), [progress]);
   const sortedBooks = useMemo(() => [...entry.books].sort((a, b) => {
     let value = 0;
     if (sortKey === 'title') value = a.title.localeCompare(b.title, 'zh-Hans-CN');
     else if (sortKey === 'addedAt') value = a.addedAt - b.addedAt;
+    else if (sortKey === 'recent') value = (recentAtByBookId.get(a.id) || 0) - (recentAtByBookId.get(b.id) || 0);
     else value = (a.seriesIndex ?? Number.MAX_SAFE_INTEGER) - (b.seriesIndex ?? Number.MAX_SAFE_INTEGER)
       || displayBookFileName(a).localeCompare(displayBookFileName(b), 'zh-Hans-CN');
     return sortOrder === 'asc' ? value : -value;
-  }), [entry.books, sortKey, sortOrder]);
+  }), [entry.books, recentAtByBookId, sortKey, sortOrder]);
   const leaveSelectionMode = () => {
     setSelectionMode(false);
     setSelectedBookIds(new Set());
@@ -314,13 +317,14 @@ export function SeriesDetailView({
             <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
               <select
                 value={sortKey}
-                onChange={(event) => setSortKey(event.target.value as 'series' | 'title' | 'addedAt')}
+                onChange={(event) => setSortKey(event.target.value as 'series' | 'title' | 'addedAt' | 'recent')}
                 aria-label="系列书籍排序方式"
                 className="h-9 min-w-0 rounded-xl bg-black/5 px-2 text-xs outline-none dark:bg-white/10 sm:px-3"
               >
                 <option value="series">卷序 / 文件名</option>
                 <option value="title">书名</option>
                 <option value="addedAt">加入时间</option>
+                <option value="recent">最近阅读</option>
               </select>
               <button
                 type="button"

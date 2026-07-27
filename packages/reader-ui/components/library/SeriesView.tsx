@@ -1,5 +1,5 @@
 import React, { useDeferredValue, useMemo, useRef, useState } from 'react';
-import { useAppContext } from '../../store/AppStore';
+import { useAppContext, useProgressContext } from '../../store/AppStore';
 import { Book } from '../../types';
 import { ArrowDownAZ, ArrowUpAZ, GitMerge, Grid2X2, Layers, List, Pencil, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
 import { BookCover } from './BookCover';
@@ -21,13 +21,14 @@ export function SeriesView({
   onReadBook: (book: Book) => void;
 }) {
   const { series, books, createSeries, updateSeries, deleteSeries, autoCreateMetadataSeries, mergeSeries } = useAppContext();
+  const progress = useProgressContext();
   const [editorSeriesId, setEditorSeriesId] = useState<string | null | undefined>();
   const [draggingSeriesId, setDraggingSeriesId] = useState<string | undefined>();
   const [isAutoCreating, setIsAutoCreating] = useState(false);
   const [autoCreateMessage, setAutoCreateMessage] = useState('');
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
-  const [sortKey, setSortKey] = useState<'name' | 'bookCount' | 'addedAt'>('name');
+  const [sortKey, setSortKey] = useState<'name' | 'bookCount' | 'addedAt' | 'recent'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [visibleSeriesCount, setVisibleSeriesCount] = useState(8);
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -36,6 +37,7 @@ const [mergeSourceId, setMergeSourceId] = useState<string>();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const showScrollTopRef = useRef(false);
   const booksById = useMemo(() => new Map(books.map((book) => [book.id, book])), [books]);
+  const recentAtByBookId = useMemo(() => new Map(progress.map((item) => [item.bookId, item.updatedAt])), [progress]);
   const [visibleBySeriesId, setVisibleBySeriesId] = useState<Record<string, number>>({});
   const editingSeries = typeof editorSeriesId === 'string'
     ? series.find((item) => item.id === editorSeriesId)
@@ -60,10 +62,15 @@ const [mergeSourceId, setMergeSourceId] = useState<string>();
         const aAdded = Math.max(...a.bookIds.map((id) => booksById.get(id)?.addedAt || 0), 0);
         const bAdded = Math.max(...b.bookIds.map((id) => booksById.get(id)?.addedAt || 0), 0);
         value = aAdded - bAdded;
+      } else if (sortKey === 'recent') {
+        const aRecent = Math.max(...a.bookIds.map((id) => recentAtByBookId.get(id) || 0), 0);
+        const bRecent = Math.max(...b.bookIds.map((id) => recentAtByBookId.get(id) || 0), 0);
+        value = aRecent - bRecent;
       } else value = a.name.localeCompare(b.name, 'zh-Hans-CN');
-      return sortOrder === 'asc' ? value : -value;
+      const orderedValue = sortOrder === 'asc' ? value : -value;
+      return orderedValue || a.name.localeCompare(b.name, 'zh-Hans-CN');
     });
-  }, [booksById, deferredQuery, series, sortKey, sortOrder]);
+  }, [booksById, deferredQuery, recentAtByBookId, series, sortKey, sortOrder]);
   const visibleSeries = filteredSeries.slice(0, visibleSeriesCount);
   const normalizedQuery = deferredQuery.trim().toLocaleLowerCase();
   const booksBySeriesId = useMemo(() => new Map(series.map((item) => [
@@ -184,10 +191,11 @@ const [mergeSourceId, setMergeSourceId] = useState<string>();
             </div>
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="mr-auto px-1 text-xs tabular-nums text-black/55 dark:text-white/55">{filteredSeries.length} 个系列 · {filteredSeries.reduce((count, item) => count + item.bookIds.length, 0)} 本书</span>
-              <select value={sortKey} onChange={(event) => setSortKey(event.target.value as 'name' | 'bookCount' | 'addedAt')} aria-label="系列排序方式" className="h-9 min-w-0 rounded-xl bg-black/5 px-2 text-xs outline-none dark:bg-white/10">
+              <select value={sortKey} onChange={(event) => setSortKey(event.target.value as 'name' | 'bookCount' | 'addedAt' | 'recent')} aria-label="系列排序方式" className="h-9 min-w-0 rounded-xl bg-black/5 px-2 text-xs outline-none dark:bg-white/10">
                 <option value="name">系列名</option>
                 <option value="bookCount">书籍数量</option>
                 <option value="addedAt">最近加入</option>
+                <option value="recent">最近阅读</option>
               </select>
               <button type="button" onClick={() => setSortOrder((value) => value === 'asc' ? 'desc' : 'asc')} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-black/5 dark:bg-white/10" aria-label="切换排序方向">
                 {sortOrder === 'asc' ? <ArrowUpAZ className="h-4 w-4" /> : <ArrowDownAZ className="h-4 w-4" />}
