@@ -13,6 +13,7 @@ import { useReadiumReaderLifecycle } from './useReadiumReaderLifecycle';
 export function useReadiumReader({
   book,
   chromeVisible,
+  onClose,
   onProgressChange,
   onToggleChrome,
   onTocChange,
@@ -87,6 +88,8 @@ export function useReadiumReader({
     goForward: navigate(1),
     loadError,
     loading,
+    onClose,
+    onToggleChrome,
     pageCounter,
     previewImage,
     resourceStripHostRef: runtime.resourceStripHostRef,

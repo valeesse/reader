@@ -162,6 +162,18 @@ impl StateRepository {
         self.get()
     }
 
+    pub fn clear_library_state(&self) -> Result<(), StateError> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction()?;
+        transaction.execute("DELETE FROM progress", [])?;
+        transaction.execute(
+            "DELETE FROM sections WHERE name IN ('series', 'lastRead')",
+            [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, StateError> {
         self.connection.lock().map_err(|_| StateError::Busy)
     }
@@ -235,5 +247,31 @@ mod tests {
         let value = state.get().unwrap();
         assert_eq!(value["progress"]["a"]["updatedAt"], 2);
         assert_eq!(value["lastRead"]["bookId"], "a");
+    }
+
+    #[test]
+    fn clearing_library_state_preserves_user_settings() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = StateRepository::open(temp.path().join("state.sqlite3")).unwrap();
+        state
+            .put_section("settings", serde_json::json!({"theme":"dark"}))
+            .unwrap();
+        state
+            .put_section("series", serde_json::json!([{"id":"series-a"}]))
+            .unwrap();
+        state
+            .put_reading(serde_json::json!({
+                "progress":{"bookId":"a","updatedAt":2},
+                "lastRead":{"bookId":"a","updatedAt":2}
+            }))
+            .unwrap();
+
+        state.clear_library_state().unwrap();
+
+        let value = state.get().unwrap();
+        assert_eq!(value["settings"]["theme"], "dark");
+        assert!(value.get("series").is_none());
+        assert!(value.get("lastRead").is_none());
+        assert_eq!(value["progress"], serde_json::json!({}));
     }
 }

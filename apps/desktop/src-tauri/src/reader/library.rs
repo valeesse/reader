@@ -32,6 +32,12 @@ fn set_library_root(
     if !root.is_dir() {
         return Err("书库根目录不是文件夹".into());
     }
+    let root_changed = get_library_root(app.clone())?
+        .and_then(|current| fs::canonicalize(current).ok())
+        .is_none_or(|current| current != root);
+    if root_changed {
+        invalidate_library_dependent_state(&app, &state)?;
+    }
     let application = create_reader_application(&app, &root)?;
     let config = LibraryConfig {
         root: root.to_string_lossy().to_string(),
@@ -225,7 +231,15 @@ async fn scan_library(app: AppHandle) -> Result<Vec<NativeBook>, String> {
 
 #[tauri::command]
 fn reader_books(state: tauri::State<'_, ReaderState>) -> Result<Vec<NativeBook>, String> {
-    Ok(reader_application(&state)?
+    let application = state
+        .application
+        .lock()
+        .map_err(|_| "阅读服务被占用".to_string())?
+        .clone();
+    let Some(application) = application else {
+        return Ok(Vec::new());
+    };
+    Ok(application
         .books()
         .map_err(|error| error.to_string())?
         .into_iter()
@@ -267,9 +281,83 @@ fn initialize_library(app: &AppHandle, state: &ReaderState) -> Result<(), String
     let Some(root) = get_library_root(app.clone())? else {
         return Ok(());
     };
-    let application = create_reader_application(app, Path::new(&root))?;
+    let root = match fs::canonicalize(&root) {
+        Ok(root) if root.is_dir() => root,
+        Ok(_) => {
+            discard_unavailable_library_root(app, state, &root, "路径不是文件夹");
+            return Ok(());
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            discard_unavailable_library_root(app, state, &root, "路径不存在");
+            return Ok(());
+        }
+        Err(error) => {
+            return Err(format!("访问书库根目录失败: {error}"));
+        }
+    };
+    let application = create_reader_application(app, &root)?;
     *state.application.lock().map_err(|_| "阅读服务被占用".to_string())? = Some(application);
     Ok(())
+}
+
+fn discard_unavailable_library_root(
+    app: &AppHandle,
+    state: &ReaderState,
+    root: &str,
+    reason: &str,
+) {
+    eprintln!("[startup] ignoring unavailable library root {root:?}: {reason}");
+    if let Err(error) = invalidate_library_dependent_state(app, state) {
+        eprintln!("[startup] failed to clear stale library state: {error}");
+    }
+    let config_path = match library_config_path(app) {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("[startup] failed to locate stale library config: {error}");
+            return;
+        }
+    };
+    if let Err(error) = fs::remove_file(config_path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        eprintln!("[startup] failed to remove stale library config: {error}");
+    }
+}
+
+fn invalidate_library_dependent_state(
+    app: &AppHandle,
+    state: &ReaderState,
+) -> Result<(), String> {
+    *state
+        .application
+        .lock()
+        .map_err(|_| "阅读服务被占用".to_string())? = None;
+    if let Some(repository) = state
+        .state
+        .lock()
+        .map_err(|_| "状态仓库被占用".to_string())?
+        .as_ref()
+    {
+        repository
+            .clear_library_state()
+            .map_err(|error| format!("清理书库关联状态失败: {error}"))?;
+    }
+    remove_directory_if_present(&library_state_dir_path(app)?, "清理书库索引失败")?;
+    remove_directory_if_present(
+        &app.path()
+            .app_cache_dir()
+            .map_err(|error| error.to_string())?
+            .join("reader-core"),
+        "清理阅读缓存失败",
+    )
+}
+
+fn remove_directory_if_present(path: &Path, context: &str) -> Result<(), String> {
+    match fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("{context}: {error}")),
+    }
 }
 
 fn create_reader_application(
@@ -294,11 +382,15 @@ fn library_config_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn library_state_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
+    let dir = library_state_dir_path(app)?;
+    fs::create_dir_all(&dir).map_err(|error| format!("创建书库状态目录失败: {error}"))?;
+    Ok(dir)
+}
+
+fn library_state_dir_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?
-        .join("library-state");
-    fs::create_dir_all(&dir).map_err(|error| format!("创建书库状态目录失败: {error}"))?;
-    Ok(dir)
+        .join("library-state"))
 }

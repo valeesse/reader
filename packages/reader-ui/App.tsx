@@ -13,7 +13,7 @@ const LibraryShell = lazy(() => import('./components/shell/LibraryShell').then((
 
 function MainLayout() {
   const { books, settings, isLoading, stateReconciled, lastReadBookId, addBooks } = useAppContext();
-  const initialReadingBook = !isLoading && lastReadBookId
+  const initialReadingBook = !runtimeCapabilities.desktopShell && !isLoading && lastReadBookId
     ? books.find((item) => item.id === lastReadBookId) || null
     : null;
   const [readingBook, setReadingBook] = useState<Book | null>(() => initialReadingBook);
@@ -109,6 +109,14 @@ function MainLayout() {
       console.warn('Failed to record last-read book', error);
     });
   }, [lastReadBookId, readingBook?.id]);
+
+  useEffect(() => {
+    if (!stateReconciled || !readingBook) return;
+    if (!books.some((book) => book.id === readingBook.id)) {
+      startupResumePendingRef.current = false;
+      setReadingBook(null);
+    }
+  }, [books, readingBook, stateReconciled]);
 
   useEffect(() => {
     document.documentElement.classList.remove('startup-dark', 'startup-sepia');

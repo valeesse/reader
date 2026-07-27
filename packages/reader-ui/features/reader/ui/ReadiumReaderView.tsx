@@ -19,6 +19,8 @@ export function ReadiumReaderView({
   goForward,
   loadError,
   loading,
+  onClose,
+  onToggleChrome,
   pageCounter,
   previewImage,
   resourceStripHostRef,
@@ -28,7 +30,13 @@ export function ReadiumReaderView({
   savingImage,
   settings,
 }: ReadiumReaderViewProps) {
-  if (loadError) return <ReaderLoadError message={loadError} onRetry={retry} />;
+  if (loadError) {
+    return (
+      <div className="relative h-full w-full" onClick={onToggleChrome}>
+        <ReaderLoadError message={loadError} onClose={onClose} onRetry={retry} />
+      </div>
+    );
+  }
 
   return (
     <div className="group relative h-full w-full select-none overflow-hidden">

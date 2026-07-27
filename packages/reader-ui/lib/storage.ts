@@ -1,4 +1,4 @@
-import { get, keys, set } from 'idb-keyval';
+import { del, get, keys, set } from 'idb-keyval';
 import {
   getWebProgress,
   getWebState,
@@ -68,12 +68,31 @@ export async function getBooks(): Promise<Book[]> {
         seriesIndex: book.seriesIndex ?? cachedBook?.seriesIndex,
       };
     });
-    await set(KEYS.BOOKS, books.map(stripBookCover));
+    await reconcileLocalLibraryCache(books);
     return books;
   } catch (error) {
     if (!runtimeCapabilities.desktopShell) throw error;
     return cached.map(stripBookCover);
   }
+}
+
+async function reconcileLocalLibraryCache(books: Book[]) {
+  const available = new Set(books.map((book) => book.id));
+  const allKeys = await keys();
+  const staleBookKeys = allKeys.filter((key): key is string => {
+    if (typeof key !== 'string') return false;
+    if (key.startsWith(KEYS.BOOK_COVER)) {
+      return !available.has(key.slice(KEYS.BOOK_COVER.length));
+    }
+    if (key.startsWith(KEYS.PROGRESS)) {
+      return !available.has(key.slice(KEYS.PROGRESS.length));
+    }
+    return false;
+  });
+  await Promise.all([
+    set(KEYS.BOOKS, books.map(stripBookCover)),
+    ...staleBookKeys.map((key) => del(key)),
+  ]);
 }
 
 export async function saveBookCover(bookId: string, cover: string) {
@@ -173,6 +192,16 @@ export async function getLastReadBookId(): Promise<string | undefined> {
     return typeof lastRead === 'string' ? lastRead : lastRead?.bookId;
   }
   return get<string>(KEYS.LAST_READ);
+}
+
+export async function clearLastReadBook() {
+  await Promise.all([
+    del(KEYS.LAST_READ),
+    del(KEYS.LAST_READ_UPDATED_AT),
+    runtimeCapabilities.remoteState
+      ? putWebStateSection('lastRead', { bookId: null, updatedAt: Date.now() })
+      : Promise.resolve(),
+  ]);
 }
 
 /**

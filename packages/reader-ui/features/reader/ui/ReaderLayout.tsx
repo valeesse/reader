@@ -221,6 +221,7 @@ export function ReaderLayout({ book, onClose, onOpenBook, onPresentable }: Reade
             key={book.id}
             book={book}
             chromeVisible={chromeVisible}
+            onClose={onClose}
             onProgressChange={handleProgressChange}
             onToggleChrome={toggleChrome}
             onTocChange={setTocItems}

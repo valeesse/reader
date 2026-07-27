@@ -183,11 +183,12 @@ Web 服务默认只监听 `127.0.0.1`。Docker/LAN 部署未设置 `ZENITH_AUTH_
 ```bash
 pnpm lint
 pnpm build
+pnpm build:installer # Windows NSIS 安装包，产物位于 target/release/bundle/nsis/
 pnpm test:reader:real # packaged app must be running with CDP enabled
 cargo fmt --check --manifest-path apps/desktop/src-tauri/Cargo.toml
 cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
-pnpm tauri:build
+pnpm tauri:build # 同样生成安装包；安装时可分别选择是否关联 EPUB/TXT
 pnpm clean
 ```
 

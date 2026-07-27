@@ -14,12 +14,14 @@ import {
   getSeries,
   saveSeries,
   getLastReadBookId,
+  clearLastReadBook,
   getStartupSnapshotSync,
   saveStartupSnapshot,
   ProgressSavedDetail,
 } from '../lib/storage';
 import { normalizeSettings } from '../lib/readingSettings';
 import { cancelReaderIdle, scheduleReaderIdle } from '../lib/readerScheduler';
+import { runtimeCapabilities } from '../lib/backend';
 
 interface AppContextType {
   books: Book[];
@@ -69,18 +71,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
         getLastReadBookId(),
       ]);
       const loadedBooks = storedBooks;
+      const availableBookIds = new Set(loadedBooks.map((book) => book.id));
+      const validSeries = loadedSeries
+        .map((item) => ({
+          ...item,
+          bookIds: item.bookIds.filter((bookId) => availableBookIds.has(bookId)),
+        }))
+        .filter((item) => item.bookIds.length > 0);
       setBooks(loadedBooks);
-      setSeries(loadedSeries);
+      setSeries(validSeries);
       const normalizedSettings = normalizeSettings(loadedSettings);
       settingsRef.current = normalizedSettings;
       setSettingsState(normalizedSettings);
-      // A book may have been opened while this refresh was reading IDB. Never
-      // let an older empty result erase the synchronous resume marker.
-      const effectiveLastReadBookId = loadedLastReadBookId || getStartupSnapshotSync()?.lastReadBookId;
+      // Resume only when the authoritative library still contains the book.
+      // A stale startup snapshot must never reopen an unavailable resource.
+      const lastReadCandidate = loadedLastReadBookId || getStartupSnapshotSync()?.lastReadBookId;
+      const effectiveLastReadBookId = lastReadCandidate && availableBookIds.has(lastReadCandidate)
+        ? lastReadCandidate
+        : undefined;
+      if (lastReadCandidate && !effectiveLastReadBookId) {
+        await clearLastReadBook();
+      }
       setLastReadBookId(effectiveLastReadBookId);
       saveStartupSnapshot({
         books: loadedBooks,
-        series: loadedSeries,
+        series: validSeries,
         settings: normalizedSettings,
         lastReadBookId: effectiveLastReadBookId,
       });
@@ -94,7 +109,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    if (!startupSnapshot || !startupSnapshot.lastReadBookId) {
+    if (runtimeCapabilities.desktopShell || !startupSnapshot || !startupSnapshot.lastReadBookId) {
       void reloadState();
       return;
     }
