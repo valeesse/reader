@@ -1,6 +1,6 @@
 use crate::{error::ApiError, state::AppState};
 use axum::{Json, extract::State, http::StatusCode};
-use notify::{Event, EventKind, RecursiveMode, Watcher};
+use notify::{Config, Event, EventKind, PollWatcher, RecursiveMode, Watcher};
 use reader_contracts::{Capabilities, ResourceTransport};
 use reader_core::{Book, ScanProgress};
 use std::{
@@ -125,9 +125,16 @@ pub(crate) async fn rescan(State(state): State<AppState>) -> Result<StatusCode, 
 
 pub(crate) fn start_library_watcher(state: &AppState, root: &Path) -> Result<(), notify::Error> {
     let (sender, receiver) = mpsc::channel::<notify::Result<Event>>();
-    let mut watcher = notify::recommended_watcher(move |event| {
-        let _ = sender.send(event);
-    })?;
+    // Web deployments commonly mount the library from Docker, SMB or a NAS.
+    // Native filesystem notifications are not guaranteed to cross those
+    // boundaries, so use metadata polling here instead of an inotify/FSEvents
+    // watcher. Scanning remains incremental; this only discovers changed paths.
+    let mut watcher = PollWatcher::new(
+        move |event| {
+            let _ = sender.send(event);
+        },
+        Config::default().with_poll_interval(Duration::from_secs(2)),
+    )?;
     watcher.watch(root, RecursiveMode::Recursive)?;
     *state.library_watcher.lock().expect("library watcher lock") = Some(watcher);
 
@@ -179,6 +186,41 @@ pub(crate) fn start_library_watcher(state: &AppState, root: &Path) -> Result<(),
         })
         .map_err(notify::Error::io)?;
     Ok(())
+}
+
+pub(crate) fn reconcile_library_in_background(state: AppState) {
+    if let Err(error) = std::thread::Builder::new()
+        .name("zenith-server-startup-scan".into())
+        .spawn(move || {
+            {
+                let mut status = state.scan.blocking_write();
+                if status.running {
+                    return;
+                }
+                status.running = true;
+                status.error = None;
+            }
+            let result = state.application.scan(|progress| {
+                if let Ok(mut status) = state.scan.try_write() {
+                    status.visited = progress.visited;
+                    status.matched = progress.matched;
+                    status.current_relative_path = progress.current_relative_path;
+                }
+            });
+            let mut status = state.scan.blocking_write();
+            status.running = false;
+            status.current_relative_path.clear();
+            match result {
+                Ok(_) => {
+                    status.version = status.version.saturating_add(1);
+                    status.error = None;
+                }
+                Err(error) => status.error = Some(error.to_string()),
+            }
+        })
+    {
+        eprintln!("[startup] failed to start library scan: {error}");
+    }
 }
 
 fn library_event_needs_scan(event: &Event) -> bool {

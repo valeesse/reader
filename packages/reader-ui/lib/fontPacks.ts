@@ -1,7 +1,31 @@
 import type { ReaderFontPack } from '../contracts/readerGateway';
 import { desktopFileSrc, readerFontPacks, runtimeCapabilities } from './backend';
+import wenkaiWebCss from 'lxgw-wenkai-screen-webfont/lxgwwenkaigbscreenr.css?inline';
+import yuanWebCss from '@free-fonts/lxgw-975-yuan/lxgw-975-yuan.css?inline';
 
 const STYLE_ATTRIBUTE = 'data-zenith-font-pack';
+const WEB_FONT_PACKS: ReaderFontPack[] = [
+  {
+    id: 'wenkai',
+    label: '霞鹜文楷 Screen',
+    family: 'Zenith LXGW WenKai',
+    version: '1.7.0',
+    source: 'lxgw-wenkai-screen-webfont',
+    installed: true,
+    bytes: 0,
+    css: wenkaiWebCss.replaceAll('LXGW WenKai Screen R', 'Zenith LXGW WenKai'),
+  },
+  {
+    id: 'yuan',
+    label: '霞鹜 975 圆体',
+    family: 'Zenith LXGW 975 Yuan',
+    version: '1.0.0',
+    source: '@free-fonts/lxgw-975-yuan',
+    installed: true,
+    bytes: 0,
+    css: yuanWebCss.replaceAll('LXGW 975 Yuan SC', 'Zenith LXGW 975 Yuan'),
+  },
+];
 let installedPacks: ReaderFontPack[] = [];
 let refreshPromise: Promise<ReaderFontPack[]> | undefined;
 
@@ -10,7 +34,10 @@ export function getInstalledReaderFontPacks() {
 }
 
 export function refreshReaderFontPacks() {
-  if (!runtimeCapabilities.desktopShell) return Promise.resolve([] as ReaderFontPack[]);
+  if (!runtimeCapabilities.desktopShell) {
+    installedPacks = WEB_FONT_PACKS;
+    return Promise.resolve(WEB_FONT_PACKS);
+  }
   refreshPromise ||= readerFontPacks()
     .then((packs) => {
       installedPacks = packs.filter((pack) => pack.installed && pack.css && pack.rootPath);
@@ -23,7 +50,6 @@ export function refreshReaderFontPacks() {
 }
 
 export async function installOptionalReaderFontStyles(doc: Document, selectedFamily?: string) {
-  if (!runtimeCapabilities.desktopShell) return;
   if (installedPacks.length === 0) await refreshReaderFontPacks();
   const selected = installedPacks.filter((pack) => !selectedFamily || selectedFamily.includes(pack.family));
   const selectedIds = new Set(selected.map((pack) => pack.id));
@@ -47,6 +73,7 @@ export function clearOptionalReaderFontStyles(doc: Document) {
 }
 
 function resolveFontUrls(pack: ReaderFontPack) {
+  if (!pack.rootPath) return pack.css || '';
   const root = pack.rootPath || '';
   const separator = root.includes('\\') ? '\\' : '/';
   return (pack.css || '').replace(/url\((['"]?)([^'"\)]+)\1\)/g, (_match, _quote: string, relative: string) => {

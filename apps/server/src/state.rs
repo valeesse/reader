@@ -15,7 +15,7 @@ use tokio::sync::RwLock;
 pub(crate) struct AppState {
     pub(crate) application: Arc<ReaderApplication>,
     pub(crate) scan: Arc<RwLock<ScanStatus>>,
-    pub(crate) library_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
+    pub(crate) library_watcher: Arc<Mutex<Option<notify::PollWatcher>>>,
     pub(crate) authentication: bool,
     state: Arc<StateRepository>,
 }

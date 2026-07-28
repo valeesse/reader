@@ -10,6 +10,7 @@ import { BookListItem, BookTile, LongPressSelectable, SeriesDetailView, SeriesLi
 import { ScrollToTopButton } from './ScrollToTopButton';
 import { runtimeCapabilities } from '../../lib/backend';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { AppSelect } from '../ui/AppSelect';
 
 type SortKey = 'fileName' | 'addedAt' | 'recent';
 type SortOrder = 'asc' | 'desc';
@@ -292,16 +293,17 @@ export function Library({
                     </button>
                   ))}
                 </div>
-                <select
+                <AppSelect
                   value={sortKey}
-                  onChange={(event) => setSortKey(event.target.value as SortKey)}
-                  aria-label="排序方式"
+                  onChange={setSortKey}
+                  ariaLabel="排序方式"
+                  options={[
+                    { value: 'recent', label: '最近阅读' },
+                    { value: 'fileName', label: '文件名' },
+                    { value: 'addedAt', label: '加入时间' },
+                  ]}
                   className="h-10 min-w-[6.25rem] flex-1 rounded-xl bg-black/[0.035] px-2 text-xs outline-none focus:ring-2 focus:ring-[#087DF1]/35 dark:bg-white/10 sm:px-3 sm:text-sm min-[1280px]:w-[7.75rem] min-[1280px]:flex-none"
-                >
-                  <option value="recent">最近阅读</option>
-                  <option value="fileName">文件名</option>
-                  <option value="addedAt">加入时间</option>
-                </select>
+                />
                 <button
                   onClick={toggleSortOrder}
                   aria-label={sortOrder === 'asc' ? '当前升序，点击切换为降序' : '当前降序，点击切换为升序'}

@@ -3,6 +3,7 @@ import { AppSettings } from '../../types';
 import type { FileAssociationStatus, ReaderCacheStats, ReaderFontPack } from '../../lib/backend';
 import { READER_FONT_OPTIONS, READING_SETTING_LIMITS } from '../../lib/readingSettings';
 import { runtimeCapabilities } from '../../lib/backend';
+import { AppSelect } from '../ui/AppSelect';
 
 type UpdateSettings = (settings: Partial<AppSettings>) => void;
 
@@ -196,9 +197,13 @@ export function ReadingDefaultsSection({ settings, updateSettings }: { settings:
       </div>
       <label className="block space-y-2">
         <span className="text-sm font-medium text-[#1C1C1E] dark:text-white">字体选择</span>
-        <select value={settings.fontFamily} onChange={(event) => updateSettings({ fontFamily: event.target.value })} className="w-full bg-black/5 dark:bg-white/5 rounded-lg px-3 py-2 text-sm outline-none" style={{ fontFamily: settings.fontFamily }}>
-          {READER_FONT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
+        <AppSelect
+          value={settings.fontFamily}
+          options={READER_FONT_OPTIONS.map((option) => ({ ...option, fontFamily: option.value }))}
+          onChange={(fontFamily) => updateSettings({ fontFamily })}
+          ariaLabel="默认阅读字体"
+          className="h-10 w-full text-sm"
+        />
       </label>
       <RangeSetting label="字体大小" value={settings.fontSize} unit="px" limits={READING_SETTING_LIMITS.fontSize} onChange={(fontSize) => updateSettings({ fontSize })} />
       <RangeSetting label="行间距" value={settings.lineHeight} limits={READING_SETTING_LIMITS.lineHeight} onChange={(lineHeight) => updateSettings({ lineHeight })} />

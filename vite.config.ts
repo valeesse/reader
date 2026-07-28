@@ -14,7 +14,7 @@ export default defineConfig(({ command }) => {
     { find: /^react-dom\/client$/, replacement: path.join(uiRoot, 'vendor/prebuilt-react/react-dom-client.js') },
   ] : [];
   return {
-    plugins: [instantStartupHtml(), ...reactWithPrebuiltRuntime(), tailwindcss()],
+    plugins: [webFontWeight400Only(), instantStartupHtml(), ...reactWithPrebuiltRuntime(), tailwindcss()],
     resolve: {
       alias: [
         ...developmentReactAliases,
@@ -55,6 +55,26 @@ export default defineConfig(({ command }) => {
     envPrefix: ['VITE_', 'TAURI_'],
   };
 });
+
+/**
+ * The Yuan package ships 400/500/700 CSS in one file. The reader uses normal
+ * body text only, so remove the unused faces before Vite sees their asset URLs;
+ * otherwise every web build unnecessarily copies three complete CJK fonts.
+ */
+function webFontWeight400Only() {
+  return {
+    name: 'zenith-web-font-weight-400-only',
+    enforce: 'pre' as const,
+    transform(source: string, id: string) {
+      const normalizedId = id.replaceAll('\\', '/');
+      if (!normalizedId.includes('/@free-fonts/lxgw-975-yuan/lxgw-975-yuan.css')) return;
+      const firstFace = source.indexOf('@font-face');
+      if (firstFace < 0) return;
+      const faces = source.match(/@font-face\s*\{[^}]*\}/g) || [];
+      return `${source.slice(0, firstFace)}${faces.filter((face) => face.includes('font-weight: 400;')).join('\n\n')}\n`;
+    },
+  };
+}
 
 /**
  * Vite waits for dependency optimization before returning transformed HTML.

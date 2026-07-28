@@ -1,5 +1,4 @@
 import BookOpen from 'lucide-react/dist/esm/icons/book-open.mjs';
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.mjs';
 import Columns2 from 'lucide-react/dist/esm/icons/columns-2.mjs';
 import Monitor from 'lucide-react/dist/esm/icons/monitor.mjs';
 import Moon from 'lucide-react/dist/esm/icons/moon.mjs';
@@ -7,6 +6,7 @@ import Sun from 'lucide-react/dist/esm/icons/sun.mjs';
 import { motion } from 'motion/react';
 import { AppSettings } from '../../../types';
 import { READER_FONT_OPTIONS, READING_SETTING_LIMITS } from '../../../lib/readingSettings';
+import { AppSelect } from '../../../components/ui/AppSelect';
 import {
   MarginInput,
   PAGE_TURN_OPTIONS,
@@ -81,12 +81,13 @@ export function ReaderSettingsPanel({
           </div>
         </SettingsSection>
         <SettingsSection title="文字排版">
-          <div className="relative">
-            <select value={settings.fontFamily} onChange={(event) => updateSettings({ fontFamily: event.target.value })} className="reader-settings-select h-11 w-full appearance-none border border-black/[0.06] bg-black/[0.035] px-3 pr-10 text-sm text-[#1C1C1E] outline-none transition focus:border-[#007AFF]/40 focus:ring-2 focus:ring-[#007AFF]/15 dark:border-white/[0.07] dark:bg-white/[0.055] dark:text-white" style={{ fontFamily: settings.fontFamily }}>
-              {READER_FONT_OPTIONS.map((option) => <option key={option.value} value={option.value} style={{ fontFamily: option.value, fontSize: '14px' }}>{option.label}</option>)}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/40 dark:text-white/40" />
-          </div>
+          <AppSelect
+            value={settings.fontFamily}
+            options={READER_FONT_OPTIONS.map((option) => ({ ...option, fontFamily: option.value }))}
+            onChange={(fontFamily) => updateSettings({ fontFamily })}
+            ariaLabel="阅读字体"
+            className="reader-settings-select h-11 w-full text-sm text-[#1C1C1E] dark:text-white"
+          />
           <div className="mt-3 divide-y divide-black/[0.055] dark:divide-white/[0.07]">
             <SliderRow label="文字大小" value={settings.fontSize} {...READING_SETTING_LIMITS.fontSize} unit="px" onChange={(fontSize) => updateSettings({ fontSize })} />
             <SliderRow label="段间距" value={settings.paragraphSpacing} {...READING_SETTING_LIMITS.paragraphSpacing} unit="em" onChange={(paragraphSpacing) => updateSettings({ paragraphSpacing })} />

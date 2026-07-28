@@ -10,6 +10,7 @@ import type { LibraryEntry, LibraryLayoutMode } from './Library';
 import { ScrollToTopButton } from './ScrollToTopButton';
 import { useAppContext, useProgressContext } from '../../store/AppStore';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { AppSelect } from '../ui/AppSelect';
 
 export function SeriesTile({
   entry,
@@ -315,17 +316,18 @@ export function SeriesDetailView({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-base font-semibold text-[#1C1C1E] dark:text-white">系列书籍</h3>
             <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
-              <select
+              <AppSelect
                 value={sortKey}
-                onChange={(event) => setSortKey(event.target.value as 'series' | 'title' | 'addedAt' | 'recent')}
-                aria-label="系列书籍排序方式"
-                className="h-9 min-w-0 rounded-xl bg-black/5 px-2 text-xs outline-none dark:bg-white/10 sm:px-3"
-              >
-                <option value="series">卷序 / 文件名</option>
-                <option value="title">书名</option>
-                <option value="addedAt">加入时间</option>
-                <option value="recent">最近阅读</option>
-              </select>
+                onChange={setSortKey}
+                ariaLabel="系列书籍排序方式"
+                options={[
+                  { value: 'series', label: '卷序 / 文件名' },
+                  { value: 'title', label: '书名' },
+                  { value: 'addedAt', label: '加入时间' },
+                  { value: 'recent', label: '最近阅读' },
+                ]}
+                className="h-9 min-w-[7.5rem] text-xs"
+              />
               <button
                 type="button"
                 onClick={() => setSortOrder((value) => value === 'asc' ? 'desc' : 'asc')}

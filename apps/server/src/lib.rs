@@ -43,7 +43,8 @@ pub fn build_router(config: ServerConfig) -> Result<Router, Box<dyn std::error::
         &config.state_dir,
         &config.cache_dir,
     )?);
-    if reader.books()?.is_empty() {
+    let needs_initial_scan = reader.books()?.is_empty();
+    if needs_initial_scan {
         reader.scan(|_| {})?;
     }
     let application = Arc::new(ReaderApplication::new(reader));
@@ -53,6 +54,12 @@ pub fn build_router(config: ServerConfig) -> Result<Router, Box<dyn std::error::
         config.auth_token.is_some(),
     )?;
     library_api::start_library_watcher(&state, &config.library_dir)?;
+    // Files can be added while the server is stopped, in which case no watcher
+    // event exists. Reconcile a persisted registry after the HTTP service is
+    // constructed so a large library does not block startup.
+    if !needs_initial_scan {
+        library_api::reconcile_library_in_background(state.clone());
+    }
     let auth_token = config.auth_token.clone().map(Arc::new);
     Ok(Router::new()
         .route("/api/capabilities", get(library_api::capabilities))

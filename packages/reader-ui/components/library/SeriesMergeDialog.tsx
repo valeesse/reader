@@ -1,6 +1,7 @@
 import { GitMerge, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Series } from '../../types';
+import { AppSelect } from '../ui/AppSelect';
 
 export function SeriesMergeDialog({
   source,
@@ -16,15 +17,13 @@ export function SeriesMergeDialog({
   const targets = useMemo(() => series.filter((item) => item.id !== source.id), [series, source.id]);
   const [targetId, setTargetId] = useState(targets[0]?.id || '');
   const [busy, setBusy] = useState(false);
-  const selectRef = useRef<HTMLSelectElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    selectRef.current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !busy) onCancel();
       if (event.key !== 'Tab') return;
-      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), select:not(:disabled)');
+      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled)');
       if (!focusable?.length) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
@@ -63,9 +62,14 @@ export function SeriesMergeDialog({
         </div>
         <label className="mt-5 block space-y-2 text-sm font-medium">
           合并到
-          <select ref={selectRef} value={targetId} onChange={(event) => setTargetId(event.target.value)} className="h-11 w-full rounded-xl border border-black/10 bg-black/[0.035] px-3 text-sm dark:border-white/10 dark:bg-white/10">
-            {targets.map((item) => <option key={item.id} value={item.id}>{item.name}（{item.bookIds.length} 本）</option>)}
-          </select>
+          <AppSelect
+            value={targetId}
+            onChange={setTargetId}
+            ariaLabel="目标系列"
+            options={targets.map((item) => ({ value: item.id, label: `${item.name}（${item.bookIds.length} 本）` }))}
+            className="h-11 w-full text-sm"
+            autoFocus
+          />
         </label>
         <div className="mt-6 flex justify-end gap-2">
           <button onClick={onCancel} disabled={busy} className="h-10 rounded-xl bg-black/5 px-4 text-sm font-medium hover:bg-black/10 dark:bg-white/10">取消</button>

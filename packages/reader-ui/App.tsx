@@ -4,6 +4,7 @@ import { Book } from './types';
 import { markLastReadBook } from './lib/storage';
 import { cancelReaderIdle, scheduleReaderIdle } from './lib/readerScheduler';
 import { drainPendingOpenFiles, openExternalBooks, runtimeCapabilities } from './lib/backend';
+import { installOptionalReaderFontStyles } from './lib/fontPacks';
 import './features/reader/styles.css';
 
 let readerLayoutModulePromise: Promise<typeof import('./features/reader/ui/ReaderLayout')> | undefined;
@@ -118,6 +119,10 @@ function MainLayout() {
     if (settings.theme !== 'dark') document.documentElement.classList.remove('dark');
     if (settings.theme !== 'sepia') document.documentElement.classList.remove('sepia');
   }, [settings.theme]);
+
+  useEffect(() => {
+    void installOptionalReaderFontStyles(document, settings.fontFamily);
+  }, [settings.fontFamily]);
 
   useEffect(() => {
     if (readingBook) return;

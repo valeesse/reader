@@ -10,6 +10,7 @@ import { ScrollToTopButton } from './ScrollToTopButton';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { SeriesMergeDialog } from './SeriesMergeDialog';
 import type { LibraryLayoutMode } from './Library';
+import { AppSelect } from '../ui/AppSelect';
 
 export function SeriesView({
   layoutMode,
@@ -191,12 +192,18 @@ const [mergeSourceId, setMergeSourceId] = useState<string>();
             </div>
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="mr-auto px-1 text-xs tabular-nums text-black/55 dark:text-white/55">{filteredSeries.length} 个系列 · {filteredSeries.reduce((count, item) => count + item.bookIds.length, 0)} 本书</span>
-              <select value={sortKey} onChange={(event) => setSortKey(event.target.value as 'name' | 'bookCount' | 'addedAt' | 'recent')} aria-label="系列排序方式" className="h-9 min-w-0 rounded-xl bg-black/5 px-2 text-xs outline-none dark:bg-white/10">
-                <option value="name">系列名</option>
-                <option value="bookCount">书籍数量</option>
-                <option value="addedAt">最近加入</option>
-                <option value="recent">最近阅读</option>
-              </select>
+              <AppSelect
+                value={sortKey}
+                onChange={setSortKey}
+                ariaLabel="系列排序方式"
+                options={[
+                  { value: 'name', label: '系列名' },
+                  { value: 'bookCount', label: '书籍数量' },
+                  { value: 'addedAt', label: '最近加入' },
+                  { value: 'recent', label: '最近阅读' },
+                ]}
+                className="h-9 min-w-[6.5rem] text-xs"
+              />
               <button type="button" onClick={() => setSortOrder((value) => value === 'asc' ? 'desc' : 'asc')} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-black/5 dark:bg-white/10" aria-label="切换排序方向">
                 {sortOrder === 'asc' ? <ArrowUpAZ className="h-4 w-4" /> : <ArrowDownAZ className="h-4 w-4" />}
               </button>
