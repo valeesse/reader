@@ -150,6 +150,11 @@ export function installReadiumFrameStyles(doc: Document) {
       padding-block-end: 0 !important;
       padding-inline-start: 0 !important;
     }
+    :root[data-zenith-book-type="epub"]:not([data-zenith-layout="fixed"]),
+    :root[data-zenith-book-type="epub"]:not([data-zenith-layout="fixed"]) body {
+      margin: 0 !important;
+      padding: 0 !important;
+    }
     :root:not([data-zenith-layout="fixed"]) img {
       border-radius: var(--ZENITH__imageRadius) !important; cursor: zoom-in !important; display: block !important;
       clip-path: inset(0 round var(--ZENITH__imageRadius)) !important;

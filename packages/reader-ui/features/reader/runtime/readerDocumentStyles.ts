@@ -34,11 +34,29 @@ export function applyReaderDocumentProperties(doc: Document, settings: AppSettin
   void installOptionalReaderFontStyles(doc, settings.fontFamily);
 }
 
-export async function applyContinuousReaderDocumentStyles(doc: Document, settings: AppSettings, bookType: BookType) {
+export function resetReflowableEpubPageEdges(doc: Document, bookType: BookType, layout = 'reflowable') {
+  if (bookType !== 'epub' || layout === 'fixed') return;
+  // Inline important declarations also beat publisher inline styles. The
+  // surrounding reader viewport remains the sole owner of page-edge spacing.
+  for (const element of [doc.documentElement, doc.body]) {
+    element?.style.setProperty('margin', '0', 'important');
+    element?.style.setProperty('padding', '0', 'important');
+  }
+}
+
+export async function applyContinuousReaderDocumentStyles(
+  doc: Document,
+  settings: AppSettings,
+  bookType: BookType,
+  layout = 'reflowable',
+) {
   await installReadiumStyles(doc);
   applyReaderDocumentProperties(doc, settings, bookType);
   const root = doc.documentElement;
   const colors = readerThemeColors(settings.theme);
+  root.dataset.zenithBookType = bookType;
+  root.dataset.zenithLayout = layout;
+  resetReflowableEpubPageEdges(doc, bookType, layout);
   root.style.removeProperty('--USER__lineLength');
   root.style.setProperty('--RS__scrollPaddingTop', '0px');
   root.style.setProperty('--RS__scrollPaddingRight', '0px');
@@ -59,6 +77,11 @@ export async function applyContinuousReaderDocumentStyles(doc: Document, setting
       height: auto !important;
       min-height: 0 !important;
       overflow: hidden !important;
+    }
+    :root[data-zenith-book-type="epub"]:not([data-zenith-layout="fixed"]),
+    :root[data-zenith-book-type="epub"]:not([data-zenith-layout="fixed"]) body {
+      margin: 0 !important;
+      padding: 0 !important;
     }
     body {
       overflow: hidden !important;

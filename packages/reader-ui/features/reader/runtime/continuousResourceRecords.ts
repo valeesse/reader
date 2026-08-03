@@ -165,7 +165,12 @@ function findReadingOrderLink(environment: StripRecordEnvironment, href: string)
 }
 
 export function applyDocumentSettings(environment: StripRecordEnvironment, doc: Document) {
-  return applyContinuousReaderDocumentStyles(doc, environment.settings(), environment.bookType);
+  return applyContinuousReaderDocumentStyles(
+    doc,
+    environment.settings(),
+    environment.bookType,
+    environment.publication.metadata.effectiveLayout,
+  );
 }
 
 export function measureRecord(environment: StripRecordEnvironment, record: StripRecord) {

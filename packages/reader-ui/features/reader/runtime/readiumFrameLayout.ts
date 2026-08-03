@@ -1,6 +1,6 @@
 import { EpubNavigator } from '../../../vendor/readium-navigator';
 import { AppSettings } from '../../../types';
-import { applyReaderDocumentProperties } from './readerDocumentStyles';
+import { applyReaderDocumentProperties, resetReflowableEpubPageEdges } from './readerDocumentStyles';
 import { getLiveReadiumIframe, currentReadiumFrame, readiumFrames } from './readiumNavigatorAdapter';
 import { invalidateReadiumDocumentGeometry } from './readiumViewerPresentation';
 import { isContinuousScroll } from './readiumViewerModel';
@@ -71,6 +71,7 @@ export function applyReadiumFrameSettings(
   root.dataset.zenithLayout = layout || 'reflowable';
   markMediaOnlyEpubPages(doc, bookType, layout);
   applyReaderDocumentProperties(doc, settings, bookType);
+  resetReflowableEpubPageEdges(doc, bookType, layout);
   const viewportHeight = Math.max(1, doc.defaultView?.innerHeight || root.clientHeight || 1);
   const viewportWidth = Math.max(1, doc.defaultView?.innerWidth || root.clientWidth || 1);
   const contentScale = readiumContentScale(doc);
