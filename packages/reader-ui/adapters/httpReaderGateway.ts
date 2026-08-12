@@ -18,6 +18,9 @@ type WebScanStatus = {
   version: number;
 };
 
+const API_TOKEN_STORAGE_KEY = 'zenith_api_token';
+const API_TOKEN_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 400;
+
 export class HttpReaderGateway implements ReaderGateway {
   private apiToken = initialApiToken();
   readonly capabilities: Capabilities = {
@@ -174,12 +177,30 @@ function initialApiToken() {
     window.history.replaceState(null, '', url);
     return query;
   }
-  const stored = window.sessionStorage.getItem('zenith_api_token') || '';
+  const stored = readStoredApiToken();
   if (stored) persistApiToken(stored);
   return stored;
 }
 
 function persistApiToken(token: string) {
-  window.sessionStorage.setItem('zenith_api_token', token);
-  document.cookie = `zenith_token=${encodeURIComponent(token)}; Path=/; SameSite=Strict`;
+  try {
+    window.localStorage.setItem(API_TOKEN_STORAGE_KEY, token);
+    window.sessionStorage.removeItem(API_TOKEN_STORAGE_KEY);
+  } catch {
+    // The persistent cookie still keeps authenticated asset requests working
+    // when storage access is restricted by the browser.
+  }
+  document.cookie = `zenith_token=${encodeURIComponent(token)}; Path=/; SameSite=Strict; Max-Age=${API_TOKEN_COOKIE_MAX_AGE_SECONDS}`;
+}
+
+function readStoredApiToken() {
+  try {
+    const durable = window.localStorage.getItem(API_TOKEN_STORAGE_KEY)?.trim();
+    if (durable) return durable;
+
+    // Migrate tokens saved by releases that only kept them for one browser session.
+    return window.sessionStorage.getItem(API_TOKEN_STORAGE_KEY)?.trim() || '';
+  } catch {
+    return '';
+  }
 }
