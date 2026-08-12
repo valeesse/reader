@@ -51,7 +51,7 @@ export function formatEpubPageCounter(navigator: EpubNavigator, locator: Readium
   const progress = progressionFromLocator(locator, publication);
   const chapter = chapterPageFromDocument(publication, locator.href, doc || undefined, geometry, current)
     || { current, total };
-  return `本章${geometry.horizontal ? '页' : '屏'} ${chapter.current} / ${chapter.total} · 全书页 ${publicationPage.current} / ${publicationPage.total}${publicationPage.estimated ? '（估算）' : ''} · ${formatProgressPercent(progress)}`;
+  return `本章${geometry.horizontal ? '页' : '屏'} ${chapter.current} / ${chapter.total} · 全书页 ${publicationPage.current} / ${publicationPage.total} · ${formatProgressPercent(progress)}`;
 }
 function chapterPageFromDocument(
   publication: ReadiumPublicationLike,
