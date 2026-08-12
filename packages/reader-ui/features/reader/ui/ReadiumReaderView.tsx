@@ -11,6 +11,10 @@ import { ReaderLoadError, ReaderPageCounter } from './ReaderShared';
 
 type ReadiumReaderViewProps = ReturnType<typeof useReadiumReader>;
 
+// The counter sits 20px above the viewport edge and has a 16px line box.
+// Keep an additional gap between it and the publication content.
+const PAGE_COUNTER_SAFE_AREA_PX = 44;
+
 export function ReadiumReaderView({
   chromeVisible,
   closePreview,
@@ -46,7 +50,7 @@ export function ReadiumReaderView({
           paddingLeft: `${settings.pageMargins.left}px`,
           paddingRight: `${settings.pageMargins.right}px`,
           paddingTop: `${settings.pageMargins.top}px`,
-          paddingBottom: `${settings.pageMargins.bottom}px`,
+          paddingBottom: `${Math.max(settings.pageMargins.bottom, PAGE_COUNTER_SAFE_AREA_PX)}px`,
         }}
       >
         <div className="relative h-full w-full min-h-0 min-w-0">

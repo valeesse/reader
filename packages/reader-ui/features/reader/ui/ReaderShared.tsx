@@ -54,7 +54,7 @@ export function ReaderLoadError({
 export function ReaderPageCounter({ value }: { value: string }) {
   if (!value) return null;
   return (
-    <div data-reader-page-counter className="absolute bottom-5 right-5 z-30 text-[11px] font-medium text-black/50 dark:text-white/50">
+    <div data-reader-page-counter className="pointer-events-none absolute bottom-5 right-5 z-30 leading-4 text-[11px] font-medium text-black/50 dark:text-white/50">
       {value}
     </div>
   );
