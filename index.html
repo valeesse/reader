@@ -69,9 +69,9 @@
           var snapshot = JSON.parse(localStorage.getItem('zenith_startup_snapshot_v2') || 'null');
           window.__ZENITH_STARTUP__.startupSnapshot = snapshot;
           var theme = snapshot && snapshot.settings && snapshot.settings.theme;
-          var lastReadBookId = snapshot && snapshot.lastReadBookId;
-          window.__ZENITH_STARTUP__.resumeBook = lastReadBookId && Array.isArray(snapshot.books)
-            ? snapshot.books.find(function (book) { return book.id === lastReadBookId; }) || null
+          var resumeBookId = localStorage.getItem('zenith_reader_resume_book_v1');
+          window.__ZENITH_STARTUP__.resumeBook = resumeBookId && Array.isArray(snapshot.books)
+            ? snapshot.books.find(function (book) { return book.id === resumeBookId; }) || null
             : null;
           if (theme === 'dark') document.documentElement.classList.add('startup-dark');
           if (theme === 'sepia') document.documentElement.classList.add('startup-sepia');

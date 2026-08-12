@@ -35,6 +35,7 @@ export const KEYS = {
 };
 
 const SESSION_WEBDAV_PASSWORD = 'zenith_session_webdav_password';
+const READER_RESUME_BOOK = 'zenith_reader_resume_book_v1';
 
 type WebState = {
   progress?: Record<string, ReadingProgress>;
@@ -238,6 +239,21 @@ export function markLastReadBook(bookId: string) {
 
 export function getLastReadBookIdSync() {
   return getStartupSnapshotSync()?.lastReadBookId;
+}
+
+export function getReaderResumeBookIdSync() {
+  try {
+    return window.localStorage.getItem(READER_RESUME_BOOK) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function setReaderResumeBookIdSync(bookId?: string) {
+  try {
+    if (bookId) window.localStorage.setItem(READER_RESUME_BOOK, bookId);
+    else window.localStorage.removeItem(READER_RESUME_BOOK);
+  } catch {}
 }
 
 export async function saveSettings(settings: AppSettings) {

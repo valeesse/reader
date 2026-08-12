@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { AppProvider, useAppContext } from './store/AppStore';
 import { Book } from './types';
-import { markLastReadBook } from './lib/storage';
+import { getReaderResumeBookIdSync, markLastReadBook, setReaderResumeBookIdSync } from './lib/storage';
 import { cancelReaderIdle, scheduleReaderIdle } from './lib/readerScheduler';
 import { drainPendingOpenFiles, openExternalBooks, runtimeCapabilities } from './lib/backend';
 import { installOptionalReaderFontStyles } from './lib/fontPacks';
@@ -14,13 +14,13 @@ const LibraryShell = lazy(() => import('./components/shell/LibraryShell').then((
 
 function MainLayout() {
   const { books, settings, isLoading, stateReconciled, lastReadBookId, addBooks } = useAppContext();
-  const initialReadingBook = !runtimeCapabilities.desktopShell && !isLoading && lastReadBookId
-    ? books.find((item) => item.id === lastReadBookId) || null
+  const resumeBookIdRef = useRef(getReaderResumeBookIdSync());
+  const initialReadingBook = !runtimeCapabilities.desktopShell && !isLoading && resumeBookIdRef.current
+    ? books.find((item) => item.id === resumeBookIdRef.current) || null
     : null;
   const [readingBook, setReadingBook] = useState<Book | null>(() => initialReadingBook);
   const [startupResolved, setStartupResolved] = useState(() => Boolean(initialReadingBook));
   const startupResumePendingRef = useRef(true);
-  const startedWithResumeRef = useRef(Boolean(initialReadingBook));
   const addBooksRef = useRef(addBooks);
   const stateReconciledRef = useRef(stateReconciled);
   const stateReconciliationWaitersRef = useRef<Array<() => void>>([]);
@@ -92,20 +92,24 @@ function MainLayout() {
 
   useEffect(() => {
     if (isLoading || !startupResumePendingRef.current) return;
-    const book = lastReadBookId ? books.find((item) => item.id === lastReadBookId) : undefined;
+    const book = resumeBookIdRef.current ? books.find((item) => item.id === resumeBookIdRef.current) : undefined;
     if (book) {
-      startedWithResumeRef.current = true;
       setReadingBook(book);
       setStartupResolved(true);
       startupResumePendingRef.current = false;
     } else if (stateReconciled) {
+      resumeBookIdRef.current = undefined;
+      setReaderResumeBookIdSync();
       setStartupResolved(true);
       startupResumePendingRef.current = false;
     }
-  }, [books, isLoading, lastReadBookId, stateReconciled]);
+  }, [books, isLoading, stateReconciled]);
 
   useEffect(() => {
-    if (!readingBook || readingBook.id === lastReadBookId) return;
+    if (!readingBook) return;
+    resumeBookIdRef.current = readingBook.id;
+    setReaderResumeBookIdSync(readingBook.id);
+    if (readingBook.id === lastReadBookId) return;
     void markLastReadBook(readingBook.id).catch((error) => {
       console.warn('Failed to record last-read book', error);
     });
@@ -134,10 +138,14 @@ function MainLayout() {
 
   const closeReader = () => {
     startupResumePendingRef.current = false;
+    resumeBookIdRef.current = undefined;
+    setReaderResumeBookIdSync();
     setReadingBook(null);
   };
 
   const openBookFromLibrary = (book: Book) => {
+    resumeBookIdRef.current = book.id;
+    setReaderResumeBookIdSync(book.id);
     setReadingBook(book);
   };
 
@@ -159,7 +167,7 @@ function MainLayout() {
           <ReaderLayout
             book={readingBook}
             onClose={closeReader}
-            onOpenBook={setReadingBook}
+            onOpenBook={openBookFromLibrary}
             onPresentable={presentReader}
           />
         </Suspense>

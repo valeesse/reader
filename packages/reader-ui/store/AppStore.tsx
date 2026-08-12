@@ -17,6 +17,7 @@ import {
   clearLastReadBook,
   removeLocalBookState,
   getStartupSnapshotSync,
+  getReaderResumeBookIdSync,
   saveStartupSnapshot,
   ProgressSavedDetail,
 } from '../lib/storage';
@@ -111,7 +112,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    if (runtimeCapabilities.desktopShell || !startupSnapshot || !startupSnapshot.lastReadBookId) {
+    if (runtimeCapabilities.desktopShell || !startupSnapshot || !getReaderResumeBookIdSync()) {
       void reloadState();
       return;
     }
