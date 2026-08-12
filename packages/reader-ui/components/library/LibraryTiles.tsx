@@ -24,7 +24,7 @@ export function SeriesTile({
       whileHover={{ y: -4 }}
       whileTap={{ scale: 0.98 }}
       onClick={onOpenSeries}
-      className="group flex min-w-0 cursor-pointer flex-col gap-2 rounded-xl text-left focus-visible:outline-offset-4 sm:gap-3"
+      className="group flex w-full min-w-0 cursor-pointer flex-col gap-2 rounded-xl text-left focus-visible:outline-offset-4 sm:gap-3"
     >
       <div className="relative aspect-[3/4] overflow-hidden rounded-xl bg-[#e4e5df] shadow-[0_8px_24px_rgba(35,40,33,0.12)] transition-shadow duration-300 group-hover:shadow-[0_14px_34px_rgba(35,40,33,0.2)] dark:bg-[#30332f]">
         <BookCover book={entry.coverBook} className="w-full h-full object-cover" />
@@ -52,7 +52,7 @@ export function BookTile({ book, onReadBook }: { book: Book; onReadBook: (book: 
       onPointerDown={() => prewarmWebReaderOnIntent(book)}
       onFocus={() => prewarmWebReaderOnIntent(book)}
       onClick={() => onReadBook(book)}
-      className="group flex min-w-0 cursor-pointer flex-col gap-2 rounded-xl text-left focus-visible:outline-offset-4 sm:gap-3"
+      className="group flex w-full min-w-0 cursor-pointer flex-col gap-2 rounded-xl text-left focus-visible:outline-offset-4 sm:gap-3"
     >
       <div className="aspect-[3/4] rounded-xl shadow-[0_8px_24px_rgba(35,40,33,0.12)] group-hover:shadow-[0_12px_30px_rgba(35,40,33,0.17)] transition-shadow duration-300 bg-[#e4e5df] dark:bg-[#30332f] overflow-hidden relative">
         <BookCover book={book} className="w-full h-full object-cover" showMeta />
