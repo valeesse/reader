@@ -14,6 +14,7 @@ import { AppSelect } from '../ui/AppSelect';
 
 type SortKey = 'fileName' | 'addedAt' | 'recent';
 type SortOrder = 'asc' | 'desc';
+type LibrarySortState = { key: SortKey; order: SortOrder };
 type TypeFilter = 'all' | BookType;
 export type LibraryLayoutMode = 'grid' | 'list';
 export type LibraryEntry =
@@ -21,6 +22,7 @@ export type LibraryEntry =
   | { kind: 'series'; id: string; type: 'epub' | 'txt' | 'mixed'; title: string; fileName: string; addedAt: number; recentAt: number; series: Series; books: Book[]; coverBook: Book };
 
 const BOOK_BATCH_SIZE = 72;
+const LIBRARY_SORT_STORAGE_KEY = 'zenith_library_sort';
 
 export function Library({
   layoutMode,
@@ -38,8 +40,8 @@ export function Library({
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
-  const [sortKey, setSortKey] = useState<SortKey>('recent');
-  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+  const [sort, setSort] = useState<LibrarySortState>(readLibrarySort);
+  const { key: sortKey, order: sortOrder } = sort;
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedBookIds, setSelectedBookIds] = useState<Set<string>>(() => new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -157,6 +159,12 @@ export function Library({
   }, [query, sortKey, sortOrder, typeFilter, libraryEntries.length]);
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem(LIBRARY_SORT_STORAGE_KEY, JSON.stringify(sort));
+    } catch {}
+  }, [sort]);
+
+  useEffect(() => {
     if (selectedSeriesId && !libraryEntries.some((entry) => entry.kind === 'series' && entry.id === selectedSeriesId)) {
       setSelectedSeriesId(null);
     }
@@ -168,7 +176,7 @@ export function Library({
   }, [selectedSeriesId]);
 
   const toggleSortOrder = () => {
-    setSortOrder((current) => (current === 'asc' ? 'desc' : 'asc'));
+    setSort((current) => ({ ...current, order: current.order === 'asc' ? 'desc' : 'asc' }));
   };
 
   const leaveSelectionMode = () => {
@@ -247,7 +255,7 @@ export function Library({
                 onPointerDown={() => prewarmWebReaderOnIntent(recentBook)}
                 onFocus={() => prewarmWebReaderOnIntent(recentBook)}
                 onClick={() => onReadBook(recentBook)}
-                className="app-card w-full overflow-hidden text-left transition-all hover:-translate-y-0.5 hover:border-[#087DF1]/20 hover:shadow-[0_14px_34px_rgba(35,40,33,0.12)] lg:max-w-4xl"
+                className="app-card w-full overflow-hidden text-left transition-all hover:-translate-y-0.5 hover:border-[#087DF1]/20 hover:shadow-[0_14px_34px_rgba(35,40,33,0.12)]"
               >
                 <div className="flex items-center gap-4 bg-gradient-to-r from-[#087DF1]/[0.075] to-transparent p-3 sm:gap-5 sm:p-4">
                   <div className="h-[82px] w-[62px] shrink-0 overflow-hidden rounded-xl bg-[#e4e5df] shadow-[0_8px_22px_rgba(35,40,33,0.15)] sm:h-[112px] sm:w-[84px]">
@@ -295,14 +303,14 @@ export function Library({
                 </div>
                 <AppSelect
                   value={sortKey}
-                  onChange={setSortKey}
+                  onChange={(key) => setSort((current) => ({ ...current, key }))}
                   ariaLabel="排序方式"
                   options={[
                     { value: 'recent', label: '最近阅读' },
                     { value: 'fileName', label: '文件名' },
                     { value: 'addedAt', label: '加入时间' },
                   ]}
-                  className="h-10 min-w-[6.25rem] flex-1 rounded-xl bg-black/[0.035] px-2 text-xs outline-none focus:ring-2 focus:ring-[#087DF1]/35 dark:bg-white/10 sm:px-3 sm:text-sm min-[1280px]:w-[7.75rem] min-[1280px]:flex-none"
+                  className="h-10 w-36 flex-none text-sm"
                 />
                 <button
                   onClick={toggleSortOrder}
@@ -431,4 +439,16 @@ export function Library({
       )}
     </div>
   );
+}
+
+function readLibrarySort(): LibrarySortState {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(LIBRARY_SORT_STORAGE_KEY) || 'null') as Partial<LibrarySortState> | null;
+    const key = stored?.key;
+    const order = stored?.order;
+    if ((key === 'recent' || key === 'fileName' || key === 'addedAt') && (order === 'asc' || order === 'desc')) {
+      return { key, order };
+    }
+  } catch {}
+  return { key: 'recent', order: 'desc' };
 }

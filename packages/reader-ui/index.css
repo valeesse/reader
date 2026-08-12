@@ -134,7 +134,7 @@ button:disabled {
 
 @media (min-width: 1280px) {
   .library-grid {
-    grid-template-columns: repeat(auto-fill, minmax(170px, 220px));
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   }
 }
 
