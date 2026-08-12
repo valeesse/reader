@@ -215,12 +215,6 @@ function fitSinglePageEpubMedia(
     setInlineProperty(element, 'min-width', '0');
     setInlineProperty(element, 'object-fit', 'contain');
     setInlineProperty(element, 'width', 'auto');
-    const image = element.tagName.toLowerCase() === 'img' ? element as HTMLImageElement : undefined;
-    if (image && image.naturalWidth > 0 && image.naturalHeight > 0) {
-      const scale = Math.min(1, maximumWidthValue / image.naturalWidth, maximumHeightValue / image.naturalHeight);
-      setInlineProperty(element, 'height', `${Math.max(1, Math.floor(image.naturalHeight * scale))}px`);
-      setInlineProperty(element, 'width', `${Math.max(1, Math.floor(image.naturalWidth * scale))}px`);
-    }
   });
   fittedEpubMedia.set(doc, saved);
 }

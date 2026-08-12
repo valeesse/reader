@@ -137,6 +137,10 @@ function createStyle(doc: Document, id: string, css: string) {
 function installReaderTextFinish(doc: Document) {
   if (doc.getElementById(TEXT_FINISH_STYLE_ID)) return;
   const style = createStyle(doc, TEXT_FINISH_STYLE_ID, `
+    :root[style*="--USER__fontFamily"] body,
+    :root[style*="--USER__fontFamily"] body *:not(code):not(var):not(kbd):not(samp) {
+      font-family: var(--USER__fontFamily) !important;
+    }
     p {
       -webkit-font-smoothing: antialiased;
       text-rendering: optimizeLegibility;

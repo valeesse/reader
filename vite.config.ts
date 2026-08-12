@@ -14,6 +14,10 @@ export default defineConfig(({ command }) => {
     { find: /^react-dom\/client$/, replacement: path.join(uiRoot, 'vendor/prebuilt-react/react-dom-client.js') },
   ] : [];
   return {
+    // Keep generated asset references relative to index.html. Docker images are
+    // commonly exposed below a reverse-proxy prefix, where root-absolute
+    // `/assets/...` font URLs would otherwise bypass the mounted application.
+    base: './',
     plugins: [webFontWeight400Only(), instantStartupHtml(), ...reactWithPrebuiltRuntime(), tailwindcss()],
     resolve: {
       alias: [

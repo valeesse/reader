@@ -86,6 +86,9 @@ function resolveWebFontUrls(css: string) {
   return css.replace(/url\((['"]?)([^'"\)]+)\1\)/g, (match, _quote: string, source: string) => {
     const value = source.trim();
     if (!value || /^(?:data:|blob:)/i.test(value)) return match;
-    return `url("${new URL(value, window.location.href)}")`;
+    // Vite emits relative URLs when the web build uses a relative base. Resolve
+    // them against the entry document before installing this CSS into Readium's
+    // blob-backed iframe, whose own base URL cannot locate application assets.
+    return `url("${new URL(value, document.baseURI)}")`;
   });
 }
