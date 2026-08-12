@@ -60,13 +60,19 @@ pub(crate) fn prefetch(
     hrefs: Vec<String>,
 ) -> Result<(), ReaderError> {
     validate_session(s, id, session)?;
-    let path = s.resolve(id, "epub")?;
-    let (sig, manifest) = {
+    let (sig, manifest, archive) = {
         let books = s.epub_books.lock().map_err(|_| ReaderError::Busy)?;
         let book = books.get(id).ok_or(ReaderError::InvalidSession)?;
-        (book.signature, book.manifest_items.clone())
+        (
+            book.signature,
+            book.manifest_items.clone(),
+            book.archive.clone(),
+        )
     };
-    let mut archive = open_archive(&path)?;
+    // Reopening a large EPUB reparses its entire ZIP central directory. Reuse
+    // the session archive so a two-resource boundary prefetch stays proportional
+    // to the requested window instead of the publication's entry count.
+    let mut archive = archive.lock().map_err(|_| ReaderError::Busy)?;
     let mut seen = HashSet::new();
     let targets = hrefs
         .into_iter()

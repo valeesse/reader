@@ -4,31 +4,49 @@ import { ReadiumLink } from './readiumPublicationModel';
 import { createLocator, normalizeZipPath, stripHash } from './readiumPublicationSupport';
 
 const POSITION_CHARS = 1024;
+const PROGRESSIVE_POSITION_BATCH_SIZE = 12;
 
-export async function calculatePositionCounts(
+export type PositionCountBatch = {
+  counts: EpubPositionCount[];
+  complete: boolean;
+};
+
+export async function calculatePositionCountBatch(
   readingOrder: ReadiumLink[],
   resourceManager: EpubResourceManager,
+  existingCounts: EpubPositionCount[],
   signal: AbortSignal,
-): Promise<EpubPositionCount[]> {
-  const counts: EpubPositionCount[] = [];
+  batchSize = PROGRESSIVE_POSITION_BATCH_SIZE,
+): Promise<PositionCountBatch> {
+  const countsByHref = new Map(existingCounts.map((item) => [normalizeZipPath(stripHash(item.href)), item]));
+  const pending = readingOrder.filter((link) => !countsByHref.has(normalizeZipPath(stripHash(link.href))));
+  if (pending.length === 0) return { counts: orderedCounts(readingOrder, countsByHref), complete: true };
   const worker = new Worker(new URL('./epubPosition.worker.ts', import.meta.url), { type: 'module' });
   try {
-    for (const link of readingOrder) {
-      if (signal.aborted) return counts;
+    for (const link of pending.slice(0, Math.max(1, batchSize))) {
+      if (signal.aborted) break;
+      let count = 1;
       try {
-        const source = await resourceManager.sourceText(link);
+        const source = await resourceManager.sourceText(link, signal);
         const textLength = source ? await countTextInWorker(worker, source, signal) : 0;
-        counts.push({ href: link.href, count: Math.max(1, Math.ceil(textLength / POSITION_CHARS)) });
+        count = Math.max(1, Math.ceil(textLength / POSITION_CHARS));
       } catch {
-        if (signal.aborted) return counts;
-        counts.push({ href: link.href, count: 1 });
+        if (signal.aborted) break;
       }
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      countsByHref.set(normalizeZipPath(stripHash(link.href)), { href: link.href, count });
     }
   } finally {
     worker.terminate();
   }
-  return counts;
+  const counts = orderedCounts(readingOrder, countsByHref);
+  return { counts, complete: counts.length === readingOrder.length };
+}
+
+function orderedCounts(readingOrder: ReadiumLink[], countsByHref: Map<string, EpubPositionCount>) {
+  return readingOrder.flatMap((link) => {
+    const count = countsByHref.get(normalizeZipPath(stripHash(link.href)));
+    return count ? [{ href: link.href, count: Math.max(1, Math.round(count.count)) }] : [];
+  });
 }
 
 function countTextInWorker(worker: Worker, source: string, signal: AbortSignal) {

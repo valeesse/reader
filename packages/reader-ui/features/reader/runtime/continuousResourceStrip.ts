@@ -75,9 +75,12 @@ export class ContinuousResourceStrip {
     this.scroller.appendChild(this.content);
     this.host.replaceChildren(this.scroller);
     const baseline = Math.max(1600, this.host.clientHeight * 1.5);
-    const positionCounts = publication.readingOrder.items.map((link) => Math.max(1, publication.positions.filter((position) => (
-      publication.readingOrder.findWithHref(position.href)?.href === link.href
-    )).length));
+    const countByHref = new Map<string, number>();
+    publication.positions.forEach((position) => {
+      const href = publication.readingOrder.findWithHref(position.href)?.href;
+      if (href) countByHref.set(href, (countByHref.get(href) || 0) + 1);
+    });
+    const positionCounts = publication.readingOrder.items.map((link) => Math.max(1, countByHref.get(link.href) || 0));
     const median = [...positionCounts].sort((a, b) => a - b)[Math.floor(positionCounts.length / 2)] || 1;
     this.geometry = new ContinuousResourceGeometry(
       publication.readingOrder.items.length,

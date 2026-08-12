@@ -26,7 +26,10 @@ const WEB_FONT_PACKS: ReaderFontPack[] = [
     css: yuanWebCss.replaceAll('LXGW 975 Yuan SC', 'Zenith LXGW 975 Yuan'),
   },
 ];
-let installedPacks: ReaderFontPack[] = [];
+// Web packs are bundled with the application, so expose them synchronously.
+// Readium applies settings during its first layout pass; starting with an empty
+// list made that pass race the resolved refresh promise in Docker browsers.
+let installedPacks: ReaderFontPack[] = runtimeCapabilities.desktopShell ? [] : WEB_FONT_PACKS;
 let refreshPromise: Promise<ReaderFontPack[]> | undefined;
 
 export function getInstalledReaderFontPacks() {

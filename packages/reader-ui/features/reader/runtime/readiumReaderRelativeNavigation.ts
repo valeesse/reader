@@ -14,7 +14,6 @@ import { isContinuousScroll } from './readiumViewerModel';
 import { createFrameTransition } from './readiumReaderTransition';
 import type { ReadiumReaderRuntime } from './readiumReaderRuntime';
 
-const ADJACENT_PREPARATION_TIMEOUT_MS = 650;
 const FRAME_RECOVERY_DELAY_MS = 320;
 const FRAME_RECOVERY_TIMEOUT_MS = 1800;
 
@@ -105,26 +104,13 @@ export function installRelativeNavigation(runtime: ReadiumReaderRuntime) {
     const direction: -1 | 1 = pending > 0 ? 1 : -1;
     const warmNavigation = inspectWarmNavigationPath(navigator, direction);
     const warmPath = warmNavigation.warm;
-    if (warmNavigation.detail.crossesResource && !warmPath && runtime.navigationRetryCountRef.current === 0) {
-      runtime.navigationLockedRef.current = true;
-      runtime.navigationRetryCountRef.current = 1;
-      const token = ++runtime.navigationTokenRef.current;
+    if (warmNavigation.detail.crossesResource && !warmPath) {
+      // Never serialize the user's turn behind speculative preparation. The
+      // navigator can construct the target itself, while this short background
+      // head start still makes the common path warm without adding a fixed
+      // 650 ms penalty at every cold resource boundary.
       const href = navigator.currentLocator?.href || '';
-      let released = false;
-      const releasePreparation = () => {
-        if (released) return;
-        released = true;
-        window.clearTimeout(timeoutId);
-        if (runtime.navigationTokenRef.current !== token) return;
-        runtime.navigationLockedRef.current = false;
-        runtime.operations.drainAbsoluteNavigation();
-        drainNavigationQueue();
-      };
-      const timeoutId = window.setTimeout(releasePreparation, ADJACENT_PREPARATION_TIMEOUT_MS);
-      void runtime.operations.prepareAdjacentLayouts(href, direction)
-        .catch((error) => console.warn('Readium adjacent layout preparation failed', error))
-        .finally(releasePreparation);
-      return;
+      void runtime.operations.prepareAdjacentLayouts(href, direction).catch(() => {});
     }
     runtime.navigationRetryCountRef.current = 0;
     runtime.pendingNavigationRef.current -= direction;
@@ -218,6 +204,7 @@ export function installRelativeNavigation(runtime: ReadiumReaderRuntime) {
   };
 
   const navigatePage = (direction: -1 | 1, coalesce = false) => {
+    runtime.operations.cancelDeferredWork(true);
     if (isContinuousScroll(runtime.settingsRef.current) && runtime.resourceStripRef.current) {
       runtime.resourceStripRef.current.turn(direction);
       return;

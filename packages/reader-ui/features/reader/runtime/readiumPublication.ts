@@ -2,15 +2,15 @@ import {
   closeEpubBook,
   NativeEpubBookInfo,
   NativeEpubLink,
-  getEpubPositionCounts,
   prefetchEpubResources,
   openEpubBook,
 } from '../../../lib/readerClient';
-import { getCachedEpubPositionCounts, saveCachedEpubPositionCounts } from './publicationPositionCache';
+import { yieldReaderTask } from '../../../lib/readerScheduler';
+import { getCachedEpubPositionProgress, saveCachedEpubPositionProgress } from './publicationPositionCache';
 import { EpubResourceManager } from './epubResourceManager';
 import { LinkCollection, ReadiumLink, ReadiumMetadata } from './readiumPublicationModel';
 import {
-  calculatePositionCounts,
+  calculatePositionCountBatch,
   coarsePositionCounts,
   createPositionsFromCounts,
 } from './readiumPositions';
@@ -20,8 +20,6 @@ import {
   normalizeZipPath,
   stripHash,
 } from './readiumPublicationSupport';
-
-const POSITION_REFINEMENT_MAX_SOURCE_BYTES = 64 * 1024 * 1024;
 
 export type ReadiumLocatorLike = {
   href: string;
@@ -76,7 +74,7 @@ export type ReadiumPublicationLike = {
   textRangeForHref?: (href: string) => { start: number; end: number } | undefined;
   advancePrefetchGeneration: () => void;
   contentKey: string;
-  refinePositions?: (signal: AbortSignal) => Promise<void>;
+  refinePositions?: (signal: AbortSignal) => Promise<boolean>;
   close: () => void;
 };
 
@@ -97,12 +95,12 @@ export async function createReadiumPublication(resourceId: string, fallbackTitle
   const resources = new LinkCollection(book.resources.map(nativeLinkToReadiumLink));
   const toc = new LinkCollection(book.toc.map(nativeLinkToReadiumLink));
   const resourceManager = new EpubResourceManager(resourceId, sessionId);
-  const cachedCounts = opened.positionCounts.length > 0
-    ? opened.positionCounts
-    : await getCachedEpubPositionCounts(resourceId, cacheKey).catch(() => undefined);
-  const positions = createPositionsFromCounts(readingOrder.items, cachedCounts || coarsePositionCounts(readingOrder.items));
-  const sourceBytes = Number.parseInt(cacheKey.split('-', 1)[0], 10);
-  const canRefinePositions = !Number.isFinite(sourceBytes) || sourceBytes <= POSITION_REFINEMENT_MAX_SOURCE_BYTES;
+  const cachedProgress = opened.positionCounts.length > 0
+    ? { counts: opened.positionCounts, complete: true }
+    : await getCachedEpubPositionProgress(resourceId, cacheKey).catch(() => undefined);
+  const completeCounts = cachedProgress?.complete ? cachedProgress.counts : undefined;
+  const positions = createPositionsFromCounts(readingOrder.items, completeCounts || coarsePositionCounts(readingOrder.items));
+  let progressiveCounts = cachedProgress?.counts || [];
   let lastPrefetchKey = '';
   let lastPrefetch: Promise<void> = Promise.resolve();
   let prefetchController: AbortController | undefined;
@@ -168,56 +166,21 @@ export async function createReadiumPublication(resourceId: string, fallbackTitle
       resourceManager.advanceGeneration();
     },
     contentKey: `${cacheKey}:epub-content-v2`,
-    refinePositions: cachedCounts || !canRefinePositions ? undefined : async (signal) => {
-      const counts = await getEpubPositionCounts(resourceId, sessionId, signal)
-        .catch((error) => {
-          if (signal.aborted) throw error;
-          return calculatePositionCounts(readingOrder.items, resourceManager, signal);
-        });
-      if (signal.aborted) return;
-      const refined = createPositionsFromCounts(readingOrder.items, counts);
-      for (const tocLink of toc.items) {
-        if (signal.aborted) return;
-        const fragment = tocLink.locator.locations.fragments?.[0];
-        const resourceLink = readingOrder.findWithHref(tocLink.href);
-        if (!fragment || !resourceLink) continue;
-        try {
-          const source = await resourceManager.sourceText(resourceLink);
-          const document = new DOMParser().parseFromString(source, 'application/xhtml+xml');
-          const element = document.getElementById(fragment);
-          if (!element || !document.body) continue;
-          const allText = document.body.textContent || '';
-          let preceding = 0;
-          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-          while (walker.nextNode()) {
-            if (element.contains(walker.currentNode)) break;
-            preceding += walker.currentNode.textContent?.length || 0;
-          }
-          const progression = Math.max(0, Math.min(1, preceding / Math.max(1, allText.length)));
-          const base = resourceLink.locator;
-          refined.push(base.copyWithLocations({
-            ...base.locations,
-            progression,
-            fragments: [fragment],
-            htmlIdValue: fragment,
-          }));
-        } catch {}
+    refinePositions: completeCounts ? undefined : async (signal) => {
+      let complete = false;
+      while (!signal.aborted && !complete) {
+        const batch = await calculatePositionCountBatch(readingOrder.items, resourceManager, progressiveCounts, signal);
+        progressiveCounts = batch.counts;
+        complete = batch.complete;
+        await saveCachedEpubPositionProgress(resourceId, cacheKey, progressiveCounts, complete);
+        if (!complete && !signal.aborted) await yieldReaderTask('background', { timeout: 250, signal });
       }
-      refined.sort((left, right) => {
-        const leftIndex = readingOrder.findIndexWithHref(left.href);
-        const rightIndex = readingOrder.findIndexWithHref(right.href);
-        return leftIndex - rightIndex || (left.locations.progression || 0) - (right.locations.progression || 0);
-      });
-      refined.forEach((locator, index) => {
-        locator.locations.position = index + 1;
-        const resourceIndex = readingOrder.findIndexWithHref(locator.href);
-        const resourceProgression = locator.locations.progression || 0;
-        locator.locations.totalProgression = readingOrder.items.length > 0
-          ? (Math.max(0, resourceIndex) + resourceProgression) / readingOrder.items.length
-          : 0;
-      });
+      if (signal.aborted || !complete) return false;
+      const counts = progressiveCounts;
+      const refined = createPositionsFromCounts(readingOrder.items, counts);
+      if (signal.aborted) return false;
       positions.splice(0, positions.length, ...refined);
-      await saveCachedEpubPositionCounts(resourceId, cacheKey, counts);
+      return true;
     },
     close: () => {
       prefetchController?.abort();

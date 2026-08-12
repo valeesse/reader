@@ -62,10 +62,19 @@ export class ReadiumLink {
 }
 
 export class LinkCollection {
-  constructor(public items: ReadiumLink[]) {}
+  private byHref = new Map<string, ReadiumLink>();
+  private indexByHref = new Map<string, number>();
+
+  constructor(public items: ReadiumLink[]) {
+    items.forEach((link, index) => {
+      const href = normalizeZipPath(stripHash(link.href));
+      if (!this.byHref.has(href)) this.byHref.set(href, link);
+      if (!this.indexByHref.has(href)) this.indexByHref.set(href, index);
+    });
+  }
   findWithHref(href: string) {
     const normalized = normalizeZipPath(stripHash(href));
-    return this.items.find((link) => normalizeZipPath(stripHash(link.href)) === normalized);
+    return this.byHref.get(normalized);
   }
   findExactWithHref(href: string) {
     const normalized = normalizeHref(href);
@@ -73,7 +82,7 @@ export class LinkCollection {
   }
   findIndexWithHref(href: string) {
     const normalized = normalizeZipPath(stripHash(href));
-    return this.items.findIndex((link) => normalizeZipPath(stripHash(link.href)) === normalized);
+    return this.indexByHref.get(normalized) ?? -1;
   }
   findWithRel(rel: string) { return this.items.find((link) => link.rels?.has(rel)); }
   filterByRel(rel: string) { return this.items.filter((link) => link.rels?.has(rel)); }

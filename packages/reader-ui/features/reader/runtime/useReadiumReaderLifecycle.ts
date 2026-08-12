@@ -185,7 +185,15 @@ export function useReadiumReaderLifecycle(runtime: ReadiumReaderRuntime, options
           container, publication,
           createNavigatorCallbacks(runtime, { book, navigator: () => navigator, publication, openPreview, queueProgressSave, schedulePageCounter }),
           publication.positions, initialPosition,
-          { preferences: createReadiumPreferences(backingSettings, book.type), defaults: createReadiumDefaults(backingSettings, book.type) },
+          {
+            preferences: createReadiumPreferences(backingSettings, book.type),
+            defaults: createReadiumDefaults(backingSettings, book.type),
+            // Readium owns the final CSP for its blob-backed frames. Without
+            // the application origin in this allow-list, Docker-hosted WOFF2
+            // assets are rejected even though their @font-face rules are
+            // correctly injected into the publication document.
+            injectables: { rules: [], allowedDomains: [window.location.origin] },
+          },
         );
         recordReaderMetric({ kind: 'load', name: `${book.type}-navigator-constructor`, durationMs: performance.now() - navigatorStartedAt });
         runtime.navigatorRef.current = navigator;

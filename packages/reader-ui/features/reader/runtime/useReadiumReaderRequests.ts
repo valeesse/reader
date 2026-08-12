@@ -46,6 +46,7 @@ export function installAbsoluteNavigation(runtime: ReadiumReaderRuntime) {
   };
 
   const submitAbsoluteNavigation = (locator: Parameters<typeof runtime.operations.submitAbsoluteNavigation>[0], requestId: number) => {
+    runtime.operations.cancelDeferredWork(true);
     runtime.absoluteNavigationTokenRef.current += 1;
     runtime.absoluteNavigationPendingRef.current = { locator, requestId };
     runtime.pendingNavigationRef.current = 0;

@@ -115,7 +115,9 @@ export function installDeferredOperations(
       publication.prefetchAroundHref(href, STABLE_PREFETCH_RADIUS, direction).catch(() => {});
       publication.prepareContentAroundHref(href, STABLE_PREFETCH_RADIUS, direction).catch(() => {});
     }, 320);
-    if (restartRefinement || resourceChanged) cancelPositionRefinement();
+    // Any fresh position/layout activity is foreground work. Pause an active
+    // scan immediately and only resume after the reader has stayed stable.
+    if (restartRefinement || resourceChanged || runtime.refinementAbortRef.current) cancelPositionRefinement();
     if (runtime.positionsRefinedRef.current || !publication.refinePositions || runtime.refinementAbortRef.current) return;
     if (runtime.refinementTimerRef.current !== null) window.clearTimeout(runtime.refinementTimerRef.current);
     runtime.refinementTimerRef.current = window.setTimeout(() => {
@@ -125,8 +127,8 @@ export function installDeferredOperations(
         if (runtime.positionsRefinedRef.current || !publication.refinePositions) return;
         const controller = new AbortController();
         runtime.refinementAbortRef.current = controller;
-        publication.refinePositions(controller.signal).then(() => {
-          if (!controller.signal.aborted) {
+        publication.refinePositions(controller.signal).then((complete) => {
+          if (!controller.signal.aborted && complete) {
             runtime.positionsRefinedRef.current = true;
             const navigator = runtime.navigatorRef.current;
             invalidatePublicationPositionRanges(publication);

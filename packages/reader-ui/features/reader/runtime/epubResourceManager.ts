@@ -44,7 +44,7 @@ export class EpubResourceManager {
 
   constructor(private resourceId: string, private sessionId: string) {}
   get(link: ReadiumLink) { return new ReadiumResource(link, this); }
-  async sourceText(link: ReadiumLink) { return (await this.payloadFor(link.href)).text ?? ''; }
+  async sourceText(link: ReadiumLink, signal?: AbortSignal) { return (await this.payloadFor(link.href, signal)).text ?? ''; }
   async read(link: ReadiumLink) {
     if (link.mediaType.isHTML || link.type === 'text/css') return new TextEncoder().encode(await this.readAsString(link) || '');
     const payload = await this.payloadFor(link.href);
@@ -123,6 +123,10 @@ export class EpubResourceManager {
     if (doc.querySelector('parsererror')) return html;
     doc.querySelectorAll('script, iframe, frame, object, embed, portal, base, form, meta[http-equiv="refresh"]')
       .forEach((element) => element.remove());
+    // The navigator installs the final CSP after it has injected its blob-based
+    // frame bridge. Keeping a publisher CSP here would intersect with that
+    // policy and can block the bridge or application-hosted reader fonts.
+    doc.querySelectorAll('meta[http-equiv="Content-Security-Policy" i]').forEach((element) => element.remove());
     doc.querySelectorAll('*').forEach((element) => Array.from(element.attributes).forEach((attribute) => {
       const name = attribute.name.toLowerCase();
       const value = attribute.value.trim();
@@ -136,8 +140,8 @@ export class EpubResourceManager {
     doc.querySelectorAll('a[href]').forEach((anchor) => {
       if (/^\s*javascript:/i.test(anchor.getAttribute('href') || '')) anchor.setAttribute('href', '#');
     });
+    sanitizePublicationParagraphs(doc);
     await rewriteUrlAttributes(doc, dirname(href), (resourceHref) => this.blobUrlFor(resourceHref));
-    installPublicationCsp(doc);
     doc.querySelectorAll('img, svg').forEach((element) => {
       const htmlElement = element as HTMLElement;
       if (htmlElement.tagName.toLowerCase() === 'svg' && !htmlElement.querySelector('image')) return;
@@ -174,15 +178,40 @@ export class EpubResourceManager {
   }
 }
 
-function installPublicationCsp(doc: XMLDocument) {
-  const head = doc.querySelector('head');
-  if (!head) return;
-  head.querySelectorAll('meta[http-equiv="Content-Security-Policy" i]').forEach((element) => element.remove());
-  const meta = doc.createElementNS(doc.documentElement.namespaceURI, 'meta');
-  meta.setAttribute('http-equiv', 'Content-Security-Policy');
-  meta.setAttribute(
-    'content',
-    "default-src 'none'; img-src blob: data:; font-src 'self' blob: data:; style-src 'unsafe-inline' blob:; media-src blob: data:; script-src blob:; frame-src 'none'; object-src 'none'; connect-src 'none'; base-uri 'self' blob:; form-action 'none'",
-  );
-  head.prepend(meta);
+const EPUB_PARAGRAPH_WHITESPACE = /[\s\u00a0\u1680\u180e\u2000-\u200b\u2028\u2029\u202f\u205f\u2060\u3000\ufeff]/u;
+const EPUB_LEADING_PARAGRAPH_WHITESPACE = /^[\s\u00a0\u1680\u180e\u2000-\u200b\u2028\u2029\u202f\u205f\u2060\u3000\ufeff]+/u;
+const MEANINGFUL_EMPTY_PARAGRAPH_CONTENT = 'img, svg, image, picture, video, audio, canvas, math, table, hr';
+
+export function sanitizePublicationParagraphs(doc: XMLDocument) {
+  doc.querySelectorAll('p').forEach((paragraph) => {
+    trimLeadingParagraphWhitespace(paragraph, doc);
+    const hasVisibleText = Array.from(paragraph.textContent || '').some((character) => !EPUB_PARAGRAPH_WHITESPACE.test(character));
+    if (hasVisibleText || paragraph.querySelector(MEANINGFUL_EMPTY_PARAGRAPH_CONTENT)) return;
+    const preservesAnchor = paragraph.hasAttribute('id') || Boolean(paragraph.querySelector('[id], a[name]'));
+    if (!preservesAnchor) {
+      paragraph.remove();
+      return;
+    }
+    // Preserve fragment targets without allowing an otherwise empty paragraph
+    // (and its publisher margins/line-height) to consume visible page space.
+    const htmlParagraph = paragraph as HTMLElement;
+    htmlParagraph.style.setProperty('display', 'block', 'important');
+    htmlParagraph.style.setProperty('height', '0', 'important');
+    htmlParagraph.style.setProperty('min-height', '0', 'important');
+    htmlParagraph.style.setProperty('margin', '0', 'important');
+    htmlParagraph.style.setProperty('padding', '0', 'important');
+    htmlParagraph.style.setProperty('line-height', '0', 'important');
+    htmlParagraph.style.setProperty('overflow', 'hidden', 'important');
+  });
+}
+
+function trimLeadingParagraphWhitespace(paragraph: Element, doc: XMLDocument) {
+  const walker = doc.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    const value = node.textContent || '';
+    const trimmed = value.replace(EPUB_LEADING_PARAGRAPH_WHITESPACE, '');
+    node.textContent = trimmed;
+    if (trimmed.length > 0) return;
+  }
 }
