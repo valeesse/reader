@@ -21,6 +21,8 @@ import {
   stripHash,
 } from './readiumPublicationSupport';
 
+const POSITION_REFINEMENT_MAX_SOURCE_BYTES = 64 * 1024 * 1024;
+
 export type ReadiumLocatorLike = {
   href: string;
   type: string;
@@ -99,6 +101,8 @@ export async function createReadiumPublication(resourceId: string, fallbackTitle
     ? opened.positionCounts
     : await getCachedEpubPositionCounts(resourceId, cacheKey).catch(() => undefined);
   const positions = createPositionsFromCounts(readingOrder.items, cachedCounts || coarsePositionCounts(readingOrder.items));
+  const sourceBytes = Number.parseInt(cacheKey.split('-', 1)[0], 10);
+  const canRefinePositions = !Number.isFinite(sourceBytes) || sourceBytes <= POSITION_REFINEMENT_MAX_SOURCE_BYTES;
   let lastPrefetchKey = '';
   let lastPrefetch: Promise<void> = Promise.resolve();
   let prefetchController: AbortController | undefined;
@@ -164,7 +168,7 @@ export async function createReadiumPublication(resourceId: string, fallbackTitle
       resourceManager.advanceGeneration();
     },
     contentKey: `${cacheKey}:epub-content-v2`,
-    refinePositions: cachedCounts ? undefined : async (signal) => {
+    refinePositions: cachedCounts || !canRefinePositions ? undefined : async (signal) => {
       const counts = await getEpubPositionCounts(resourceId, sessionId, signal)
         .catch((error) => {
           if (signal.aborted) throw error;

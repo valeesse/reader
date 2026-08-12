@@ -7,7 +7,7 @@ use zip::ZipArchive;
 pub(super) type LoadedEpubBook = (Vec<EpubManifestItem>, EpubBookInfo, Vec<EpubPositionCount>);
 
 pub(crate) fn load_book(path: &Path, fallback: &str) -> Result<LoadedEpubBook, ReaderError> {
-    let mut archive = open_archive(path)?;
+    let mut archive = open_validated_archive(path)?;
     let (opf_dir, opf_text, _) = read_opf(&mut archive)?;
     let doc = Document::parse(&opf_text).map_err(|e| ReaderError::InvalidEpub(e.to_string()))?;
     let manifest = manifest_items(&doc, &opf_dir);

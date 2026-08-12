@@ -264,9 +264,7 @@ iframe.zenith-scroll-transition-snapshot {
   pointer-events: none !important;
 }
 
-.readium-container img,
-.readium-container picture,
-.readium-container figure {
+.readium-container img {
   border-radius: var(--radius-card) !important;
   clip-path: inset(0 round var(--radius-card)) !important;
 }

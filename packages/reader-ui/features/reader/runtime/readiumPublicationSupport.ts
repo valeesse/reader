@@ -69,18 +69,29 @@ export async function rewriteUrlAttributes(
   baseDir: string,
   resolveUrl: (href: string) => Promise<string>,
 ) {
-  const tasks: Promise<void>[] = [];
+  const tasks: Array<() => Promise<void>> = [];
   doc.querySelectorAll('[src], [poster]').forEach((element) => {
-    for (const attribute of ['src', 'poster']) tasks.push(rewriteElementUrl(element, attribute, baseDir, resolveUrl));
+    for (const attribute of ['src', 'poster']) tasks.push(() => rewriteElementUrl(element, attribute, baseDir, resolveUrl));
   });
   doc.querySelectorAll('[srcset]').forEach((element) => {
-    tasks.push(rewriteElementSrcset(element, baseDir, resolveUrl));
+    tasks.push(() => rewriteElementSrcset(element, baseDir, resolveUrl));
   });
   doc.querySelectorAll('link, image, use').forEach((element) => {
-    tasks.push(rewriteElementUrl(element, 'href', baseDir, resolveUrl));
-    tasks.push(rewriteElementUrl(element, 'xlink:href', baseDir, resolveUrl));
+    tasks.push(() => rewriteElementUrl(element, 'href', baseDir, resolveUrl));
+    tasks.push(() => rewriteElementUrl(element, 'xlink:href', baseDir, resolveUrl));
   });
-  await Promise.all(tasks);
+  await runConcurrent(tasks, 4);
+}
+
+async function runConcurrent(tasks: Array<() => Promise<void>>, limit: number) {
+  let next = 0;
+  const worker = async () => {
+    while (next < tasks.length) {
+      const task = tasks[next++];
+      await task();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
 }
 
 async function rewriteElementSrcset(element: Element, baseDir: string, resolveUrl: (href: string) => Promise<string>) {

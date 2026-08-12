@@ -73,11 +73,19 @@ export function clearOptionalReaderFontStyles(doc: Document) {
 }
 
 function resolveFontUrls(pack: ReaderFontPack) {
-  if (!pack.rootPath) return pack.css || '';
+  if (!pack.rootPath) return resolveWebFontUrls(pack.css || '');
   const root = pack.rootPath || '';
   const separator = root.includes('\\') ? '\\' : '/';
   return (pack.css || '').replace(/url\((['"]?)([^'"\)]+)\1\)/g, (_match, _quote: string, relative: string) => {
     const normalized = relative.trim().replace(/^\.\//, '').replace(/[\\/]/g, separator);
     return `url("${desktopFileSrc(`${root}${separator}${normalized}`)}")`;
+  });
+}
+
+function resolveWebFontUrls(css: string) {
+  return css.replace(/url\((['"]?)([^'"\)]+)\1\)/g, (match, _quote: string, source: string) => {
+    const value = source.trim();
+    if (!value || /^(?:data:|blob:)/i.test(value)) return match;
+    return `url("${new URL(value, window.location.href)}")`;
   });
 }

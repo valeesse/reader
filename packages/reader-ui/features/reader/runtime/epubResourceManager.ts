@@ -138,7 +138,7 @@ export class EpubResourceManager {
     });
     await rewriteUrlAttributes(doc, dirname(href), (resourceHref) => this.blobUrlFor(resourceHref));
     installPublicationCsp(doc);
-    doc.querySelectorAll('img, picture, figure, svg, svg image').forEach((element) => {
+    doc.querySelectorAll('img, svg').forEach((element) => {
       const htmlElement = element as HTMLElement;
       if (htmlElement.tagName.toLowerCase() === 'svg' && !htmlElement.querySelector('image')) return;
       htmlElement.style.setProperty('border-radius', READER_IMAGE_RADIUS, 'important');
@@ -182,7 +182,7 @@ function installPublicationCsp(doc: XMLDocument) {
   meta.setAttribute('http-equiv', 'Content-Security-Policy');
   meta.setAttribute(
     'content',
-    "default-src 'none'; img-src blob: data:; font-src blob: data:; style-src 'unsafe-inline' blob:; media-src blob: data:; script-src blob:; frame-src 'none'; object-src 'none'; connect-src 'none'; base-uri 'self' blob:; form-action 'none'",
+    "default-src 'none'; img-src blob: data:; font-src 'self' blob: data:; style-src 'unsafe-inline' blob:; media-src blob: data:; script-src blob:; frame-src 'none'; object-src 'none'; connect-src 'none'; base-uri 'self' blob:; form-action 'none'",
   );
   head.prepend(meta);
 }

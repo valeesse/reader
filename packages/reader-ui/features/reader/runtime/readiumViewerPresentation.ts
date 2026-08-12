@@ -170,9 +170,7 @@ export function installReadiumFrameStyles(doc: Document) {
       max-width: 100% !important;
     }
     :root[data-zenith-layout="reflowable"][data-zenith-book-type="epub"] :is(figure, picture):has(img, svg) {
-      border-radius: var(--ZENITH__imageRadius) !important;
       clear: both !important;
-      clip-path: inset(0 round var(--ZENITH__imageRadius)) !important;
       float: none !important;
       margin-inline: auto !important;
       max-width: 100% !important;

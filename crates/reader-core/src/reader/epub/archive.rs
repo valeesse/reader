@@ -4,8 +4,12 @@ use std::{fs::File, io::Read, path::Path};
 use zip::ZipArchive;
 
 pub(super) fn open_archive(path: &Path) -> Result<ZipArchive<File>, ReaderError> {
-    let mut archive = ZipArchive::new(File::open(path).map_err(io_error)?)
-        .map_err(|e| ReaderError::InvalidEpub(e.to_string()))?;
+    ZipArchive::new(File::open(path).map_err(io_error)?)
+        .map_err(|e| ReaderError::InvalidEpub(e.to_string()))
+}
+
+pub(super) fn open_validated_archive(path: &Path) -> Result<ZipArchive<File>, ReaderError> {
+    let mut archive = open_archive(path)?;
     if archive.len() > 100_000 {
         return Err(ReaderError::InvalidEpub("too many ZIP entries".into()));
     }

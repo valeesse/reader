@@ -37,7 +37,7 @@ fn rebuild_scan_epub_metadata(
     fallback: &str,
 ) -> Result<ScanEpubMetadata, ReaderError> {
     let path = s.resolve(id, "epub")?;
-    let mut archive = open_archive(&path)?;
+    let mut archive = open_validated_archive(&path)?;
     let (_, opf_text, opf) = read_opf(&mut archive)?;
     let doc = Document::parse(&opf_text).map_err(|e| ReaderError::InvalidEpub(e.to_string()))?;
     let title = first_text(&doc, "title").unwrap_or_else(|| fallback.into());
