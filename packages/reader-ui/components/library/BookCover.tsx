@@ -57,11 +57,11 @@ export function BookCover({
 
   if (cover) {
     return (
-      <div ref={hostRef} className="contents">
+      <div ref={hostRef} className={`relative block overflow-hidden ${className}`}>
         <img
           src={coverToSrc(cover)}
           alt={book.title}
-          className={className}
+          className="absolute inset-0 h-full w-full object-cover"
           loading="lazy"
           decoding="async"
           onError={() => {
