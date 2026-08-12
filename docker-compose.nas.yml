@@ -13,6 +13,8 @@ services:
     volumes:
       - /vol2/1000/Media/Book/轻小说:/data/books/light-novels:ro
       - /vol2/1000/Media/Book/纯文本小说:/data/books/plain-text:ro
+      - /vol2/1000/Media/Book/其他1:/data/books/epub-text:ro
+      - /vol1/1000/Programs/SoNovel/data/downloads:/data/books/web-text:ro
       - ./data/state:/data/state
       - ./data/cache:/data/cache
     restart: unless-stopped
