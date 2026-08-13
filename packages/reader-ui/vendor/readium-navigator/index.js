@@ -7529,6 +7529,10 @@ class to {
   }
   async update(t, e, i, n = !1) {
     let s = this.positions.findIndex((l) => l.locations.position === e.locations.position);
+    if (s < 0 && e.href) {
+      const l = e.href.split("#")[0], d = this.positions.map((c, u) => c.href.split("#")[0] === l ? u : -1).filter((c) => c >= 0), h = Math.max(0, Math.min(1, e.locations?.progression ?? 0));
+      d.length && (s = d[Math.min(d.length - 1, Math.floor(h * d.length))]);
+    }
     if (s < 0) throw Error(`Locator not found in position list: ${e.locations.position} > ${this.positions.reduce((l, d) => d.locations.position || 0 > l ? d.locations.position || 0 : l, 0)}`);
     const o = this.positions[s].href;
     this.currentHref = o, n ? this.release() : this.release(o);
