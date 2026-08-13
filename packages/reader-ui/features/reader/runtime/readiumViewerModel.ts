@@ -126,7 +126,6 @@ export function normalizeLocatorToPublicationPosition(
     return migrated.copyWithLocations({ ...migrated.locations, ...locator.locations, ...migrated.locations });
   }
   const currentLink = publication.readingOrder.findWithHref(locator.href);
-  if (currentLink && typeof locator.locations?.position === 'number') return locator;
 
   // Reading-order hrefs are an implementation detail for virtual TXT
   // publications and have changed across releases. Migrate a saved locator by
@@ -143,6 +142,12 @@ export function normalizeLocatorToPublicationPosition(
     return publication.positions[0] || publication.readingOrder.items[0]?.locator;
   }
 
+  // `locations.position` is only meaningful for the exact position list that
+  // produced it. EPUB startup deliberately uses a coarse one-position-per-
+  // spine list while precise counts are refined in the background, so a saved
+  // absolute position can be out of range (or point at another resource) even
+  // though its href is still valid. Always rebase it through the stable href
+  // and resource progression before Readium sees it.
   const normalizedHref = currentLink.href;
   const range = publication.positions.filter((position) => {
     const href = publication.readingOrder.findWithHref(position.href)?.href || position.href.split('#')[0];

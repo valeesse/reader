@@ -9413,6 +9413,11 @@ class zn extends Pn {
   }
   refreshPositions() {
     this.positions = this.pub.positions || this.positions, this.rebuildPositionsByHref();
+    const t = this.currentLocation, e = t?.href ? this.pub.readingOrder.findWithHref(t.href)?.href || t.href : "", i = this.positionsByHref.get(e) || [];
+    if (t && i.length) {
+      const n = Math.max(0, Math.min(1, t.locations?.progression ?? 0)), s = i[Math.min(i.length - 1, Math.floor(n * i.length))];
+      this.currentLocation = s.copyWithLocations({ ...t.locations, ...s.locations, progression: n });
+    }
   }
   recoverNavigation() {
     this._navigationEpoch = (this._navigationEpoch || 0) + 1, this._isNavigating = !1;
