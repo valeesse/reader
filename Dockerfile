@@ -14,6 +14,7 @@ RUN pnpm install --frozen-lockfile
 
 COPY index.html tsconfig.json vite.config.ts ./
 COPY packages/reader-ui ./packages/reader-ui
+COPY tools/scripts/verify-font-build.mjs ./tools/scripts/verify-font-build.mjs
 
 RUN pnpm build
 
