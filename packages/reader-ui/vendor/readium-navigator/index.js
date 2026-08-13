@@ -7210,7 +7210,11 @@ const Wo = Zr, Qr = (r) => {
   const t = [...r, "http://asset.localhost", "https://asset.localhost", "asset:"].join(" ");
   return [
     // 'self' is useless because the document is loaded from a blob: URL
-    "upgrade-insecure-requests",
+    // Do not upgrade an explicitly allowed HTTP application origin. Web font
+    // URLs are absolute because this document is blob-backed; upgrading them
+    // would silently turn http://host/assets/*.woff2 into an unavailable HTTPS
+    // request on LAN and Docker deployments.
+    ...r.some((origin) => /^http:\/\//i.test(origin)) ? [] : ["upgrade-insecure-requests"],
     `default-src ${t} blob:`,
     "connect-src 'none'",
     // No fetches to anywhere. TODO: change?

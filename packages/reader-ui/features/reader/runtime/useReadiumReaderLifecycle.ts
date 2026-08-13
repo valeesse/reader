@@ -191,7 +191,8 @@ export function useReadiumReaderLifecycle(runtime: ReadiumReaderRuntime, options
             // Readium owns the final CSP for its blob-backed frames. Without
             // the application origin in this allow-list, Docker-hosted WOFF2
             // assets are rejected even though their @font-face rules are
-            // correctly injected into the publication document.
+            // correctly injected into the publication document. The vendored
+            // CSP generator also preserves this origin when it uses HTTP.
             injectables: { rules: [], allowedDomains: [window.location.origin] },
           },
         );
