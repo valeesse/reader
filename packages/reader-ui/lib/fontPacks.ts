@@ -4,6 +4,9 @@ import wenkaiWebCss from 'lxgw-wenkai-screen-webfont/lxgwwenkaigbscreenr.css?inl
 import yuanWebCss from '@free-fonts/lxgw-975-yuan/lxgw-975-yuan.css?inline';
 
 const STYLE_ATTRIBUTE = 'data-zenith-font-pack';
+const WEB_FONT_CACHE_VERSION = '2';
+const FONT_PROBE_TEXT = '阅读测试漢字かなカナAa。、';
+const fontReadiness = new WeakMap<Document, Promise<void>>();
 const WEB_FONT_PACKS: ReaderFontPack[] = [
   {
     id: 'wenkai',
@@ -66,9 +69,14 @@ export async function installOptionalReaderFontStyles(doc: Document, selectedFam
     style.textContent = resolveFontUrls(pack);
     (doc.head || doc.documentElement).appendChild(style);
   }
-  if (selected.length > 0 && doc.defaultView) {
-    void doc.fonts?.ready.then(() => doc.defaultView?.dispatchEvent(new Event('resize')));
-  }
+  const ready = waitForSelectedFontFaces(doc, selected);
+  fontReadiness.set(doc, ready);
+  await ready;
+  doc.defaultView?.dispatchEvent(new Event('resize'));
+}
+
+export function waitForOptionalReaderFonts(doc: Document) {
+  return fontReadiness.get(doc) || Promise.resolve();
 }
 
 export function clearOptionalReaderFontStyles(doc: Document) {
@@ -92,6 +100,25 @@ function resolveWebFontUrls(css: string) {
     // Vite emits relative URLs when the web build uses a relative base. Resolve
     // them against the entry document before installing this CSS into Readium's
     // blob-backed iframe, whose own base URL cannot locate application assets.
-    return `url("${new URL(value, document.baseURI)}")`;
+    const url = new URL(value, document.baseURI);
+    // Font files used to be cached for a year without CORS response headers.
+    // A versioned query forces existing Docker clients and reverse proxies to
+    // request the corrected response instead of reusing that incompatible hit.
+    url.searchParams.set('zenith-font', WEB_FONT_CACHE_VERSION);
+    return `url("${url}")`;
   });
+}
+
+async function waitForSelectedFontFaces(doc: Document, selected: ReaderFontPack[]) {
+  const fontSet = (doc as Document & { fonts?: Partial<FontFaceSet> }).fonts;
+  if (!fontSet || selected.length === 0) return;
+  if (typeof fontSet.load === 'function') {
+    await Promise.all(selected.map((pack) => fontSet
+      .load!(`16px "${pack.family.replaceAll('"', '\\"')}"`, FONT_PROBE_TEXT)
+      .then(() => undefined)
+      .catch(() => undefined)));
+  }
+  if (fontSet.ready && typeof fontSet.ready.then === 'function') {
+    await fontSet.ready.then(() => undefined).catch(() => undefined);
+  }
 }

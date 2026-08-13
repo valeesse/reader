@@ -113,6 +113,7 @@ async fn static_assets_are_immutable_and_compressed_while_html_revalidates() {
         .oneshot(
             Request::get("/assets/app.js")
                 .header(header::ACCEPT_ENCODING, "gzip")
+                .header(header::ORIGIN, "null")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -126,6 +127,20 @@ async fn static_assets_are_immutable_and_compressed_while_html_revalidates() {
     assert_eq!(
         asset.headers().get(header::CONTENT_ENCODING).unwrap(),
         "gzip"
+    );
+    assert_eq!(
+        asset
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .unwrap(),
+        "*"
+    );
+    assert_eq!(
+        asset
+            .headers()
+            .get("cross-origin-resource-policy")
+            .unwrap(),
+        "cross-origin"
     );
 
     let html = app

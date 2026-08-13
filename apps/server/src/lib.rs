@@ -152,7 +152,8 @@ async fn static_cache_headers(request: Request<Body>, next: Next) -> Response {
     let path = request.uri().path().to_string();
     let mut response = next.run(request).await;
     if response.status().is_success() && !path.starts_with("/api/") {
-        let value = if path.starts_with("/assets/") || path.starts_with("/fonts/") {
+        let immutable_asset = path.starts_with("/assets/") || path.starts_with("/fonts/");
+        let value = if immutable_asset {
             "public, max-age=31536000, immutable"
         } else {
             "no-cache"
@@ -160,6 +161,20 @@ async fn static_cache_headers(request: Request<Body>, next: Next) -> Response {
         response
             .headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static(value));
+        if immutable_asset {
+            // Readium renders EPUB resources in a blob-backed iframe. That
+            // document has an opaque `null` origin, so web fonts still need an
+            // explicit CORS grant even when they are served by this process.
+            // These hashed assets are public and never contain user data.
+            response.headers_mut().insert(
+                header::ACCESS_CONTROL_ALLOW_ORIGIN,
+                HeaderValue::from_static("*"),
+            );
+            response.headers_mut().insert(
+                header::HeaderName::from_static("cross-origin-resource-policy"),
+                HeaderValue::from_static("cross-origin"),
+            );
+        }
     }
     response
 }

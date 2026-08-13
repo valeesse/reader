@@ -1,5 +1,6 @@
 import { EpubNavigator } from '../../../vendor/readium-navigator';
 import { AppSettings } from '../../../types';
+import { waitForOptionalReaderFonts } from '../../../lib/fontPacks';
 import { applyReaderDocumentProperties, resetReflowableEpubPageEdges } from './readerDocumentStyles';
 import { getLiveReadiumIframe, currentReadiumFrame, readiumFrames } from './readiumNavigatorAdapter';
 import { invalidateReadiumDocumentGeometry } from './readiumViewerPresentation';
@@ -21,8 +22,11 @@ export function waitForLayoutFrames() {
 }
 
 export async function waitForFrameReadiness(doc: Document, bookType: 'epub' | 'txt') {
-  const fontSet = (doc as Document & { fonts?: FontFaceSet }).fonts;
-  if (fontSet) await withTimeout(fontSet.ready.then(() => undefined), 500);
+  await withTimeout(waitForOptionalReaderFonts(doc), 1_500);
+  const fontSet = (doc as Document & { fonts?: Partial<FontFaceSet> }).fonts;
+  if (fontSet?.ready && typeof fontSet.ready.then === 'function') {
+    await withTimeout(fontSet.ready.then(() => undefined), 500);
+  }
   if (bookType === 'txt') return;
   const images = Array.from(doc.images).slice(0, 8);
   await Promise.all(images.map((image) => {
