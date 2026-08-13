@@ -1,4 +1,5 @@
 import { AppSettings, defaultSettings } from '../types';
+import { runtimeCapabilities } from './backend';
 
 const DOUBLE_PAGE_MIN_ASPECT_RATIO = 1.25;
 
@@ -16,9 +17,16 @@ export const READER_FONT_OPTIONS = [
   { value: "'PingFang SC', 'Microsoft YaHei', sans-serif", label: '黑体' },
   { value: "'Songti SC', 'SimSun', serif", label: '宋体' },
   { value: "'Kaiti SC', 'KaiTi', serif", label: '楷体' },
-  { value: "'Zenith LXGW WenKai', 'Kaiti SC', 'KaiTi', serif", label: '霞鹜文楷（可选字体包）' },
-  { value: "'Zenith LXGW 975 Yuan', 'PingFang SC', 'Microsoft YaHei', sans-serif", label: '霞鹜 975 圆体（可选字体包）' },
+  readerFontOption("'Zenith LXGW WenKai', 'Kaiti SC', 'KaiTi', serif", '霞鹜文楷'),
+  readerFontOption("'Zenith LXGW 975 Yuan', 'PingFang SC', 'Microsoft YaHei', sans-serif", '霞鹜 975 圆体'),
 ] as const;
+
+function readerFontOption(value: string, name: string) {
+  return {
+    value,
+    label: `${name}${runtimeCapabilities.desktopShell ? '（需安装）' : '（Web 内置）'}`,
+  };
+}
 
 export function normalizeSettings(settings: AppSettings): AppSettings {
   const legacy = settings as AppSettings & { txtReadingFlow?: 'paged' | 'scroll' };

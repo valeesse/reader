@@ -26,6 +26,7 @@ fn test_config(temp: &TempDir) -> ServerConfig {
         "const value = 'reader';\n".repeat(512),
     )
     .unwrap();
+    fs::write(dist_dir.join("assets/reader-font.woff2"), b"woff2").unwrap();
     ServerConfig {
         library_dir,
         state_dir,
@@ -136,10 +137,33 @@ async fn static_assets_are_immutable_and_compressed_while_html_revalidates() {
         "*"
     );
     assert_eq!(
-        asset
-            .headers()
-            .get("cross-origin-resource-policy")
+        asset.headers().get("cross-origin-resource-policy").unwrap(),
+        "cross-origin"
+    );
+
+    let font = app
+        .clone()
+        .oneshot(
+            Request::get("/assets/reader-font.woff2?zenith-font=3")
+                .header(header::ORIGIN, "null")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(font.status(), StatusCode::OK);
+    assert_eq!(
+        font.headers().get(header::CONTENT_TYPE).unwrap(),
+        "font/woff2"
+    );
+    assert_eq!(
+        font.headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
             .unwrap(),
+        "*"
+    );
+    assert_eq!(
+        font.headers().get("cross-origin-resource-policy").unwrap(),
         "cross-origin"
     );
 

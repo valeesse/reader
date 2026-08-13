@@ -1,10 +1,9 @@
 import type { ReaderFontPack } from '../contracts/readerGateway';
 import { desktopFileSrc, readerFontPacks, runtimeCapabilities } from './backend';
-import wenkaiWebCss from 'lxgw-wenkai-screen-webfont/lxgwwenkaigbscreenr.css?inline';
-import yuanWebCss from '@free-fonts/lxgw-975-yuan/lxgw-975-yuan.css?inline';
+import { wenkaiWebCss, yuanWebCss } from 'virtual:zenith-web-font-packs';
 
 const STYLE_ATTRIBUTE = 'data-zenith-font-pack';
-const WEB_FONT_CACHE_VERSION = '2';
+const WEB_FONT_CACHE_VERSION = '3';
 const FONT_PROBE_TEXT = '阅读测试漢字かなカナAa。、';
 const fontReadiness = new WeakMap<Document, Promise<void>>();
 const WEB_FONT_PACKS: ReaderFontPack[] = [

@@ -182,7 +182,8 @@ Web 服务默认只监听 `127.0.0.1`。Docker/LAN 部署未设置 `ZENITH_AUTH_
 
 ```bash
 pnpm lint
-pnpm build
+pnpm build              # Web 构建：内置完整霞鹜 Webfont（WOFF2，圆体 400/500/700）
+pnpm build:desktop      # 桌面前端：不内置字体，字体包仍按需下载
 pnpm build:installer # Windows NSIS 安装包，产物位于 target/release/bundle/nsis/
 pnpm test:reader:real # packaged app must be running with CDP enabled
 cargo fmt --check --manifest-path apps/desktop/src-tauri/Cargo.toml

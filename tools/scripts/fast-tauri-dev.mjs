@@ -4,7 +4,7 @@ const host = '127.0.0.1';
 const port = 3000;
 
 if (process.env.ZENITH_HMR === 'true') {
-  const server = await createServer({ server: { host, port, strictPort: true, hmr: true } });
+  const server = await createServer({ mode: 'desktop', server: { host, port, strictPort: true, hmr: true } });
   await server.listen();
   server.printUrls();
 } else {
@@ -13,6 +13,7 @@ if (process.env.ZENITH_HMR === 'true') {
   // its window, then serve immutable chunks; subsequent edits rebuild dist in
   // the background and take effect on the next app reload.
   const watcher = await build({
+    mode: 'desktop',
     build: { watch: {} },
     logLevel: 'warn',
   });

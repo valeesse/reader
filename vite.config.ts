@@ -6,7 +6,8 @@ import {defineConfig} from 'vite';
 
 const uiRoot = path.resolve(__dirname, 'packages/reader-ui');
 
-export default defineConfig(({ command }) => {
+export default defineConfig(({ command, mode }) => {
+  const bundleWebFonts = mode !== 'desktop';
   const developmentReactAliases = command === 'serve' ? [
     { find: /^react$/, replacement: path.join(uiRoot, 'vendor/prebuilt-react/react.js') },
     { find: /^react\/jsx-runtime$/, replacement: path.join(uiRoot, 'vendor/prebuilt-react/react-jsx-runtime.js') },
@@ -18,7 +19,7 @@ export default defineConfig(({ command }) => {
     // commonly exposed below a reverse-proxy prefix, where root-absolute
     // `/assets/...` font URLs would otherwise bypass the mounted application.
     base: './',
-    plugins: [webFontWeight400Only(), instantStartupHtml(), ...reactWithPrebuiltRuntime(), tailwindcss()],
+    plugins: [bundledWebFonts(bundleWebFonts), instantStartupHtml(), ...reactWithPrebuiltRuntime(), tailwindcss()],
     resolve: {
       alias: [
         ...developmentReactAliases,
@@ -61,21 +62,27 @@ export default defineConfig(({ command }) => {
 });
 
 /**
- * The Yuan package ships 400/500/700 CSS in one file. The reader uses normal
- * body text only, so remove the unused faces before Vite sees their asset URLs;
- * otherwise every web build unnecessarily copies three complete CJK fonts.
+ * Web deployments carry the complete local webfont packages so every browser
+ * gets the same glyphs and Yuan 400/500/700 weights without a CDN dependency.
+ * Desktop builds return an empty module: their optional font packs continue to
+ * be downloaded into the app cache and never inflate the installer frontend.
  */
-function webFontWeight400Only() {
+function bundledWebFonts(enabled: boolean) {
+  const moduleId = 'virtual:zenith-web-font-packs';
+  const resolvedModuleId = `\0${moduleId}`;
   return {
-    name: 'zenith-web-font-weight-400-only',
-    enforce: 'pre' as const,
-    transform(source: string, id: string) {
-      const normalizedId = id.replaceAll('\\', '/');
-      if (!normalizedId.includes('/@free-fonts/lxgw-975-yuan/lxgw-975-yuan.css')) return;
-      const firstFace = source.indexOf('@font-face');
-      if (firstFace < 0) return;
-      const faces = source.match(/@font-face\s*\{[^}]*\}/g) || [];
-      return `${source.slice(0, firstFace)}${faces.filter((face) => face.includes('font-weight: 400;')).join('\n\n')}\n`;
+    name: 'zenith-bundled-web-fonts',
+    resolveId(id: string) {
+      if (id === moduleId) return resolvedModuleId;
+    },
+    load(id: string) {
+      if (id !== resolvedModuleId) return;
+      if (!enabled) return `export const wenkaiWebCss = ''; export const yuanWebCss = '';`;
+      return `
+        import wenkaiWebCss from 'lxgw-wenkai-screen-webfont/lxgwwenkaigbscreenr.css?inline';
+        import yuanWebCss from '@free-fonts/lxgw-975-yuan/lxgw-975-yuan.css?inline';
+        export { wenkaiWebCss, yuanWebCss };
+      `;
     },
   };
 }
